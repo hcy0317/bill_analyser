@@ -47,6 +47,8 @@ Bill Analyser 是一个多来源账单导入、智能去重、自动分类、预
 
 导入预览并发补充：上文“不扩展到 selection”仅指不把行级 `row_version` 错用为集合版本。显式 `selectionAction=patch` 当前使用独立且唯一的 `selection_hash`：repository 在 active-session 锁事务内按完整已选 id 快照校验 token，再原子应用 selected/deselected 两组更新；过期 token 零写入并返回 `409 PREVIEW_SELECTION_CONFLICT`、权威 metadata 与请求目标行快照，无 token 的旧调用保持兼容但也复用同一事务。桌面跨页选择差量通过中立 services facade 发送当前集合 token；收到类型化冲突时用权威 metadata 和目标行快照重基选择状态与本地 baseline，并终止当前上层动作而不盲重试。该集合 token 不替代 `row_version`，也不会被隐式加入 confirm 或 LLM 生成 payload。
 
+导入预览 recurring decision 也复用行级 `row_version` CAS：PUT 接受 recurring candidate，DELETE 清除 recurring 绑定，两者都从 `expectedState.rowVersion` 读取可选 token，并在 active-session 锁事务内先比较已锁 preview 行再执行任何 patch。过期 token 返回统一 `409 PREVIEW_ROW_VERSION_CONFLICT` 与最新完整 preview row，零写入；当前 token 成功后返回递增版本的完整行；无 token 的旧调用保持兼容。桌面 recurring mutation 通过 `importPreviewRecurring.ts` 的 typed service adapter 访问该 REST 合同，冲突时直接用响应快照重基行版本、文本和 recurring 状态，不自动重试。该边界不修改 recurring 业务匹配语义、数据库 schema、金额单位、selection token、decision group 或 confirm。
+
 ## 数据库与健康检查
 
 默认本地运行态使用：

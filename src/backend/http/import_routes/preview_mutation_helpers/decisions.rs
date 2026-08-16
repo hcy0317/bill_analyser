@@ -101,9 +101,15 @@ fn match_reasons_from_value(value: Option<&Value>) -> Vec<String> {
 /// 把 preview 决策结果投影为 HTTP response，保留 not_found/conflict 的前端可识别状态。
 fn preview_decision_result_response(
     result: ImportPreviewDecisionResult,
+    expected_row_version: Option<i64>,
     extra: Value,
 ) -> ImportV2RouteResponse {
     if result.state_conflict {
+        if let (Some(expected), Some(latest_row)) = (expected_row_version, result.preview) {
+            if latest_row.version != expected {
+                return preview_row_version_conflict_response(expected, latest_row);
+            }
+        }
         return preview_state_conflict_response();
     }
     if result.invalid_recurring_id {

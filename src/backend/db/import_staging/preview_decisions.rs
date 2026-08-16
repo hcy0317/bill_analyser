@@ -112,6 +112,10 @@ pub fn update_preview_recurring_match_decision(
             tx.commit().await?;
             return Ok(preview_decision_not_found());
         };
+        if expected_row_version_conflicts(&preview, expected_state) {
+            tx.commit().await?;
+            return Ok(preview_decision_state_conflict_with_preview(preview));
+        }
         if expected_state_conflicts(&preview, expected_state) {
             tx.commit().await?;
             return Ok(preview_decision_state_conflict());
@@ -181,6 +185,12 @@ fn expected_state_conflicts(
             return true;
         }
     }
+    if expected
+        .expected_row_version
+        .is_some_and(|value| value != preview.version)
+    {
+        return true;
+    }
     if let Some(value) = &expected.preview_type {
         if value != &preview.preview_type {
             return true;
@@ -199,6 +209,15 @@ fn expected_state_conflicts(
     false
 }
 
+fn expected_row_version_conflicts(
+    preview: &ImportPreviewRow,
+    expected: Option<&ImportPreviewExpectedState>,
+) -> bool {
+    expected
+        .and_then(|value| value.expected_row_version)
+        .is_some_and(|value| value != preview.version)
+}
+
 fn preview_decision_not_found() -> ImportPreviewDecisionResult {
     ImportPreviewDecisionResult {
         preview: None,
@@ -210,6 +229,16 @@ fn preview_decision_not_found() -> ImportPreviewDecisionResult {
 fn preview_decision_state_conflict() -> ImportPreviewDecisionResult {
     ImportPreviewDecisionResult {
         preview: None,
+        state_conflict: true,
+        invalid_recurring_id: false,
+    }
+}
+
+fn preview_decision_state_conflict_with_preview(
+    preview: ImportPreviewRow,
+) -> ImportPreviewDecisionResult {
+    ImportPreviewDecisionResult {
+        preview: Some(preview),
         state_conflict: true,
         invalid_recurring_id: false,
     }

@@ -1413,61 +1413,21 @@ async function updatePreviewRecurringMatch(
     addDecisionLoadingId(recurringDecisionLoadingIds, previewId);
 
     try {
-        const token = getCurrentToken();
-        const headers: Record<string, string> = {
-            'Content-Type': 'application/json'
-        };
-        if (token) {
-            headers['Authorization'] = `Bearer ${token}`;
-        }
-
         const normalizedRecurringId = recurringId === null || recurringId === ''
             ? null
             : parseInt(String(recurringId), 10);
-        const response = await fetch(`/api/bills/import/v2/preview-item/${previewId}/recurring-match`, {
-            method: normalizedRecurringId === null ? 'DELETE' : 'PUT',
-            headers: headers,
-            body: JSON.stringify(
-                normalizedRecurringId === null
-                    ? {
-                        expectedState: getTransferDecisionExpectedState(item),
-                        responseMode: 'preview-item'
-                    }
-                    : {
-                        recurringId: normalizedRecurringId,
-                        expectedState: getTransferDecisionExpectedState(item),
-                        responseMode: 'preview-item'
-                    }
-            )
+        const response = await services.updateImportPreviewRecurringMatch({
+            previewId,
+            recurringId: normalizedRecurringId,
+            expectedState: getTransferDecisionExpectedState(item)
         });
+        const result = response.data.result;
 
-        if (!response.ok) {
-            let actionErrorText = response.status >= 500
-                ? 'Internal Server Error'
-                : `Recurring match request failed (${response.status})`;
-
-            try {
-                const errorPayload = await response.json() as { error?: string };
-                if (typeof errorPayload?.error === 'string' && errorPayload.error.trim()) {
-                    actionErrorText = errorPayload.error.trim();
-                }
-            } catch {
-                // ignore non-JSON error bodies and keep the safe fallback message
-            }
-
-            throw new Error(actionErrorText);
-        }
-
-        const result = await response.json();
-        if (!result.success) {
-            throw new Error(result.error || 'Unknown error');
-        }
-
-        if ((result.data?.sessionId || '') !== props.sessionId) {
+        if ((result?.sessionId || '') !== props.sessionId) {
             throw new Error('Recurring match response is out of date');
         }
 
-        const refreshedPreview = resolvePreviewDecisionItem(result.data, previewId);
+        const refreshedPreview = resolvePreviewDecisionItem(result, previewId);
         if (!refreshedPreview) {
             throw new Error('Recurring match response missing preview item');
         }
@@ -1476,8 +1436,14 @@ async function updatePreviewRecurringMatch(
         snackbar.value?.showMessage(tt(getRecurringDecisionMessageKey(normalizedRecurringId === null)));
         return true;
     } catch (error) {
+        const conflict = services.getImportPreviewRowVersionConflict(error);
+        if (conflict && Number(conflict.previewItem.id) === previewId) {
+            commitEditingTransactionDraft();
+            syncTransactionFromPreviewDecision(item, conflict.previewItem);
+            rebaseImportPreviewTextSyncConflict(item, conflict.previewItem);
+        }
         logger.error(`[定时匹配决策] 失败: ${error}`);
-        snackbar.value?.showMessage(error instanceof Error ? error.message : 'Recurring match failed');
+        snackbar.value?.showMessage(getRecurringDecisionErrorMessage(error));
         return false;
     } finally {
         removeDecisionLoadingId(recurringDecisionLoadingIds, previewId);
@@ -2354,6 +2320,11 @@ function resolvePreviewDecisionItem(
 }
 
 function getImportDecisionErrorMessage(error: unknown, fallbackMessage: string): string {
+    const responseError = (error as { response?: { data?: { error?: unknown } } })
+        ?.response?.data?.error;
+    if (typeof responseError === 'string' && responseError.trim()) {
+        return responseError.trim();
+    }
     if (error instanceof Error && error.message.trim()) {
         return error.message.trim();
     }
@@ -2361,6 +2332,23 @@ function getImportDecisionErrorMessage(error: unknown, fallbackMessage: string):
         return error.trim();
     }
     return fallbackMessage;
+}
+
+function getRecurringDecisionErrorMessage(error: unknown): string {
+    const response = (error as { response?: { status?: unknown; data?: { error?: unknown } } })
+        ?.response;
+    const responseError = response?.data?.error;
+    if (typeof responseError === 'string' && responseError.trim()) {
+        return responseError.trim();
+    }
+    if (typeof response?.status === 'number') {
+        return response.status >= 500
+            ? 'Internal Server Error'
+            : `Recurring match request failed (${response.status})`;
+    }
+    return error instanceof Error && error.message.trim()
+        ? error.message.trim()
+        : 'Recurring match failed';
 }
 
 function syncTransactionFromPreviewDecision(item: ImportTransaction, previewData: ImportPreviewRecord): void {

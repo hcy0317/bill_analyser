@@ -115,6 +115,49 @@ describe('import preview upload and learning service behavior', () => {
 });
 
 describe('import preview lifecycle service behavior', () => {
+    test('submits recurring decisions through the typed preview service for PUT and DELETE', async () => {
+        axiosPut.mockResolvedValueOnce(dataEnvelope({
+            sessionId: 'recurring/session',
+            previewItem: { id: 7, row_version: 9, preview_recurring_id: 17 }
+        }));
+        axiosDelete.mockResolvedValueOnce(dataEnvelope({
+            sessionId: 'recurring/session',
+            previewItem: { id: 7, row_version: 10, preview_recurring_id: null }
+        }));
+        const expectedState = { sessionId: 'recurring/session', rowVersion: 8 };
+
+        const accepted = await services.updateImportPreviewRecurringMatch({
+            previewId: 7,
+            recurringId: 17,
+            expectedState
+        });
+        const cleared = await services.updateImportPreviewRecurringMatch({
+            previewId: 7,
+            recurringId: null,
+            expectedState: { ...expectedState, rowVersion: 9 }
+        });
+
+        expect(axiosPut).toHaveBeenCalledWith(
+            'bills/import/v2/preview-item/7/recurring-match',
+            {
+                recurringId: 17,
+                expectedState,
+                responseMode: 'preview-item'
+            }
+        );
+        expect(axiosDelete).toHaveBeenCalledWith(
+            'bills/import/v2/preview-item/7/recurring-match',
+            {
+                data: {
+                    expectedState: { ...expectedState, rowVersion: 9 },
+                    responseMode: 'preview-item'
+                }
+            }
+        );
+        expect(accepted.data.result.previewItem?.row_version).toBe(9);
+        expect(cleared.data.result.previewItem?.row_version).toBe(10);
+    });
+
     test('normalizes update success from either the data field or the legacy success flag', async () => {
         axiosPut
             .mockResolvedValueOnce({ data: { success: true, data: { updated: false, previewItem: { id: 7, row_version: 9 } } } })

@@ -1,0 +1,93 @@
+{
+  "schema_version": 1,
+  "date": "2026-08-17",
+  "cyanflow_slice": "C4 recurring decision row CAS",
+  "status": "local_full_audit_passed",
+  "production_behavior_changed": true,
+  "breaking_change": false,
+  "contracts": {
+    "routes": [
+      "PUT /api/bills/import/v2/preview-item/:preview_id/recurring-match",
+      "DELETE /api/bills/import/v2/preview-item/:preview_id/recurring-match"
+    ],
+    "expected_row_version_location": "expectedState.rowVersion",
+    "expected_row_version_optional": true,
+    "active_session_lock_before_compare": true,
+    "stale_token_zero_writes": true,
+    "successful_mutation_increments_version": true,
+    "successful_mutation_returns_full_row": true,
+    "conflict_http_status": 409,
+    "conflict_code": "PREVIEW_ROW_VERSION_CONFLICT",
+    "conflict_returns_latest_full_row": true,
+    "legacy_without_token_preserved": true,
+    "generic_expected_state_conflict_preserved": true,
+    "schema_changed": false,
+    "money_contract_changed": false
+  },
+  "scope": {
+    "recurring_put": "row_cas_enabled",
+    "recurring_delete": "row_cas_enabled",
+    "selection": "unchanged",
+    "reclassify": "unchanged",
+    "learning_decision": "unchanged",
+    "llm_decision": "unchanged",
+    "direct_decision_group": "unchanged",
+    "confirm": "unchanged"
+  },
+  "frontend": {
+    "service_facade": "updateImportPreviewRecurringMatch",
+    "service_module": "src/web/src/lib/services/importPreviewRecurring.ts",
+    "conflict_parser": "getImportPreviewRowVersionConflict",
+    "conflict_rebase": [
+      "row version",
+      "text fields",
+      "recurring state"
+    ],
+    "conflict_automatic_retry": false
+  },
+  "focused_verification": {
+    "real_postgres_recurring_row_cas": {
+      "discovered": 2,
+      "passed": 2,
+      "failed": 0,
+      "ignored": 0
+    },
+    "frontend_suites": 3,
+    "frontend_tests_passed": 63
+  },
+  "full_audit": {
+    "status": "passed",
+    "real_postgres_fail_closed": true,
+    "cargo_test_workspace": "passed",
+    "cargo_fmt_all_check": "passed",
+    "cargo_clippy_workspace_all_targets": "passed",
+    "rust_full_runtime_coverage_percent": 65.51,
+    "rust_changed_coverage_method": "working-tree diff via governance-normalizers changed-coverage",
+    "rust_changed_executable_lines": 32,
+    "rust_changed_covered_lines": 30,
+    "rust_changed_executable_line_coverage_percent": 93.75,
+    "rust_changed_coverage_require_matched_files": true,
+    "rust_changed_coverage_require_executable_lines": true,
+    "frontend_test_suites_passed": 308,
+    "frontend_tests_passed": 41484,
+    "frontend_total_line_coverage_percent": 94.23,
+    "frontend_total_branch_coverage_percent": 91.23,
+    "frontend_total_function_coverage_percent": 91.99,
+    "frontend_changed_executable_lines": 32,
+    "frontend_changed_covered_lines": 31,
+    "frontend_changed_executable_line_coverage_percent": 96.88,
+    "frontend_lint_errors": 0,
+    "frontend_existing_warnings": 141,
+    "rust_only_source_tree_gate": "passed",
+    "rust_only_source_tree_tracked_paths": 1990,
+    "rust_backend_structure_scanned_files": 596,
+    "rust_backend_structure_baseline_entries": 3,
+    "frontend_structure_scanned_files": 618,
+    "frontend_large_file_allowlist_entries": 39,
+    "git_diff_check": "passed"
+  },
+  "delivery": {
+    "authority": "Gitea pull request and exact-head Actions run",
+    "dynamic_ids_embedded_in_repository": false
+  }
+}

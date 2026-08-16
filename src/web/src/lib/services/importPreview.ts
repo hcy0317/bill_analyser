@@ -29,6 +29,7 @@ import {
     type ApiResponsePromise
 } from './http.ts';
 import importPreviewSelectionServices from './importPreviewSelection.ts';
+import importPreviewRecurringServices from './importPreviewRecurring.ts';
 
 type MatchingCandidateActionName = 'accept' | 'reject' | 'clear';
 
@@ -165,6 +166,7 @@ function postMatchingCandidateAction(
 // 中文说明：导入预览域服务 facade，集中保留旧 endpoint、timeout 和 payload 字段名，供根 services.ts 继续透出。
 const importPreviewServices = {
     ...importPreviewSelectionServices,
+    ...importPreviewRecurringServices,
     getImportPreviewRowVersionConflict,
     // 中文说明：提交通用导入文件解析请求，按旧表单字段发送列映射、类型映射和文件格式参数。
     parseImportTransaction: ({ fileType, fileEncoding, importFile, columnMapping, transactionTypeMapping, hasHeaderLine, timeFormat, timezoneFormat, amountDecimalSeparator, amountDigitGroupingSymbol, geoSeparator, geoOrder, tagSeparator, delimiter }: { fileType: string, fileEncoding?: string, importFile: File, columnMapping?: Record<number, number>, transactionTypeMapping?: Record<string, TransactionType>, hasHeaderLine?: boolean, timeFormat?: string, timezoneFormat?: string, amountDecimalSeparator?: string, amountDigitGroupingSymbol?: string, geoSeparator?: string, geoOrder?: string, tagSeparator?: string, delimiter?: string }): ApiResponsePromise<ImportTransactionResponsePageWrapper> => {

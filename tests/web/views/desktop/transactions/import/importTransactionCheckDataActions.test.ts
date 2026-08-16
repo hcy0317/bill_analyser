@@ -11,6 +11,7 @@ const mockAnalyzeLLMTransactions = jest.fn<(...args: Array<any>) => Promise<any>
 const mockGetImportLearningSuggestions = jest.fn<(...args: Array<any>) => Promise<any>>();
 const mockPromoteImportLearning = jest.fn<(...args: Array<any>) => Promise<any>>();
 const mockReviewImportTransferDecision = jest.fn<(...args: Array<any>) => Promise<any>>();
+const mockUpdateImportPreviewRecurringMatch = jest.fn<(...args: Array<any>) => Promise<any>>();
 const mockGetImportPreviewRowVersionConflict = jest.fn<(...args: Array<any>) => any>();
 const mockPatchImportPreviewSelection = jest.fn<(...args: Array<any>) => Promise<any>>();
 const mockGetImportPreviewSelectionConflict = jest.fn<(...args: Array<any>) => any>();
@@ -133,6 +134,7 @@ jest.mock('@/lib/services.ts', () => ({
         getImportLearningSuggestions: mockGetImportLearningSuggestions,
         promoteImportLearning: mockPromoteImportLearning,
         reviewImportTransferDecision: mockReviewImportTransferDecision,
+        updateImportPreviewRecurringMatch: mockUpdateImportPreviewRecurringMatch,
         getImportPreviewRowVersionConflict: mockGetImportPreviewRowVersionConflict,
         patchImportPreviewSelection: mockPatchImportPreviewSelection,
         getImportPreviewSelectionConflict: mockGetImportPreviewSelectionConflict
@@ -289,6 +291,7 @@ beforeEach(() => {
     mockAnalyzeLLMTransactions.mockResolvedValue({ data: { result: { candidates_created: 0 } } });
     mockGetImportLearningSuggestions.mockResolvedValue({ data: { result: { suggestions: [] } } });
     mockPromoteImportLearning.mockResolvedValue({ data: { result: { rules_total: 0 } } });
+    mockUpdateImportPreviewRecurringMatch.mockReset();
     mockGetImportPreviewRowVersionConflict.mockReturnValue(null);
     mockPatchImportPreviewSelection.mockResolvedValue({
         data: {
@@ -573,23 +576,14 @@ describe('desktop recurring decision behavior', () => {
         try {
             const transaction = createTransaction(202);
             const bindings = createBindings([transaction]);
-            mockFetch.mockResolvedValueOnce({
-                ok: true,
-                json: async () => ({
-                    success: true,
-                    data: { sessionId: 'action-session', previewItem: recurringPreview(202, 17) }
-                })
+            mockUpdateImportPreviewRecurringMatch.mockResolvedValueOnce({
+                data: { result: { sessionId: 'action-session', previewItem: recurringPreview(202, 17) } }
             });
 
             await expect(bindings.updatePreviewRecurringMatch(transaction, '17')).resolves.toBe(true);
-            expect(mockFetch).toHaveBeenLastCalledWith('/api/bills/import/v2/preview-item/202/recurring-match', {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json', Authorization: 'Bearer action-token' },
-                body: expect.any(String)
-            });
-            expect(JSON.parse(mockFetch.mock.calls[0]![1].body)).toMatchObject({
+            expect(mockUpdateImportPreviewRecurringMatch).toHaveBeenLastCalledWith({
+                previewId: 202,
                 recurringId: 17,
-                responseMode: 'preview-item',
                 expectedState: expect.any(Object)
             });
             expect(transaction).toMatchObject({
@@ -601,17 +595,15 @@ describe('desktop recurring decision behavior', () => {
             expect(bindings.recurringDecisionLoadingIds.value).toEqual([]);
             expect(mockShowMessage).toHaveBeenCalledWith('Scheduled Match');
 
-            mockFetch.mockResolvedValueOnce({
-                ok: true,
-                json: async () => ({
-                    success: true,
-                    data: { sessionId: 'action-session', preview: [recurringPreview(202, null)] }
-                })
+            mockUpdateImportPreviewRecurringMatch.mockResolvedValueOnce({
+                data: { result: { sessionId: 'action-session', preview: [recurringPreview(202, null)] } }
             });
             await bindings.clearRecurringMatch(transaction);
-            expect(mockFetch).toHaveBeenLastCalledWith('/api/bills/import/v2/preview-item/202/recurring-match', expect.objectContaining({
-                method: 'DELETE'
-            }));
+            expect(mockUpdateImportPreviewRecurringMatch).toHaveBeenLastCalledWith({
+                previewId: 202,
+                recurringId: null,
+                expectedState: expect.any(Object)
+            });
             expect(transaction).toMatchObject({ recurringTemplateId: '', recurringCandidateCount: 0, recurringMatchScore: 0 });
             expect(mockShowMessage).toHaveBeenLastCalledWith('Clear Scheduled Match');
         } finally {
@@ -620,16 +612,20 @@ describe('desktop recurring decision behavior', () => {
     });
 
     test.each([
-        [{ ok: false, status: 409, json: async () => ({ error: 'stale recurring state' }) }, 'stale recurring state'],
-        [{ ok: false, status: 500, json: async () => { throw new Error('not json'); } }, 'Internal Server Error'],
-        [{ ok: true, json: async () => ({ success: true, data: { sessionId: 'other-session' } }) }, 'Recurring match response is out of date'],
-        [{ ok: true, json: async () => ({ success: true, data: { sessionId: 'action-session' } }) }, 'Recurring match response missing preview item']
-    ])('reports safe recurring failures and always clears loading state', async (response, message) => {
+        [{ reject: { response: { status: 409, data: { error: 'stale recurring state' } } } }, 'stale recurring state'],
+        [{ reject: { response: { status: 500, data: {} } } }, 'Internal Server Error'],
+        [{ result: { sessionId: 'other-session' } }, 'Recurring match response is out of date'],
+        [{ result: { sessionId: 'action-session' } }, 'Recurring match response missing preview item']
+    ])('reports safe recurring failures and always clears loading state', async (outcome, message) => {
         const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
         try {
             const transaction = createTransaction(203);
             const bindings = createBindings([transaction]);
-            mockFetch.mockResolvedValueOnce(response);
+            if ('reject' in outcome) {
+                mockUpdateImportPreviewRecurringMatch.mockRejectedValueOnce(outcome.reject);
+            } else {
+                mockUpdateImportPreviewRecurringMatch.mockResolvedValueOnce({ data: { result: outcome.result } });
+            }
 
             await expect(bindings.updatePreviewRecurringMatch(transaction, '17')).resolves.toBe(false);
             expect(mockShowMessage).toHaveBeenLastCalledWith(message);
@@ -637,6 +633,36 @@ describe('desktop recurring decision behavior', () => {
         } finally {
             warnSpy.mockRestore();
         }
+    });
+
+    test('rebases a typed recurring row conflict without retrying the mutation', async () => {
+        const transaction = createTransaction(207);
+        (transaction as ImportTransaction & { _rowVersion?: number })._rowVersion = 8;
+        const bindings = createBindings([transaction]);
+        const conflictError = new Error('Preview row changed, please refresh');
+        const latestPreview = {
+            ...recurringPreview(207, 23),
+            row_version: 9,
+            preview_description: 'newer server description'
+        };
+        mockUpdateImportPreviewRecurringMatch.mockRejectedValueOnce(conflictError);
+        mockGetImportPreviewRowVersionConflict.mockReturnValueOnce({
+            expected_row_version: 8,
+            actual_row_version: 9,
+            previewItem: latestPreview
+        });
+
+        await expect(bindings.updatePreviewRecurringMatch(transaction, 17)).resolves.toBe(false);
+
+        expect(mockUpdateImportPreviewRecurringMatch).toHaveBeenCalledTimes(1);
+        expect(mockUpdateImportPreviewRecurringMatch).toHaveBeenCalledWith({
+            previewId: 207,
+            recurringId: 17,
+            expectedState: expect.objectContaining({ rowVersion: 8 })
+        });
+        expect((transaction as ImportTransaction & { _rowVersion?: number })._rowVersion).toBe(9);
+        expect(transaction.recurringTemplateId).toBe('23');
+        expect(transaction.comment).toBe('newer server description');
     });
 
     test('candidate dialog selects the linked/best candidate and supports apply and clear', async () => {
@@ -663,9 +689,8 @@ describe('desktop recurring decision behavior', () => {
             expect(bindings.formatRecurringCandidateSubtitle(candidates[0])).toContain('Matched Date: 2026-07-10');
 
             bindings.selectedRecurringCandidateId.value = '17';
-            mockFetch.mockResolvedValueOnce({
-                ok: true,
-                json: async () => ({ success: true, data: { sessionId: 'action-session', previewItem: recurringPreview(204, 17) } })
+            mockUpdateImportPreviewRecurringMatch.mockResolvedValueOnce({
+                data: { result: { sessionId: 'action-session', previewItem: recurringPreview(204, 17) } }
             });
             await bindings.applySelectedRecurringCandidate();
             expect(bindings.showRecurringCandidateDialog.value).toBe(false);
@@ -673,9 +698,8 @@ describe('desktop recurring decision behavior', () => {
 
             bindings.recurringCandidateTarget.value = transaction;
             bindings.showRecurringCandidateDialog.value = true;
-            mockFetch.mockResolvedValueOnce({
-                ok: true,
-                json: async () => ({ success: true, data: { sessionId: 'action-session', previewItem: recurringPreview(204, null) } })
+            mockUpdateImportPreviewRecurringMatch.mockResolvedValueOnce({
+                data: { result: { sessionId: 'action-session', previewItem: recurringPreview(204, null) } }
             });
             await bindings.clearRecurringMatchFromDialog();
             expect(bindings.showRecurringCandidateDialog.value).toBe(false);

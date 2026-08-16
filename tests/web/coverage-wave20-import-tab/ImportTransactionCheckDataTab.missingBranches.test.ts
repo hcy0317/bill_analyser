@@ -10,6 +10,7 @@ const mockLlmPreviewRecommendReject = jest.fn<(...args: Array<any>) => Promise<a
 const mockGetMatchingSessionCandidates = jest.fn<(...args: Array<any>) => Promise<any>>();
 const mockUpdateImportPreviewItem = jest.fn<(...args: Array<any>) => Promise<any>>();
 const mockReviewImportTransferDecision = jest.fn<(...args: Array<any>) => Promise<any>>();
+const mockUpdateImportPreviewRecurringMatch = jest.fn<(...args: Array<any>) => Promise<any>>();
 const mockReclassifyImportPreview = jest.fn<(...args: Array<any>) => Promise<any>>();
 const mockGetImportPreviewRowVersionConflict = jest.fn<(...args: Array<any>) => any>();
 const mockPatchImportPreviewSelection = jest.fn<(...args: Array<any>) => Promise<any>>();
@@ -151,6 +152,7 @@ jest.mock('@/lib/services.ts', () => ({
         getMatchingSessionCandidates: mockGetMatchingSessionCandidates,
         updateImportPreviewItem: mockUpdateImportPreviewItem,
         reviewImportTransferDecision: mockReviewImportTransferDecision,
+        updateImportPreviewRecurringMatch: mockUpdateImportPreviewRecurringMatch,
         reclassifyImportPreview: mockReclassifyImportPreview,
         getImportPreviewRowVersionConflict: mockGetImportPreviewRowVersionConflict,
         patchImportPreviewSelection: mockPatchImportPreviewSelection,
@@ -354,6 +356,7 @@ beforeEach(() => {
     mockAnalyzeLLMTransactions.mockResolvedValue({ data: { result: { candidates_created: 0 } } });
     mockGetImportLearningSuggestions.mockResolvedValue({ data: { result: { suggestions: [] } } });
     mockPromoteImportLearning.mockResolvedValue({ data: { result: { rules_total: 0 } } });
+    mockUpdateImportPreviewRecurringMatch.mockReset();
     mockGetImportPreviewRowVersionConflict.mockReturnValue(null);
     mockPatchImportPreviewSelection.mockResolvedValue({
         data: { result: { updated: 0, metadata: null } }
@@ -380,37 +383,39 @@ describe('ImportTransactionCheckDataTab uncovered category and recurring branche
         expect(bindings.assignDestinationAccountIdIfKnown(transaction, undefined)).toBe(false);
     });
 
-    test('recurring mutation handles unauthenticated success, protocol failures, stale data, and non-Error failures', async () => {
+    test('recurring mutation handles service success, response failures, stale data, and non-Error failures', async () => {
         const transaction = createTransaction(2);
         const { bindings } = createBindings([transaction]);
 
-        mockFetch.mockResolvedValueOnce(response({
-            json: { success: true, data: { sessionId: 'branch-session', previewItem: previewFor(transaction) } }
-        }));
+        mockUpdateImportPreviewRecurringMatch.mockResolvedValueOnce({
+            data: { result: { sessionId: 'branch-session', previewItem: previewFor(transaction) } }
+        });
         await expect(bindings.updatePreviewRecurringMatch(transaction, 17)).resolves.toBe(true);
-        expect(mockFetch.mock.calls[0]?.[1]?.headers).not.toHaveProperty('Authorization');
+        expect(mockUpdateImportPreviewRecurringMatch).toHaveBeenCalledWith({
+            previewId: 2,
+            recurringId: 17,
+            expectedState: expect.not.objectContaining({ rowVersion: expect.anything() })
+        });
 
-        mockFetch.mockResolvedValueOnce(response({ ok: false, status: 400, json: { error: '  recurring rejected  ' } }));
+        mockUpdateImportPreviewRecurringMatch.mockRejectedValueOnce({
+            response: { status: 400, data: { error: '  recurring rejected  ' } }
+        });
         await expect(bindings.updatePreviewRecurringMatch(transaction, null)).resolves.toBe(false);
         expect(mockShowMessage).toHaveBeenLastCalledWith('recurring rejected');
 
-        mockFetch.mockResolvedValueOnce(response({ ok: false, status: 400, json: { error: '   ' } }));
+        mockUpdateImportPreviewRecurringMatch.mockRejectedValueOnce({
+            response: { status: 400, data: { error: '   ' } }
+        });
         await bindings.updatePreviewRecurringMatch(transaction, null);
         expect(mockShowMessage).toHaveBeenLastCalledWith('Recurring match request failed (400)');
 
-        mockFetch.mockResolvedValueOnce(response({ json: { success: false, error: 'protocol rejected' } }));
-        await bindings.updatePreviewRecurringMatch(transaction, null);
-        expect(mockShowMessage).toHaveBeenLastCalledWith('protocol rejected');
-
-        mockFetch.mockResolvedValueOnce(response({ json: { success: false, error: '' } }));
-        await bindings.updatePreviewRecurringMatch(transaction, null);
-        expect(mockShowMessage).toHaveBeenLastCalledWith('Unknown error');
-
-        mockFetch.mockResolvedValueOnce(response({ json: { success: true, data: { sessionId: '', previewItem: previewFor(transaction) } } }));
+        mockUpdateImportPreviewRecurringMatch.mockResolvedValueOnce({
+            data: { result: { sessionId: '', previewItem: previewFor(transaction) } }
+        });
         await bindings.updatePreviewRecurringMatch(transaction, null);
         expect(mockShowMessage).toHaveBeenLastCalledWith('Recurring match response is out of date');
 
-        mockFetch.mockRejectedValueOnce('plain recurring failure');
+        mockUpdateImportPreviewRecurringMatch.mockRejectedValueOnce('plain recurring failure');
         await bindings.updatePreviewRecurringMatch(transaction, null);
         expect(mockShowMessage).toHaveBeenLastCalledWith('Recurring match failed');
     });

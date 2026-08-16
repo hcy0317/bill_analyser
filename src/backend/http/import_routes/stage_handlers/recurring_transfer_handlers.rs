@@ -129,6 +129,7 @@ pub async fn preview_recurring_match_put_runtime_handler(
     ) {
         Ok(result) => route_response(preview_decision_result_response(
             result,
+            expected_state.expected_row_version,
             json!({"recurringId": recurring_id}),
         )),
         Err(error) => route_response(db_error_response(error)),
@@ -183,6 +184,7 @@ pub async fn preview_recurring_match_delete_runtime_handler(
     ) {
         Ok(result) => route_response(preview_decision_result_response(
             result,
+            expected_state.expected_row_version,
             json!({"recurringId": Value::Null}),
         )),
         Err(error) => route_response(db_error_response(error)),
