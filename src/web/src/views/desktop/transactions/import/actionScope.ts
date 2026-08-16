@@ -1,22 +1,15 @@
+import type {
+    CanonicalImportPreviewActionFilters,
+    ImportPreviewActionScope
+} from '@/models/import_preview.ts';
+
 import type { ImportPreviewServerQueryFilters } from './importPreviewIndex.ts';
 import { normalizePreviewPageFilters } from './import-dialog/previewPageQuery.ts';
 
-export interface CanonicalImportPreviewActionFilters {
-    min_datetime: string | null;
-    max_datetime: string | null;
-    transaction_type: string | null;
-    category: string | null;
-    account: string | null;
-    tag: string | null;
-    signal: string | null;
-    annotation: string | null;
-    description: string | null;
-    selected_only: false;
-}
-
-export type ImportPreviewActionScope =
-    | { kind: 'selected'; selection_hash: string }
-    | { kind: 'all_matching'; filters: CanonicalImportPreviewActionFilters; filter_hash: string };
+export type {
+    CanonicalImportPreviewActionFilters,
+    ImportPreviewActionScope
+} from '@/models/import_preview.ts';
 
 export function hashImportPreviewActionFilters(filters: CanonicalImportPreviewActionFilters): string {
     let hash = 2166136261;

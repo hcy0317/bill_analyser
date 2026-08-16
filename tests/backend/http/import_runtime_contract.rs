@@ -512,7 +512,7 @@ fn weak_import_api_adapters_are_discoverable_and_cannot_grow() {
     );
     assert!(any_count > 0, "focused any discovery must hit");
     assert!(
-        weak_record_count <= 20,
+        weak_record_count <= 10,
         "typed import work must ratchet Record<string, unknown> down from the C4 baseline"
     );
     assert!(

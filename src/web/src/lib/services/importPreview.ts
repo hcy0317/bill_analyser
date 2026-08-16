@@ -11,7 +11,10 @@ import type {
     ImportPreviewRowVersionConflict,
 } from '@/models/import_preview.ts';
 import type {
+    ImportLearningActionPayload,
+    ImportLearningPromoteRequest,
     ImportLearningPromoteResponse,
+    ImportLearningSuggestionsRequest,
     ImportLearningSuggestionsResponse
 } from '@/models/import_learning.ts';
 import type {
@@ -211,29 +214,21 @@ const importPreviewServices = {
     getImportLearningSuggestions: ({
         sessionId,
         previewUpdates,
-        previewIds,
         actionScope
-    }: {
-        sessionId: string,
-        previewUpdates?: Array<Record<string, unknown>>,
-        previewIds?: number[]
-        actionScope?: Record<string, unknown>
-    }): ApiResponsePromise<ImportLearningSuggestionsResponse> => {
-        const payload: Record<string, unknown> = {};
+    }: ImportLearningSuggestionsRequest): ApiResponsePromise<ImportLearningSuggestionsResponse> => {
+        const route = `bills/import/v2/learning/${sessionId}/suggestions`;
+        if (actionScope === undefined) {
+            return axios.get<ApiDataResponse<ImportLearningSuggestionsResponse>>(route).then(response => {
+                return buildApiResponse(response, response.data?.data);
+            });
+        }
 
+        const payload: ImportLearningActionPayload = { action_scope: actionScope };
         if (previewUpdates !== undefined) {
             payload['preview_updates'] = previewUpdates;
         }
-        if (previewIds !== undefined) {
-            payload['previewIds'] = previewIds;
-        }
-        if (actionScope !== undefined) payload['action_scope'] = actionScope;
 
-        const request = Object.keys(payload).length > 0
-            ? axios.post<ApiDataResponse<ImportLearningSuggestionsResponse>>(`bills/import/v2/learning/${sessionId}/suggestions`, payload)
-            : axios.get<ApiDataResponse<ImportLearningSuggestionsResponse>>(`bills/import/v2/learning/${sessionId}/suggestions`);
-
-        return request.then(response => {
+        return axios.post<ApiDataResponse<ImportLearningSuggestionsResponse>>(route, payload).then(response => {
             return buildApiResponse(response, response.data?.data);
         });
     },
@@ -241,23 +236,13 @@ const importPreviewServices = {
     promoteImportLearning: ({
         sessionId,
         previewUpdates,
-        previewIds,
         actionScope
-    }: {
-        sessionId: string,
-        previewUpdates?: Array<Record<string, unknown>>,
-        previewIds?: number[]
-        actionScope?: Record<string, unknown>
-    }): ApiResponsePromise<ImportLearningPromoteResponse> => {
-        const payload: Record<string, unknown> = {};
+    }: ImportLearningPromoteRequest): ApiResponsePromise<ImportLearningPromoteResponse> => {
+        const payload: ImportLearningActionPayload = { action_scope: actionScope };
 
         if (previewUpdates !== undefined) {
             payload['preview_updates'] = previewUpdates;
         }
-        if (previewIds !== undefined) {
-            payload['previewIds'] = previewIds;
-        }
-        if (actionScope !== undefined) payload['action_scope'] = actionScope;
 
         return axios.post<ApiDataResponse<ImportLearningPromoteResponse>>(`bills/import/v2/learning/${sessionId}/promote`, payload).then(response => {
             return buildApiResponse(response, response.data?.data);

@@ -1,3 +1,26 @@
+import type {
+    ImportPreviewActionScope,
+    ImportPreviewPatchPayload
+} from './import_preview.ts';
+
+export type ImportLearningSuggestionsRequest = {
+    sessionId: string;
+} & (
+    | { actionScope?: undefined; previewUpdates?: undefined }
+    | { actionScope: ImportPreviewActionScope; previewUpdates?: ImportPreviewPatchPayload[] }
+);
+
+export interface ImportLearningPromoteRequest {
+    sessionId: string;
+    actionScope: ImportPreviewActionScope;
+    previewUpdates?: ImportPreviewPatchPayload[];
+}
+
+export interface ImportLearningActionPayload {
+    action_scope: ImportPreviewActionScope;
+    preview_updates?: ImportPreviewPatchPayload[];
+}
+
 export interface ImportLearningSuggestion {
     matchType: string;
     matchValue: string;

@@ -845,7 +845,11 @@ import {
 import {
     clearResolvedImportPreviewReviewState
 } from '../importPreviewReviewState.ts';
-import { buildImportPreviewActionScope, hashImportPreviewSelectionIds } from '../actionScope.ts';
+import {
+    buildImportPreviewActionScope,
+    hashImportPreviewSelectionIds,
+    type ImportPreviewActionScope
+} from '../actionScope.ts';
 import { buildSelectionPatch } from '../selectionActionCoordinator.ts';
 import { buildCanonicalPreviewPageRequestKey } from '../import-dialog/previewPageQuery.ts';
 import {
@@ -3006,7 +3010,7 @@ const rebaseImportPreviewActionPreflushConflict = createImportPreviewActionPrefl
     reconcileDrafts: reconcileServerPagedDraftsAfterSelection
 });
 
-function buildPreviewActionScope(): Record<string, unknown> {
+function buildPreviewActionScope(): ImportPreviewActionScope {
     const selectedPreviewIds = getTrackedTransactionsForSelection()
         .filter(transaction => transaction.selected)
         .map(transaction => getPreviewId(transaction))
@@ -3024,7 +3028,7 @@ function buildPreviewActionScope(): Record<string, unknown> {
     });
 }
 
-async function flushPreviewSelectionAndBuildActionScope(): Promise<Record<string, unknown>> {
+async function flushPreviewSelectionAndBuildActionScope(): Promise<ImportPreviewActionScope> {
     if (!serverPagedMode.value || !props.sessionId) {
         return buildPreviewActionScope();
     }

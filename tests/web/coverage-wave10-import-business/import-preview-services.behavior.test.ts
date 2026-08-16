@@ -19,7 +19,10 @@ jest.mock('axios', () => ({
 
 import { TransactionType } from '@/core/transaction.ts';
 import services from '@/lib/services/importPreview.ts';
-import type { ImportPreviewHistoryRewriteAcknowledgement } from '@/models/import_preview.ts';
+import type {
+    ImportPreviewActionScope,
+    ImportPreviewHistoryRewriteAcknowledgement
+} from '@/models/import_preview.ts';
 
 function dataEnvelope<T>(data: T, success = true): Record<string, unknown> {
     return { status: 200, data: { success, data } };
@@ -83,16 +86,26 @@ describe('import preview upload and learning service behavior', () => {
         expect(empty.data.result).toEqual({ suggestions: [1] });
 
         axiosPost.mockResolvedValueOnce(dataEnvelope({ suggestions: [2] }));
+        const selectedScope: ImportPreviewActionScope = {
+            kind: 'selected',
+            selection_hash: 'hash'
+        };
+        const invalidTopLevelIds = {
+            sessionId: 'session/2',
+            actionScope: selectedScope,
+            // @ts-expect-error preview ids belong inside an explicit_selected action scope.
+            previewIds: [8, 9],
+        } satisfies Parameters<typeof services.getImportLearningSuggestions>[0];
+        expect(invalidTopLevelIds.previewIds).toEqual([8, 9]);
+
         const scoped = await services.getImportLearningSuggestions({
             sessionId: 'session/2',
             previewUpdates: [{ id: 8 }],
-            previewIds: [8, 9],
-            actionScope: { selection_hash: 'hash' }
+            actionScope: selectedScope
         });
         expect(axiosPost).toHaveBeenCalledWith('bills/import/v2/learning/session/2/suggestions', {
             preview_updates: [{ id: 8 }],
-            previewIds: [8, 9],
-            action_scope: { selection_hash: 'hash' }
+            action_scope: selectedScope
         });
         expect(scoped.data.result).toEqual({ suggestions: [2] });
     });
@@ -102,14 +115,12 @@ describe('import preview upload and learning service behavior', () => {
         const response = await services.promoteImportLearning({
             sessionId: 'learning-session',
             previewUpdates: [],
-            previewIds: [],
-            actionScope: { mode: 'selected' }
+            actionScope: { kind: 'explicit_selected', preview_ids: [8, 9] }
         });
 
         expect(axiosPost).toHaveBeenCalledWith('bills/import/v2/learning/learning-session/promote', {
             preview_updates: [],
-            previewIds: [],
-            action_scope: { mode: 'selected' }
+            action_scope: { kind: 'explicit_selected', preview_ids: [8, 9] }
         });
         expect(response.data.result).toEqual({ promoted: 0 });
     });
