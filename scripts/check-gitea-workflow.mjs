@@ -16,7 +16,7 @@ const READ_MERGE_BASE = 'MERGE_BASE_SHA="$(node scripts/resolve-ci-diff-refs.mjs
 const READ_HEAD = 'HEAD_SHA="$(node scripts/resolve-ci-diff-refs.mjs read --input .omx/ultragoal/evidence/ci-diff-refs.json --field head_sha)"';
 const RUST_BUSINESS_DIFF_GUARD = 'git -c gc.auto=0 diff --quiet "$MERGE_BASE_SHA...$HEAD_SHA" -- src/backend || rust_business_diff_exit=$?';
 const RUST_DIFF = 'git -c gc.auto=0 diff --unified=0 "$MERGE_BASE_SHA...$HEAD_SHA" -- src/backend tests/backend > .omx/ultragoal/evidence/rust-changed.diff';
-const RUST_COVERAGE = 'node scripts/governance-normalizers.mjs changed-coverage --lcov workspace.lcov --diff .omx/ultragoal/evidence/rust-changed.diff --threshold 90 --require-matched-files --require-executable-lines';
+const RUST_COVERAGE = 'node scripts/governance-normalizers.mjs changed-coverage --lcov workspace.lcov --diff .omx/ultragoal/evidence/rust-changed.diff --threshold 90 --require-matched-files --require-executable-lines --allow-no-business-files';
 const RUST_COVERAGE_BLOCK = [
     'rust_business_diff_exit=0',
     RUST_BUSINESS_DIFF_GUARD,
@@ -31,7 +31,7 @@ const RUST_COVERAGE_BLOCK = [
 ].join('\n');
 const FRONTEND_BUSINESS_DIFF_GUARD = 'git -c gc.auto=0 diff --quiet "$MERGE_BASE_SHA...$HEAD_SHA" -- src/web/src || frontend_business_diff_exit=$?';
 const FRONTEND_DIFF = 'git -c gc.auto=0 diff --unified=0 "$MERGE_BASE_SHA...$HEAD_SHA" -- src/web tests/web > .omx/ultragoal/evidence/frontend-changed.diff';
-const FRONTEND_COVERAGE = 'node scripts/governance-normalizers.mjs changed-coverage --lcov src/web/coverage/lcov.info --diff .omx/ultragoal/evidence/frontend-changed.diff --threshold 90 --require-matched-files --require-executable-lines';
+const FRONTEND_COVERAGE = 'node scripts/governance-normalizers.mjs changed-coverage --lcov src/web/coverage/lcov.info --diff .omx/ultragoal/evidence/frontend-changed.diff --threshold 90 --require-matched-files --require-executable-lines --allow-no-business-files';
 const FRONTEND_COVERAGE_BLOCK = [
     'frontend_business_diff_exit=0',
     FRONTEND_BUSINESS_DIFF_GUARD,

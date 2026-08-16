@@ -219,6 +219,39 @@ function testChangedCoverageRejectsMissingVueSfcRecord() {
     assert.equal(summary.status, 'failed');
 }
 
+function testChangedCoverageAllowsExplicitTestOnlyDiff() {
+    const diffText = [
+        'diff --git a/src/backend/http/routes/tests/runtime.rs b/src/backend/http/routes/tests/runtime.rs',
+        '--- /dev/null',
+        '+++ b/src/backend/http/routes/tests/runtime.rs',
+        '@@ -0,0 +1 @@',
+        '+#[test] fn contract() {}',
+    ].join('\n');
+    const summary = summarizeChangedLineCoverage({
+        lcovText: '',
+        diffText,
+        threshold: 90,
+        requireMatchedFiles: true,
+        requireExecutableLines: true,
+        allowNoBusinessFiles: true,
+    });
+
+    assert.equal(summary.changed_file_count, 1);
+    assert.equal(summary.business_file_count, 0);
+    assert.equal(summary.coverage_disposition, 'not_applicable_no_business_files');
+    assert.equal(summary.status, 'passed');
+
+    const empty = summarizeChangedLineCoverage({
+        lcovText: '',
+        diffText: '',
+        threshold: 90,
+        requireMatchedFiles: true,
+        requireExecutableLines: true,
+        allowNoBusinessFiles: true,
+    });
+    assert.equal(empty.status, 'failed');
+}
+
 function testChangedCoverageRejectsAnyMissingBusinessFile() {
     const summary = summarizeChangedLineCoverage({
         lcovText: [
@@ -491,6 +524,7 @@ testUnifiedDiffParser();
 testChangedCoverageSummary();
 testChangedCoverageThresholdIsStrict();
 testChangedCoverageRejectsEmptyDiff();
+testChangedCoverageAllowsExplicitTestOnlyDiff();
 testChangedCoverageRejectsZeroMatchedFiles();
 testChangedCoverageRejectsZeroExecutableChangedLines();
 testChangedCoverageMatchesRustAndVuePaths();

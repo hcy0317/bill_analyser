@@ -402,6 +402,7 @@ function summarizeChangedLineCoverage({
     threshold = 90,
     requireMatchedFiles = false,
     requireExecutableLines = false,
+    allowNoBusinessFiles = false,
     sourceTextByPath = null,
 }) {
     const lcovFiles = parseLcov(lcovText);
@@ -497,15 +498,24 @@ function summarizeChangedLineCoverage({
         && file.executable_changed_lines.length > 0
         && file.coverage_percent > threshold
     ));
-    const coveragePassed = coveragePercent !== null && coveragePercent > threshold;
-    const matchedFilesPassed = !requireMatchedFiles || (
+    const noBusinessFilesAllowed = (
+        allowNoBusinessFiles
+        && changedLinesByFile.size > 0
+        && businessFileCount === 0
+    );
+    const coveragePassed = noBusinessFilesAllowed
+        || coveragePercent !== null && coveragePercent > threshold;
+    const matchedFilesPassed = noBusinessFilesAllowed || !requireMatchedFiles || (
         businessFileCount > 0
         && matchedFileCount === coverageEligibleFileCount
         && missingLcovFiles.length === 0
     );
-    const executableLinesPassed = !requireExecutableLines || executableChangedLines > 0;
+    const executableLinesPassed = noBusinessFilesAllowed
+        || !requireExecutableLines
+        || executableChangedLines > 0;
     return {
         threshold,
+        coverage_applicable: !noBusinessFilesAllowed,
         changed_file_count: changedLinesByFile.size,
         business_file_count: businessFileCount,
         coverage_eligible_file_count: coverageEligibleFileCount,
@@ -520,7 +530,11 @@ function summarizeChangedLineCoverage({
         covered_changed_lines: coveredChangedLines,
         uncovered_changed_lines: executableChangedLines - coveredChangedLines,
         coverage_percent: coveragePercent,
-        coverage_disposition: executableChangedLines === 0 ? 'failed_no_executable_lines' : 'measured',
+        coverage_disposition: noBusinessFilesAllowed
+            ? 'not_applicable_no_business_files'
+            : executableChangedLines === 0
+                ? 'failed_no_executable_lines'
+                : 'measured',
         requirements: {
             coverage_strictly_greater_than_threshold: coveragePassed,
             all_business_files_matched: matchedFilesPassed,
@@ -684,6 +698,7 @@ function main(argv = process.argv.slice(2)) {
             threshold,
             requireMatchedFiles: args.includes('--require-matched-files'),
             requireExecutableLines: args.includes('--require-executable-lines'),
+            allowNoBusinessFiles: args.includes('--allow-no-business-files'),
         });
         console.log(JSON.stringify(summary, null, 2));
         if (summary.status !== 'passed') {
@@ -708,7 +723,7 @@ function main(argv = process.argv.slice(2)) {
     }
     console.error([
         'Usage:',
-        '  node scripts/governance-normalizers.mjs changed-coverage --lcov <file> --diff <file> [--threshold 90] [--require-matched-files] [--require-executable-lines]',
+        '  node scripts/governance-normalizers.mjs changed-coverage --lcov <file> --diff <file> [--threshold 90] [--require-matched-files] [--require-executable-lines] [--allow-no-business-files]',
         '  node scripts/governance-normalizers.mjs forge-evidence --input <json>',
         '  node scripts/governance-normalizers.mjs structure-queue [--rust-output <log>] [--frontend-output <log>]',
     ].join('\n'));

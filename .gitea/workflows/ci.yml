@@ -181,7 +181,7 @@ jobs:
             echo "Rust business source unchanged; changed-line coverage not applicable."
           elif [ "$rust_business_diff_exit" -eq 1 ]; then
             git -c gc.auto=0 diff --unified=0 "$MERGE_BASE_SHA...$HEAD_SHA" -- src/backend tests/backend > .omx/ultragoal/evidence/rust-changed.diff
-            node scripts/governance-normalizers.mjs changed-coverage --lcov workspace.lcov --diff .omx/ultragoal/evidence/rust-changed.diff --threshold 90 --require-matched-files --require-executable-lines
+            node scripts/governance-normalizers.mjs changed-coverage --lcov workspace.lcov --diff .omx/ultragoal/evidence/rust-changed.diff --threshold 90 --require-matched-files --require-executable-lines --allow-no-business-files
           else
             exit "$rust_business_diff_exit"
           fi
@@ -294,7 +294,7 @@ jobs:
             echo "Frontend business source unchanged; changed-line coverage not applicable."
           elif [ "$frontend_business_diff_exit" -eq 1 ]; then
             git -c gc.auto=0 diff --unified=0 "$MERGE_BASE_SHA...$HEAD_SHA" -- src/web tests/web > .omx/ultragoal/evidence/frontend-changed.diff
-            node scripts/governance-normalizers.mjs changed-coverage --lcov src/web/coverage/lcov.info --diff .omx/ultragoal/evidence/frontend-changed.diff --threshold 90 --require-matched-files --require-executable-lines
+            node scripts/governance-normalizers.mjs changed-coverage --lcov src/web/coverage/lcov.info --diff .omx/ultragoal/evidence/frontend-changed.diff --threshold 90 --require-matched-files --require-executable-lines --allow-no-business-files
           else
             exit "$frontend_business_diff_exit"
           fi

@@ -1,7 +1,7 @@
 {
   "schema_version": "cyanflow-recognition-quality-fixture.v1",
-  "generated_at": "2026-08-16T06:53:09+08:00",
-  "repository_head": "cc19668ec3bd5440716e3b31993284acdfc7ea2d",
+  "generated_at": "2026-08-16T07:45:09+08:00",
+  "repository_head": "60da580f9accd6127607e3e188ac62e30b731548",
   "purpose": "冻结重构必须保留或补齐的识别与信号语义；本文件不包含用户账单内容。",
   "runtime_baseline_observation": {
     "corpus_manifest_sha256": "0a3b595c268413d7f404d823c6a0d0456d0e81b655e47c3c3f92e412b2c4c838",
@@ -41,10 +41,23 @@
       },
       "current_evidence": [
         "tests/backend/parsers/parser_contracts.rs:601",
+        "src/backend/http/import_routes/stage_handlers/tests/runtime/generic_mapping.rs:44",
         "src/web/src/lib/services/importPreview.ts:94"
       ],
-      "coverage_status": "partial",
-      "gap": "已有 detector no_match 与前端 mapping 请求，但缺少贯穿 HTTP -> parser -> standardized rows 的单一合同 fixture。",
+      "verification": {
+        "verified_at": "2026-08-16T07:45:09+08:00",
+        "environment": "isolated PostgreSQL 16 on localhost",
+        "focused_discovery_count": 1,
+        "focused_tests": [
+          {
+            "name": "import_routes::tests::dedicated_no_match_flows_through_generic_mapping_into_standard_rows",
+            "executed": 1,
+            "passed": 1,
+            "skipped": 0
+          }
+        ]
+      },
+      "coverage_status": "covered",
       "required_before": "C3"
     },
     {
@@ -187,9 +200,7 @@
   ],
   "gate": {
     "fixture_inventory_complete": true,
-    "all_contracts_executable": false,
-    "blocking_scenarios": [
-      "generic-unmatched-column-mapping"
-    ]
+    "all_contracts_executable": true,
+    "blocking_scenarios": []
   }
 }
