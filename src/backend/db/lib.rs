@@ -17,6 +17,7 @@ pub mod bills;
 pub mod budgets;
 pub mod error;
 pub mod import_config;
+pub mod import_stage2;
 pub mod import_staging;
 pub mod llm;
 pub mod matching;
@@ -104,6 +105,13 @@ pub use error::{DbError, DbResult};
 pub use import_config::{
     delete_postgres_import_config, list_postgres_import_configs, match_postgres_import_config,
     save_postgres_import_config, ImportConfigRepositoryError,
+};
+pub use import_stage2::{
+    load_import_stage2_account_records, load_import_stage2_account_rule_candidates,
+    load_import_stage2_category_records, load_import_stage2_category_rule_records,
+    load_import_stage2_context, load_import_stage2_recurring_template_records,
+    ImportStage2AccountRecord, ImportStage2CategoryRecord, ImportStage2CategoryRuleRecord,
+    ImportStage2ContextRows, ImportStage2LearningRuleRecord, ImportStage2RecurringTemplateRecord,
 };
 pub use import_staging::{
     apply_import_decision_group_command, apply_preview_learning_decision,

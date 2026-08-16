@@ -192,7 +192,7 @@ pub async fn import_dedup_runtime_handler(
             .map(|plan| plan.preview_draft.clone()),
     );
     let _intelligence_started_at = Instant::now();
-    let mut intelligence_stats = match apply_import_intelligence_chain(
+    let mut intelligence_stats = match ImportStage2::evaluate(
         runtime.connection_mut(),
         user_id,
         preview_drafts.as_mut_slice(),

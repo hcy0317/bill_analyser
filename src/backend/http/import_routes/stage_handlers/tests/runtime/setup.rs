@@ -88,6 +88,110 @@
         assert_eq!(latest_applied_version, latest_manifest_version);
     }
 
+    #[tokio::test(flavor = "multi_thread")]
+    async fn stage2_compatibility_readers_delegate_to_the_repository_boundary() {
+        let Some((state, user_id, _)) = import_postgres_test_state().await else {
+            return;
+        };
+        let runtime = state
+            .open_postgres_repository_runtime("stage2-compatibility-readers")
+            .expect("postgres runtime");
+        let pool = runtime.pool();
+        let category_id: i64 = sqlx::query_scalar(
+            "INSERT INTO categories (user_id,name,category_type,path,display_order) VALUES ($1,'现金转账','4','转账/现金',1) RETURNING id",
+        )
+        .bind(user_id)
+        .fetch_one(pool)
+        .await
+        .expect("insert category");
+        sqlx::query(
+            "INSERT INTO category_rules (user_id,category_id,name,rule_expression,priority,enabled) VALUES ($1,$2,'现金规则',$3,1,true)",
+        )
+        .bind(user_id)
+        .bind(category_id)
+        .bind(json!({"expression":"OR={现金}","regex_enabled":false}))
+        .execute(pool)
+        .await
+        .expect("insert category rule");
+        let account_id: i64 = sqlx::query_scalar(
+            "INSERT INTO accounts (user_id,name,account_type,display_order) VALUES ($1,'现金账户','asset',1) RETURNING id",
+        )
+        .bind(user_id)
+        .fetch_one(pool)
+        .await
+        .expect("insert account");
+        sqlx::query(
+            "INSERT INTO account_rules (user_id,account_id,name,rule_expression,regex_enabled,priority,enabled) VALUES ($1,$2,'现金账户规则',$3,false,1,true)",
+        )
+        .bind(user_id)
+        .bind(account_id)
+        .bind(json!({"expression":"OR={现金}"}))
+        .execute(pool)
+        .await
+        .expect("insert account rule");
+        sqlx::query(
+            "INSERT INTO transaction_templates (user_id,template_type,name,transaction_type,metadata,display_order) VALUES ($1,2,'现金月结','4',$2,1)",
+        )
+        .bind(user_id)
+        .bind(json!({"account":"现金账户","counterparty":"现金商户"}))
+        .execute(pool)
+        .await
+        .expect("insert recurring template");
+
+        let categories = load_import_intelligence_categories(pool, user_id)
+            .await
+            .expect("load categories");
+        let categories_by_id = categories
+            .iter()
+            .cloned()
+            .map(|category| (category.id, category))
+            .collect::<BTreeMap<_, _>>();
+        let rules = load_import_intelligence_category_rules(pool, user_id, &categories_by_id)
+            .await
+            .expect("load category rules");
+        let accounts = load_import_intelligence_accounts(pool, user_id)
+            .await
+            .expect("load accounts");
+        let account_rules = load_import_intelligence_account_rules(pool, user_id)
+            .await
+            .expect("load account rules");
+        let recurring = load_import_intelligence_recurring_templates(pool, user_id)
+            .await
+            .expect("load recurring templates");
+
+        assert_eq!(categories.len(), 1);
+        assert_eq!(rules.len(), 1);
+        assert_eq!(accounts.len(), 1);
+        assert_eq!(account_rules.len(), 1);
+        assert_eq!(recurring.len(), 1);
+        assert_eq!(recurring[0].account, "现金账户");
+        assert_eq!(recurring[0].counterparty, "现金商户");
+        assert_eq!(
+            default_transfer_category(&categories, &categories_by_id, Some(category_id))
+                .map(|category| category.id),
+            Some(category_id)
+        );
+
+        let direct_account = import_intelligence_recurring_template_from_record(
+            ImportStage2RecurringTemplateRecord {
+                id: 99,
+                name: "direct account".into(),
+                transaction_type: None,
+                source_amount_minor_units: 123,
+                source_account_id: Some(account_id),
+                scheduled_next_date: None,
+                scheduled_start_date: None,
+                metadata: json!({}),
+            },
+        );
+        assert_eq!(direct_account.account, account_id.to_string());
+        assert_eq!(direct_account.amount_cents, 123);
+        assert!(user_id_i64_for_sql(
+            UserId::new(i64::MAX as u64 + 1).expect("non-zero oversized user id")
+        )
+        .is_err());
+    }
+
     async fn insert_legacy_same_batch_transfer_fixture(
         state: &HttpAppState,
         user_id: i64,

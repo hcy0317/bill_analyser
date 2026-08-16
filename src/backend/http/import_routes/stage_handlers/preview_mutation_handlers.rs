@@ -152,7 +152,7 @@ pub async fn import_reclassify_runtime_handler(
     for draft in &mut intelligent_drafts {
         invalidate_reclassification_dependent_signals(draft);
     }
-    if let Err(error) = apply_import_intelligence_chain(
+    if let Err(error) = ImportStage2::evaluate(
         runtime.connection_mut(),
         user_id,
         intelligent_drafts.as_mut_slice(),
@@ -319,7 +319,7 @@ async fn reclassify_dematerialized_preview_items_claimed(
         .iter()
         .map(import_preview_draft_from_row)
         .collect::<Vec<_>>();
-    apply_import_intelligence_chain(runtime.connection_mut(), user_id, drafts.as_mut_slice())
+    ImportStage2::evaluate(runtime.connection_mut(), user_id, drafts.as_mut_slice())
         .await?;
     enforce_import_preview_invariants(drafts.as_mut_slice());
     let patches = preview

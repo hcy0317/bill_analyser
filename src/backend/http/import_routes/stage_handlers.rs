@@ -5,6 +5,7 @@
 include!("stage_handlers/dedup_handler.rs");
 include!("stage_handlers/decision_group_materialization.rs");
 include!("stage_handlers/stage2_types.rs");
+include!("stage_handlers/stage2_application.rs");
 include!("stage_handlers/stage2_chain.rs");
 include!("stage_handlers/stage2_transfer_invariants.rs");
 include!("stage_handlers/stage2_category_rules.rs");

@@ -78,6 +78,9 @@ use bill_analyser_db::{
     has_import_learning_feature_vector_sources, init_import_staging_schema,
     insert_import_decision_groups_batch, insert_import_history_materializations_batch,
     insert_preview_bills_batch, list_postgres_llm_candidates, list_postgres_llm_configs,
+    load_import_stage2_account_records, load_import_stage2_account_rule_candidates,
+    load_import_stage2_category_records, load_import_stage2_category_rule_records,
+    load_import_stage2_context, load_import_stage2_recurring_template_records,
     load_postgres_ocr_config_setting, mark_unprocessed_parser_templates_processed_for_session,
     parser_template_draft_from_standard_bill, preview_draft_from_history_duplicate,
     preview_draft_from_history_transfer, preview_drafts_from_dedup_bills, preview_id_snapshot_hash,
@@ -97,8 +100,10 @@ use bill_analyser_db::{
     ImportPreviewPageRequest, ImportPreviewPatch, ImportPreviewPatchField, ImportPreviewPatchValue,
     ImportPreviewQueryFilters, ImportPreviewRecurringCandidate, ImportPreviewRecurringMatchUpdate,
     ImportPreviewRow, ImportPreviewSelectionMode, ImportPreviewSelectionTarget, ImportSessionDraft,
-    ImportSessionStatusUpdate, ImportSourceDraft, ImportStandardRowDraft, LlmCandidateDraft,
-    LlmConfigDraft, LlmConfigUpdate, PostgresPool, PostgresRepositoryRuntime,
+    ImportSessionStatusUpdate, ImportSourceDraft, ImportStage2CategoryRecord,
+    ImportStage2CategoryRuleRecord, ImportStage2ContextRows, ImportStage2RecurringTemplateRecord,
+    ImportStandardRowDraft, LlmCandidateDraft, LlmConfigDraft, LlmConfigUpdate, PostgresPool,
+    PostgresRepositoryRuntime,
 };
 use bill_analyser_parsers::{
     parse_dedicated_import_bytes_with_decision, parser_source_label, post_process_raw_bills,

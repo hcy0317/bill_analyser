@@ -153,7 +153,7 @@ fn stage2_account_rules_run_after_semantic_projection_and_before_baseline() {
     let handlers = source("src/backend/http/import_routes/stage_handlers.rs");
     let stage2_loop = section_between(
         &handlers,
-        "async fn apply_import_intelligence_chain",
+        "fn evaluate_import_intelligence_snapshot",
         "fn apply_account_rule_match_after_semantic_projection",
     );
 
@@ -164,7 +164,7 @@ fn stage2_account_rules_run_after_semantic_projection_and_before_baseline() {
     let account_pre_snapshot = position(stage2_loop, "let before_account_rule =");
     let account_rule_pass = position(
         stage2_loop,
-        "apply_account_rule_match_after_semantic_projection(draft, &account_rules, &accounts);",
+        "apply_account_rule_match_after_semantic_projection(draft, account_rules, accounts);",
     );
     let baseline_persist = position(stage2_loop, "persist_stage2_actionable_baseline(draft);");
     let stats_update = position(stage2_loop, "stats.account_matched += 1;");
@@ -181,6 +181,51 @@ fn stage2_account_rules_run_after_semantic_projection_and_before_baseline() {
         stage2_loop.contains("Account recognition is intentionally last in stage2"),
         "stage2 account-rule ordering comment should survive refactors"
     );
+}
+
+#[test]
+fn stage2_production_paths_share_one_application_boundary_and_http_owns_no_sql() {
+    let handlers = source("src/backend/http/import_routes/stage_handlers.rs");
+    assert!(
+        handlers.contains("struct ImportStage2"),
+        "stage2 needs one named application boundary"
+    );
+    assert_eq!(
+        handlers.matches("ImportStage2::evaluate(").count(),
+        3,
+        "initial, direct reclassify, and decision-group reclassify must enter the same boundary"
+    );
+    assert!(
+        !handlers.contains("apply_import_intelligence_chain("),
+        "production callers must not retain the legacy HTTP-owned stage2 entry"
+    );
+
+    let stage2_application =
+        source("src/backend/http/import_routes/stage_handlers/stage2_application.rs");
+    assert_eq!(
+        stage2_application
+            .matches("load_import_stage2_context(")
+            .count(),
+        1,
+        "one context snapshot is loaded for each stage2 batch"
+    );
+    assert!(
+        stage2_application.contains("ImportStage2ContextSnapshot"),
+        "the loaded context must become an immutable batch snapshot"
+    );
+
+    let stage2_chain = source("src/backend/http/import_routes/stage_handlers/stage2_chain.rs");
+    assert!(
+        !stage2_chain.contains("sqlx::query"),
+        "stage2 evaluation must not own PostgreSQL queries"
+    );
+    assert!(
+        !stage2_chain.contains("SELECT "),
+        "stage2 evaluation must remain transport and SQL agnostic"
+    );
+    let repository = source("src/backend/db/import_stage2.rs");
+    assert!(repository.contains("pub async fn load_import_stage2_context"));
+    assert!(repository.contains("WHERE user_id = $1"));
 }
 
 #[test]
