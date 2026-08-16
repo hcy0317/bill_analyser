@@ -54,6 +54,54 @@ const baseItem = (): ImportPreviewIndexItem => ({
 });
 
 describe('import preview index helpers', () => {
+    test('uses typed snapshot memberships instead of stale index compatibility fields', () => {
+        const item = mapImportPreviewIndexResponseItem({
+            id: 8,
+            parser_source: 'alipay',
+            learning_status: 'pending',
+            learning_title: 'stale compatibility signal',
+            preview_state: {
+                projection_version: 1,
+                signals: ['parser'],
+                issues: [],
+                decisions: {
+                    transfer: { status: 'absent', has_evidence: false },
+                    history: { status: 'absent', has_evidence: false },
+                    learning: { status: 'absent', has_evidence: false },
+                    llm: { status: 'absent', has_evidence: false },
+                },
+                effective: {
+                    category_id: null,
+                    source_account_id: null,
+                    destination_account_id: null,
+                },
+            },
+        });
+
+        expect(matchesImportPreviewIndexItemFilters(item, {
+            minDatetime: null,
+            maxDatetime: null,
+            transactionType: null,
+            category: null,
+            account: null,
+            tag: null,
+            signal: 'parser',
+            annotation: null,
+            description: null,
+        })).toBe(true);
+        expect(matchesImportPreviewIndexItemFilters(item, {
+            minDatetime: null,
+            maxDatetime: null,
+            transactionType: null,
+            category: null,
+            account: null,
+            tag: null,
+            signal: 'learning',
+            annotation: null,
+            description: null,
+        })).toBe(false);
+    });
+
     test('counts annotation issues from rows that were never visited in the table', () => {
         const issues = collectImportPreviewIndexAnnotationIssues({
             ...baseItem(),
@@ -106,6 +154,22 @@ describe('import preview index helpers', () => {
                 comment: '待处理',
                 learningStatus: 'pending',
                 learningTitle: '历史命中',
+                previewState: {
+                    projection_version: 1,
+                    signals: ['learning'],
+                    issues: [],
+                    decisions: {
+                        transfer: { status: 'absent', has_evidence: false },
+                        history: { status: 'absent', has_evidence: false },
+                        learning: { status: 'pending', has_evidence: true },
+                        llm: { status: 'absent', has_evidence: false },
+                    },
+                    effective: {
+                        category_id: null,
+                        source_account_id: null,
+                        destination_account_id: null,
+                    },
+                },
             },
         ];
 

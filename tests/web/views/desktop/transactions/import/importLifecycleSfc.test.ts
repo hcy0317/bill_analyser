@@ -1,4 +1,5 @@
 import { describe, expect, jest, test } from '@jest/globals';
+import { previewStateSnapshot } from '../../../../helpers/importPreviewState.ts';
 
 const mockGetImportPreviewPage = jest.fn<(...args: Array<unknown>) => Promise<any>>();
 const mockAcceptMatchingCandidate = jest.fn<(...args: Array<unknown>) => Promise<any>>();
@@ -259,6 +260,7 @@ function createDesktopDecisionTransaction(): any {
         paymentMethod: 'card',
         comment: 'memo',
         selected: true,
+        previewState: previewStateSnapshot(['learning', 'llm']),
         matching: {
             transfer: {
                 review_status: '',
@@ -356,7 +358,14 @@ function createRenderableDesktopTransaction(type: number, index: number): any {
                 notice: 'history rewrite'
             },
             annotation: { history_rewrite_notice: 'history rewrite' }
-        }
+        },
+        previewState: previewStateSnapshot([
+            'platform_duplicate',
+            'transfer',
+            'history',
+            'learning',
+            'llm'
+        ])
     } as any;
     transaction.getTransferSuggestionReviewStatus = () => 'pending';
     transaction.hasTransferSuggestion = () => true;
@@ -778,7 +787,8 @@ describe('P3 import lifecycle production SFC coverage', () => {
                     destructive_ack_required: true
                 },
                 annotation: { history_rewrite_notice: 'history rewrite' }
-            }
+            },
+            previewState: previewStateSnapshot(['transfer', 'history', 'learning', 'llm'])
         } as any;
         transaction.hasRecurringMatch = () => false;
         try {
@@ -826,6 +836,12 @@ describe('P3 import lifecycle production SFC coverage', () => {
                     statusTransaction.learningRecommendationReason = '';
                     statusTransaction.learningRecommendationSummary = '';
                 }
+                statusTransaction.previewState = status === 'none'
+                    ? previewStateSnapshot(['platform_duplicate', 'history', 'llm'])
+                    : previewStateSnapshot(
+                        ['platform_duplicate', 'history', 'learning', 'llm'],
+                        { learning: status },
+                    );
                 const learningSignal = bindings.getImportPreviewSignalViewModel(statusTransaction).learning;
                 expect(learningSignal?.status ?? null).toBe(expected);
             }
@@ -834,6 +850,12 @@ describe('P3 import lifecycle production SFC coverage', () => {
             absentLearningTransaction.learningRecommendationReason = '';
             absentLearningTransaction.learningRecommendationSummary = '';
             absentLearningTransaction.hasLearningRecommendation = () => false;
+            absentLearningTransaction.previewState = previewStateSnapshot([
+                'platform_duplicate',
+                'transfer',
+                'history',
+                'llm'
+            ]);
             expect(bindings.getImportPreviewSignalViewModel(absentLearningTransaction).learning).toBeNull();
 
             expect(bindings.shouldClearTransferDecisionOnSync(transaction)).toBe(false);
@@ -1708,6 +1730,13 @@ describe('P3 import lifecycle production SFC coverage', () => {
                 transfer_suggestion_reason: 'paired transfer',
                 learning_recommendation_reason: 'merchant rule',
                 learning_recommendation_summary: 'Food/Cafe',
+                preview_state: previewStateSnapshot([
+                    'platform_duplicate',
+                    'transfer',
+                    'history',
+                    'learning',
+                    'llm'
+                ]),
                 matching: {
                     parser: { id: 'wechat', tags: ['wallet'] },
                     dedup: { type: 'platform_duplicate', source_ids: ['source-1'] },
@@ -1728,9 +1757,7 @@ describe('P3 import lifecycle production SFC coverage', () => {
             const [row] = bindings.normalizeRows([record]);
             bindings.rows.value = [row];
 
-            expect(bindings.normalizeSignalStatus('ACCEPTED', '')).toBe('accepted');
-            expect(bindings.normalizeSignalStatus('', 'fallback')).toBe('pending');
-            expect(bindings.normalizeSignalStatus('', '')).toBeNull();
+            expect(bindings.normalizeSignalStatus).toBeUndefined();
             expect(bindings.rowTitle(row)).toBe('Coffee Shop');
             expect(bindings.rowSubtitle(row)).toContain('Food');
             expect(bindings.formatAmount(row)).toBe('-12.34');
@@ -1799,6 +1826,10 @@ describe('P3 import lifecycle production SFC coverage', () => {
                 transfer_suggestion_level: 'green',
                 transfer_suggestion_reason: 'paired account movement',
                 learning_recommendation_reason: 'transfer preview is protected from learning type/category overrides',
+                preview_state: previewStateSnapshot(
+                    ['transfer', 'learning'],
+                    { transfer: 'pending', learning: 'skipped' }
+                ),
                 matching: {
                     parser: { id: 'wechat', tags: ['wallet'] },
                     transfer: {
@@ -1845,6 +1876,10 @@ describe('P3 import lifecycle production SFC coverage', () => {
                 selected: true,
                 preview_payment_method: 'Cash',
                 preview_amount_cents: 'not-a-number',
+                preview_state: previewStateSnapshot(
+                    ['transfer', 'learning', 'llm'],
+                    { transfer: 'accepted', learning: 'accepted', llm: 'accepted' }
+                ),
                 matching: {
                     parser: { id: 'alipay', tags: ['mobile'], source_chain: [] },
                     dedup: { type: 'similar_duplicate', source_ids: ['source-101'], source_count: 1 },
@@ -1874,9 +1909,7 @@ describe('P3 import lifecycle production SFC coverage', () => {
             const [row] = normalized;
             bindings.rows.value = [row];
 
-            expect(bindings.normalizeSignalStatus('rejected', '')).toBe('rejected');
-            expect(bindings.normalizeSignalStatus('skipped', '')).toBe('skipped');
-            expect(bindings.normalizeSignalStatus('pending', '')).toBe('pending');
+            expect(bindings.normalizeSignalStatus).toBeUndefined();
             expect(bindings.rowTitle(row)).toBe('Cash');
             expect(bindings.rowTitle({ record: {} })).toBe('Imported Transaction');
             expect(bindings.rowSubtitle({ record: {} })).toBe('');

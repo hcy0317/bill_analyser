@@ -149,6 +149,7 @@ for (const componentPath of [
 
 import { ImportTransaction } from '@/models/imported_transaction.ts';
 import ImportTransactionCheckDataTab from '@/views/desktop/transactions/import/tabs/ImportTransactionCheckDataTab.vue';
+import { previewStateSnapshot } from '../../../../helpers/importPreviewState.ts';
 
 type MatchingOverrides = Record<string, any>;
 
@@ -156,7 +157,7 @@ function createTransaction(
     id: number,
     options: { selected?: boolean, matching?: MatchingOverrides } = {}
 ): ImportTransaction {
-    const matching = {
+    const matching: MatchingOverrides = {
         parser: {
             id: 'alipay',
             tags: ['wallet'],
@@ -198,6 +199,41 @@ function createTransaction(
         selected: options.selected ?? true,
         matching
     } as never, id);
+    const signals: Array<'parser' | 'platform_duplicate' | 'transfer' | 'history' | 'learning' | 'llm'> = [];
+    const statuses: Record<string, 'pending' | 'accepted' | 'rejected' | 'skipped'> = {};
+    const meaningfulFamily = (family: 'learning' | 'llm'): boolean => {
+        const section = matching[family] as Record<string, unknown>;
+        if (section['review_status'] === null || section['suppressed'] === true) {
+            return false;
+        }
+        return Object.entries(section).some(([key, value]) => (
+            key !== 'review_status' && key !== 'suppressed' && value !== '' && value !== null && value !== 0
+        )) || ['accepted', 'rejected', 'skipped'].includes(String(section['review_status'] || ''));
+    };
+    if (matching['dedup'].type === 'platform_bank') {
+        signals.push('platform_duplicate');
+    }
+    if (['pending', 'accepted'].includes(String(matching['transfer'].review_status || ''))) {
+        signals.push('transfer');
+        statuses['transfer'] = matching['transfer'].review_status as 'pending' | 'accepted';
+    }
+    if (matching['reconciliation'].planned_operation) {
+        signals.push('history');
+        statuses['history'] = 'pending';
+    }
+    for (const family of ['learning', 'llm'] as const) {
+        if (meaningfulFamily(family)) {
+            signals.push(family);
+            const status = String(matching[family].review_status || 'pending');
+            statuses[family] = ['accepted', 'rejected', 'skipped'].includes(status)
+                ? status as 'accepted' | 'rejected' | 'skipped'
+                : 'pending';
+        }
+    }
+    if (signals.length === 0) {
+        signals.push('parser');
+    }
+    transaction.previewState = previewStateSnapshot(signals, statuses);
     (transaction as ImportTransaction & { _previewId: number })._previewId = id;
     return transaction;
 }
@@ -415,6 +451,7 @@ describe('desktop import signal, history, and annotation matrix', () => {
         transaction.parserId = 'wechat';
         transaction.parserTags = ['wallet', 'mobile'];
         transaction.dedupType = 'platform_bank';
+        transaction.previewState!.signals.push('platform_duplicate');
         transaction.matching!.dedup!.source_count = 2;
         transaction.matching!.dedup!.source_labels = ['first', 'second'];
         const afterParserDedup = bindings.getImportPreviewSignalViewModel(transaction);

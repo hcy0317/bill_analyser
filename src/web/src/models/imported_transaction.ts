@@ -1,6 +1,7 @@
 import { TransactionType } from '@/core/transaction.ts';
 
 import type { ImportMatchingPayload } from './import_matching.ts';
+import type { ImportPreviewStateSnapshot } from './import_preview_state.ts';
 import type { TransactionCreateRequest, TransactionGeoLocationResponse } from './transaction.ts';
 import {
     getFirstDefinedIdString,
@@ -60,6 +61,7 @@ export class ImportTransaction implements ImportTransactionResponse {
     public dedupType: string;
     public dedupSourceIds: Array<number | string>;
     public matching?: ImportMatchingPayload;
+    public previewState?: ImportPreviewStateSnapshot;
 
     // v7: 标记用户是否已人工标注
     public isManuallyAnnotated: boolean;
@@ -141,6 +143,7 @@ export class ImportTransaction implements ImportTransactionResponse {
             ? normalizeDedupSourceIds(dedup?.source_ids)
             : normalizeDedupSourceIds(response.dedupSourceIds);
         this.matching = matching;
+        this.previewState = response.previewState;
         this.isManuallyAnnotated = isCanonicalTruthy(annotation?.is_manually_annotated) || isCanonicalTruthy(response.isManuallyAnnotated);
 
         this.actualCategoryName = response.originalCategoryName;
@@ -477,6 +480,7 @@ export interface ImportTransactionResponse {
     readonly dedupType?: string;
     readonly dedupSourceIds?: Array<number | string> | string;
     readonly matching?: ImportMatchingPayload;
+    readonly previewState?: ImportPreviewStateSnapshot;
     readonly isManuallyAnnotated?: boolean;
     readonly selected?: boolean;
 }

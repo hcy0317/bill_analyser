@@ -90,6 +90,7 @@ for (const componentPath of [
 
 import { ImportTransaction } from '@/models/imported_transaction.ts';
 import ImportTransactionCheckDataTab from '@/views/desktop/transactions/import/tabs/ImportTransactionCheckDataTab.vue';
+import { previewStateSnapshot } from '../../../../helpers/importPreviewState.ts';
 
 function createTransaction(id: number, llm?: Record<string, unknown>): ImportTransaction {
     const transaction = ImportTransaction.of({
@@ -112,6 +113,14 @@ function createTransaction(id: number, llm?: Record<string, unknown>): ImportTra
             ...(llm ? { llm } : {})
         }
     } as never, id);
+    const rawStatus = String(llm?.['review_status'] || llm?.['lifecycle_status'] || '').trim();
+    transaction.previewState = llm
+        ? previewStateSnapshot(['llm'], {
+            llm: ['accepted', 'rejected', 'skipped'].includes(rawStatus)
+                ? rawStatus as 'accepted' | 'rejected' | 'skipped'
+                : 'pending',
+        })
+        : previewStateSnapshot(['parser']);
     (transaction as ImportTransaction & { _previewId: number })._previewId = id;
     return transaction;
 }
@@ -232,7 +241,10 @@ describe('desktop LLM memory authority', () => {
         const transaction = createTransaction(47);
         const { bindings, props } = createReactiveBindings(transaction);
         await bindings.refreshLLMSessionSignalMemory(true);
-        expect(bindings.getImportPreviewSignalViewModel(transaction).llm).toMatchObject({ status: 'accepted' });
+        expect(bindings.getImportPreviewSignalViewModel(transaction)).toMatchObject({
+            llm: null,
+            parser: expect.any(Object)
+        });
 
         props.previewMetadata = {
             counts: {
@@ -302,7 +314,7 @@ describe('desktop LLM memory authority', () => {
         });
     });
 
-    test('legacy llm evidence without an authoritative status can use memory feedback', async () => {
+    test('legacy llm memory cannot override the typed pending decision', async () => {
         mockGetLLMMemoryEvents.mockResolvedValue({
             data: { result: { events: [memoryEvent(31, 43, 'accept')] } }
         });
@@ -319,7 +331,7 @@ describe('desktop LLM memory authority', () => {
 
         expect(transaction.matching?.llm?.review_status).toBe('accepted');
         expect(bindings.getImportPreviewSignalViewModel(transaction).llm).toMatchObject({
-            status: 'accepted'
+            status: 'pending'
         });
     });
 
@@ -330,7 +342,10 @@ describe('desktop LLM memory authority', () => {
         const transaction = createTransaction(44);
         const bindings = createBindings(transaction);
         await flushMemoryRequest();
-        expect(bindings.getImportPreviewSignalViewModel(transaction).llm).toMatchObject({ status: 'accepted' });
+        expect(bindings.getImportPreviewSignalViewModel(transaction)).toMatchObject({
+            llm: null,
+            parser: expect.any(Object)
+        });
 
         bindings.clearLLMRecommendationState(transaction);
         bindings.applyLLMSignalMemoryToTransactions([transaction]);

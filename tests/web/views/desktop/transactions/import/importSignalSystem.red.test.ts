@@ -1,4 +1,5 @@
 import { describe, expect, test } from '@jest/globals';
+import { previewStateSnapshot } from '../../../../helpers/importPreviewState.ts';
 
 import { TransactionType } from '@/core/transaction.ts';
 import { ImportTransaction } from '@/models/imported_transaction.ts';
@@ -276,7 +277,8 @@ describe('import signal system RED contracts', () => {
             llm_confidence: LLM_FIXTURE.confidence,
             llm_category_path: '餐饮/咖啡',
             llm_source_account: '招商银行',
-            llm_destination_account: '支付宝'
+            llm_destination_account: '支付宝',
+            preview_state: previewStateSnapshot(['llm'])
         } as never);
         const indexView = buildImportPreviewIndexSignalViewModel(indexItem);
 

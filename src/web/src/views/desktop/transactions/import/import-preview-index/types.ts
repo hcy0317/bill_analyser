@@ -4,6 +4,7 @@ import type {
 } from '../checkDataFilters.ts';
 import type { ImportPreviewRawFlag, ImportPreviewRawSignalStatus, ImportPreviewSignalStatus } from '../checkDataMatching.ts';
 import type { ImportHistoryBillSummaryPayload } from '@/models/import_matching.ts';
+import type { ImportPreviewStateSnapshot } from '@/models/import_preview_state.ts';
 
 export interface ImportPreviewIndexItem extends ImportCheckVisibleTransactionLike {
     id: number;
@@ -15,6 +16,7 @@ export interface ImportPreviewIndexItem extends ImportCheckVisibleTransactionLik
     parserTags: string[];
     dedupType: string;
     dedupSourceIds: Array<number | string>;
+    previewState?: ImportPreviewStateSnapshot;
     transferStatus?: ImportPreviewSignalStatus | null;
     transferTitle?: string;
     learningStatus?: ImportPreviewRawSignalStatus;
@@ -208,6 +210,7 @@ export interface ImportPreviewIndexResponseItem {
     recurring_candidate_count?: number;
     recurring_match_reasons?: string;
     recurring_matched_date?: string;
+    preview_state?: ImportPreviewStateSnapshot;
 }
 
 export const SERVER_PAGED_SORTABLE_COLUMNS = new Set<string>([

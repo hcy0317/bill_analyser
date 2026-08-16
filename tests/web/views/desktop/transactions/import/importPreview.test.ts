@@ -521,13 +521,15 @@ describe('import preview server-paged reset guards', () => {
 
     test('check-data signal column uses the transfer signal adapter', () => {
         const signalSource = readSource('src/views/desktop/transactions/import/check-data-tab/useImportCheckDataSignals.ts');
-        const signalModelIndex = signalSource.indexOf('const viewModel = buildImportPreviewSignalViewModel({');
-        const signalModelSource = signalSource.slice(signalModelIndex, signalSource.indexOf('}, {', signalModelIndex));
+        const signalModelIndex = signalSource.indexOf('const viewModel = buildImportPreviewSignalViewModelFromSnapshot({');
+        const signalModelSource = signalSource.slice(signalModelIndex, signalSource.indexOf('}, item.previewState, {', signalModelIndex));
 
         expect(signalSource).toContain('getImportPreviewTransferSignalStatus,');
         expect(signalSource).toContain('getImportPreviewTransferSignalTitle');
+        expect(signalSource).toContain('buildImportPreviewSignalViewModelFromSnapshot,');
         expect(signalModelSource).toContain('transferStatus: getImportPreviewTransferSignalStatus(item),');
         expect(signalModelSource).toContain('transferTitle: getImportPreviewTransferSignalTitle(item),');
+        expect(signalSource).toContain('}, item.previewState, {');
     });
 
     test('check-data server paging no longer fetches a full preview index before filtering', () => {

@@ -1,10 +1,10 @@
 use std::collections::BTreeMap;
 
 use bill_analyser_core::{
-    attach_import_preview_matching_payload, build_import_history_rewrite_ack_token,
-    build_import_history_rewrite_operation_id, build_import_preview_filter_index_item,
-    build_import_preview_matching_payload, coerce_preview_selected_value,
-    expected_preview_state_is_valid, import_preview_index_success,
+    attach_import_preview_matching_payload, attach_import_preview_state_snapshot_to_canonical_row,
+    build_import_history_rewrite_ack_token, build_import_history_rewrite_operation_id,
+    build_import_preview_filter_index_item, build_import_preview_matching_payload,
+    coerce_preview_selected_value, expected_preview_state_is_valid, import_preview_index_success,
     import_preview_matching_feedback_has_unknown_signal_status, import_preview_page_success,
     import_preview_signal_value_is_truthy, import_session_cancel_missing_response,
     import_session_cancel_success_response, import_session_not_found_response,
@@ -178,6 +178,70 @@ fn filter_index_projects_legacy_row_through_preview_state_kernel() {
         serde_json::to_value(&item.preview_state).unwrap()["signals"],
         json!(["transfer", "learning"])
     );
+}
+
+#[test]
+fn canonical_preview_row_response_attaches_the_kernel_snapshot() {
+    let cases: Vec<PreviewStateFixtureCase> = serde_json::from_str(include_str!(
+        "../../fixtures/import_preview_state_kernel_v1.json"
+    ))
+    .expect("preview state fixture");
+
+    for case in cases {
+        let mut row = case
+            .legacy_payload
+            .as_object()
+            .expect("legacy preview payload")
+            .clone();
+        attach_import_preview_matching_payload(&mut row);
+        attach_import_preview_state_snapshot_to_canonical_row(&mut row);
+
+        let snapshot: bill_analyser_core::PreviewState = serde_json::from_value(
+            row.get("preview_state")
+                .cloned()
+                .expect("typed preview_state snapshot"),
+        )
+        .expect("valid preview_state snapshot");
+        assert_eq!(
+            snapshot.signals.names(),
+            case.expected_signals,
+            "{} response signals",
+            case.name
+        );
+        assert_eq!(
+            snapshot.issues.codes(),
+            case.expected_issues,
+            "{} response issues",
+            case.name
+        );
+        assert_eq!(
+            snapshot.is_confirmable(),
+            case.expected_confirmable,
+            "{} response confirmable",
+            case.name
+        );
+    }
+}
+
+#[test]
+fn canonical_preview_row_without_identity_annotations_fails_closed() {
+    let mut row = json!({
+        "preview_type": "expense",
+        "preview_matching_feedback": {}
+    })
+    .as_object()
+    .expect("preview row")
+    .clone();
+    attach_import_preview_matching_payload(&mut row);
+    attach_import_preview_state_snapshot_to_canonical_row(&mut row);
+
+    let snapshot: bill_analyser_core::PreviewState =
+        serde_json::from_value(row["preview_state"].clone()).expect("typed snapshot");
+    assert!(snapshot.issues.contains(ReviewIssueCode::MissingCategory));
+    assert!(snapshot
+        .issues
+        .contains(ReviewIssueCode::MissingSourceAccount));
+    assert!(!snapshot.is_confirmable());
 }
 
 #[test]

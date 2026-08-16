@@ -1,4 +1,5 @@
 import type { ImportHistoryBillSummaryPayload, ImportMatchingSourcePayload } from '@/models/import_matching.ts';
+import type { ImportPreviewStateSignalFamily } from '@/models/import_preview_state.ts';
 
 export interface ImportCheckMatchingContextState {
     parserId?: string;
@@ -97,6 +98,7 @@ export interface ImportPreviewSignalViewModel {
     learning: ImportPreviewSignalReviewView | null;
     llm: ImportPreviewSignalReviewView | null;
     recurring: ImportPreviewSignalRecurringView | null;
+    signalFamilies?: ImportPreviewStateSignalFamily[];
     hasAnySignal: boolean;
 }
 

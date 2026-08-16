@@ -1,4 +1,5 @@
 import type { ImportMatchingPayload, ImportMatchingRawFlag } from '@/models/import_matching.ts';
+import type { ImportPreviewStateSnapshot } from '@/models/import_preview_state.ts';
 import { CategoryType } from '@/core/category.ts';
 
 export interface ImportPreviewLLMMatchingPayload {
@@ -80,6 +81,7 @@ export interface ImportPreviewRecord {
     preview_parser_id?: string;
     preview_parser_tags?: string[];
     matching?: ImportPreviewMatchingPayload;
+    preview_state?: ImportPreviewStateSnapshot;
     preview_is_manually_annotated?: boolean;
     preview_selected?: boolean;
     selected?: boolean;

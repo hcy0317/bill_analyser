@@ -6,3 +6,4 @@ export * from './check-data-matching/historyRewrite.ts';
 export * from './check-data-matching/signalFilter.ts';
 export * from './check-data-matching/signalStatus.ts';
 export * from './check-data-matching/signalViewModel.ts';
+export * from './check-data-matching/previewStateAdapter.ts';

@@ -155,7 +155,6 @@ import {
 import {
     buildImportPreviewHistoryRewriteAcknowledgement,
     buildImportPreviewHistoryRewriteOperationAcknowledgement,
-    buildImportPreviewSignalViewModel,
     matchesImportPreviewSignalFilter,
     type ImportPreviewHistoryRewriteAcknowledgement,
     type ImportPreviewHistoryRewriteAcknowledgementOperation,
@@ -163,6 +162,7 @@ import {
     type ImportPreviewSignalViewModel,
     type ImportPreviewVisibleSignalFilterValue
 } from '@/views/desktop/transactions/import/checkDataMatching.ts';
+import { buildImportPreviewSignalViewModelFromRecord } from '@/views/desktop/transactions/import/importPreviewSignalProjection.ts';
 
 const props = defineProps<{
     f7route: Router.Route;
@@ -207,75 +207,14 @@ const filteredRows = computed<MobileImportPreviewRow[]>(() => rows.value.filter(
 const selectedRows = computed<MobileImportPreviewRow[]>(() => rows.value.filter(row => row.selected));
 const selectedHistoryRewriteCount = computed<number>(() => selectedRows.value.filter(row => !!historyOperation(row)).length);
 
-function buildSignal(record: ImportPreviewRecord): ImportPreviewSignalViewModel {
-    const matching = record.matching;
-    const llm = matching?.llm || {};
-    return buildImportPreviewSignalViewModel({
-        parserId: record.preview_parser_id || matching?.parser?.id,
-        parserTags: record.preview_parser_tags || matching?.parser?.tags,
-        dedupType: record.dedup_type || matching?.dedup?.type,
-        dedupSourceIds: Array.isArray(record.dedup_source_ids) ? record.dedup_source_ids : matching?.dedup?.source_ids,
-        dedupSourceCount: matching?.dedup?.source_count,
-        dedupSourceLabels: matching?.dedup?.source_labels,
-        dedupSources: matching?.dedup?.sources,
-        parserIdChain: matching?.parser?.source_chain,
-        reconciliationType: matching?.reconciliation?.candidate_type,
-        reconciliationStatus: matching?.reconciliation?.status,
-        reconciliationTitle: matching?.reconciliation?.signal_label,
-        reconciliationSourceChain: matching?.reconciliation?.source_chain,
-        reconciliationPlannedOperation: matching?.reconciliation?.planned_operation,
-        reconciliationHistoryBillId: matching?.reconciliation?.history_bill_id,
-        reconciliationHistoryBillVersion: matching?.reconciliation?.history_bill_version,
-        reconciliationHistorySummary: matching?.reconciliation?.history_summary,
-        reconciliationOperationId: matching?.reconciliation?.operation_id,
-        reconciliationAcknowledgementToken: matching?.reconciliation?.acknowledgement_token,
-        reconciliationDestructiveAckRequired: !!matching?.reconciliation?.destructive_ack_required,
-        reconciliationNotice: matching?.reconciliation?.notice || matching?.annotation?.history_rewrite_notice,
-        transferStatus: normalizeSignalStatus(matching?.transfer?.review_status, record.transfer_suggestion_reason),
-        transferTitle: record.transfer_suggestion_reason || matching?.transfer?.reason,
-        transferCandidateType: matching?.transfer?.candidate_type,
-        transferLearningLevel: matching?.transfer?.learning_level || matching?.transfer?.level || record.transfer_suggestion_level,
-        transferSuppressed: matching?.transfer?.suppressed,
-        transferPairOrder: matching?.transfer?.pair_order,
-        transferSourceChain: matching?.transfer?.source_chain,
-        learningStatus: normalizeSignalStatus(matching?.learning?.review_status, record.learning_recommendation_reason),
-        learningTitle: record.learning_recommendation_reason || matching?.learning?.reason,
-        learningSummary: record.learning_recommendation_summary || matching?.learning?.summary,
-        learningMode: matching?.learning?.mode || '',
-        learningSignalState: matching?.learning?.signal_state || '',
-        learningAutoApplied: !!matching?.learning?.auto_apply,
-        llmStatus: normalizeSignalStatus(llm.review_status, llm.reason),
-        llmTitle: llm.reason || '',
-        llmSummary: '',
-        llmConfidence: Number(llm.confidence || 0),
-        llmCategoryPath: [llm.suggested_main_category || '', llm.suggested_sub_category || ''].filter(Boolean).join('/'),
-        llmSourceAccount: llm.suggested_source_account || '',
-        llmDestinationAccount: llm.suggested_destination_account || '',
-        recurringCandidateCount: Number(record.preview_recurring_candidate_count || matching?.recurring?.candidate_count || 0),
-        recurringTitle: record.preview_recurring_name || matching?.recurring?.name || '',
-        recurringPrimaryReason: record.preview_recurring_match_reasons || matching?.recurring?.match_reasons || ''
-    }, {
-        formatAmountWithCurrency: formatAmountToLocalizedNumeralsWithCurrency
-    });
-}
-
-function normalizeSignalStatus(status: unknown, fallbackText: unknown): 'pending' | 'accepted' | 'rejected' | 'skipped' | null {
-    const normalizedStatus = String(status || '').trim().toLowerCase();
-    if (normalizedStatus === 'accepted' || normalizedStatus === 'rejected' || normalizedStatus === 'skipped') {
-        return normalizedStatus;
-    }
-    if (normalizedStatus === 'pending' || String(fallbackText || '').trim()) {
-        return 'pending';
-    }
-    return null;
-}
-
 function normalizeRows(preview: ImportPreviewRecord[]): MobileImportPreviewRow[] {
     return preview.map(record => ({
         id: Number(record.id),
         record,
         selected: !!(record.preview_selected ?? record.selected),
-        signal: buildSignal(record),
+        signal: buildImportPreviewSignalViewModelFromRecord(record, {
+            formatAmountWithCurrency: formatAmountToLocalizedNumeralsWithCurrency
+        }),
         busy: false
     })).filter(row => Number.isFinite(row.id) && row.id > 0);
 }

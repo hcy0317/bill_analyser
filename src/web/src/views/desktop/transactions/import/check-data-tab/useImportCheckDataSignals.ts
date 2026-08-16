@@ -6,7 +6,7 @@ import type { ImportTransaction } from '@/models/imported_transaction.ts';
 import type { ImportPreviewLLMMatchingPayload } from '../importPreview.ts';
 import {
     buildImportPreviewHistoryRewriteOperationAcknowledgement,
-    buildImportPreviewSignalViewModel,
+    buildImportPreviewSignalViewModelFromSnapshot,
     normalizeImportPreviewSignalStatusAlias,
     resolveImportPreviewSignalStatus,
     type ImportCheckMatchingSourceContext,
@@ -272,6 +272,7 @@ export function useImportCheckDataSignals(options: ImportCheckDataSignalsOptions
             String(llmPayload.reason || ''),
             String(llmPayload.confidence ?? ''),
             String(llmPayload.suppressed ?? ''),
+            JSON.stringify(item.previewState ?? null),
             String(!!item.hasRecurringMatch()),
             options.getRecurringMatchSummary(item),
             Number(item.recurringCandidateCount || 0),
@@ -300,7 +301,7 @@ export function useImportCheckDataSignals(options: ImportCheckDataSignalsOptions
             llmPayload.lifecycle_status,
             llmPayload.signal_state
         );
-        const viewModel = buildImportPreviewSignalViewModel({
+        const viewModel = buildImportPreviewSignalViewModelFromSnapshot({
             parserId: item.parserId,
             parserTags: item.parserTags,
             dedupType: item.dedupType,
@@ -365,7 +366,7 @@ export function useImportCheckDataSignals(options: ImportCheckDataSignalsOptions
             recurringTitle: options.getRecurringMatchSummary(item),
             recurringCandidateCount: item.recurringCandidateCount,
             recurringPrimaryReason: options.getPrimaryRecurringReason(item)
-        }, {
+        }, item.previewState, {
             ...importPreviewSignalSharedContext.value.options,
             formatAmountWithCurrency: options.formatAmountWithCurrency,
             currentParserId: item.parserId,

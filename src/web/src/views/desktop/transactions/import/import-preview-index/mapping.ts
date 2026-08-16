@@ -2,7 +2,7 @@ import { TransactionType } from '@/core/transaction.ts';
 
 import { matchesImportTransactionCheckDataFilters } from '../checkDataFilters.ts';
 
-import { buildImportPreviewSignalViewModel } from '../checkDataMatching.ts';
+import { buildImportPreviewSignalViewModelFromSnapshot } from '../checkDataMatching.ts';
 
 import type { ImportPreviewSignalViewModel } from '../checkDataMatching.ts';
 import type { ImportPreviewIndexFilterContext, ImportPreviewIndexItem, ImportPreviewIndexPageResult, ImportPreviewIndexResponseItem } from './types.ts';
@@ -40,6 +40,7 @@ export function mapImportPreviewIndexResponseItem(item: ImportPreviewIndexRespon
         parserTags: item.parser_tags || [],
         dedupType: item.dedup_type || '',
         dedupSourceIds: item.dedup_source_ids || [],
+        previewState: item.preview_state,
         transferStatus: item.transfer_status ?? null,
         transferTitle: item.transfer_title || '',
         learningStatus: learningStatusPresent ? (item.learning_status ?? null) : undefined,
@@ -127,7 +128,7 @@ export function collectImportPreviewIndexAnnotationIssues(item: ImportPreviewInd
 }
 
 export function buildImportPreviewIndexSignalViewModel(item: ImportPreviewIndexItem): ImportPreviewSignalViewModel {
-    return buildImportPreviewSignalViewModel({
+    return buildImportPreviewSignalViewModelFromSnapshot({
         parserId: item.parserId,
         parserTags: item.parserTags,
         dedupType: item.dedupType,
@@ -174,7 +175,7 @@ export function buildImportPreviewIndexSignalViewModel(item: ImportPreviewIndexI
         recurringTitle: item.recurringMatchReasons || '',
         recurringCandidateCount: Number(item.recurringCandidateCount || 0),
         recurringPrimaryReason: getPrimaryRecurringReason(item),
-    });
+    }, item.previewState);
 }
 
 // 预览索引本地兜底筛选复用 check-data 可见筛选语义，保持 server-paged 与当前页草稿的信号/标注判断一致。

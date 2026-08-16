@@ -4,6 +4,11 @@ const { computed } = require('vue');
 
 import { TransactionType } from '@/core/transaction.ts';
 import { ImportTransaction } from '@/models/imported_transaction.ts';
+import type {
+    ImportPreviewFamilyEvidence,
+    ImportPreviewStateSignalStatus,
+    ImportPreviewStateSnapshot,
+} from '@/models/import_preview_state.ts';
 import {
     resolveSignalStatusAuthority,
     serializeSignalCacheValue,
@@ -12,7 +17,16 @@ import {
 import { matchesImportPreviewSignalFilter } from '@/views/desktop/transactions/import/checkDataMatching.ts';
 
 function createTransaction(matching: Record<string, unknown> = {}): ImportTransaction {
-    return ImportTransaction.of({
+    const resolvedMatching = {
+        parser: { id: 'wechat', tags: ['parser:wechat'] },
+        learning: {
+            review_status: 'pending',
+            score: 0.91,
+            reason: 'learned merchant'
+        },
+        ...matching
+    } as Record<string, Record<string, unknown>>;
+    const transaction = ImportTransaction.of({
         type: TransactionType.Expense,
         categoryId: 'food',
         originalCategoryName: '餐饮',
@@ -28,16 +42,68 @@ function createTransaction(matching: Record<string, unknown> = {}): ImportTransa
         comment: '午餐',
         counterparty: '测试商户',
         paymentMethod: '微信支付',
-        matching: {
-            parser: { id: 'wechat', tags: ['parser:wechat'] },
-            learning: {
-                review_status: 'pending',
-                score: 0.91,
-                reason: 'learned merchant'
-            },
-            ...matching
-        }
+        matching: resolvedMatching,
     } as never, 4);
+    transaction.previewState = snapshotForMatching(resolvedMatching);
+    return transaction;
+}
+
+function evidenceFor(section: Record<string, unknown> | undefined): ImportPreviewFamilyEvidence {
+    const rawStatus = String(section?.['review_status'] || section?.['status'] || '').trim().toLowerCase();
+    const status: ImportPreviewStateSignalStatus = [
+        'pending',
+        'accepted',
+        'rejected',
+        'skipped',
+        'auto_applied',
+        'needs_review',
+        'suppressed',
+    ].includes(rawStatus)
+        ? rawStatus as ImportPreviewStateSignalStatus
+        : (rawStatus ? 'unknown' : 'absent');
+    return { status, has_evidence: !!section };
+}
+
+function snapshotForMatching(
+    matching: Record<string, Record<string, unknown>>,
+): ImportPreviewStateSnapshot {
+    const transfer = evidenceFor(matching['transfer']);
+    const history = evidenceFor(matching['reconciliation']);
+    const learning = evidenceFor(matching['learning']);
+    const llm = evidenceFor(matching['llm']);
+    const signals: ImportPreviewStateSnapshot['signals'] = [];
+    if (transfer.status === 'pending' || transfer.status === 'accepted' || transfer.status === 'auto_applied') {
+        signals.push('transfer');
+    }
+    if (
+        matching['reconciliation']?.['planned_operation']
+        && history.status !== 'unknown'
+        && history.status !== 'suppressed'
+    ) {
+        signals.push('history');
+        history.status = history.status === 'absent' ? 'pending' : history.status;
+        history.has_evidence = true;
+    }
+    if (!['absent', 'suppressed', 'unknown'].includes(learning.status)) {
+        signals.push('learning');
+    }
+    if (!['absent', 'suppressed', 'unknown'].includes(llm.status)) {
+        signals.push('llm');
+    }
+    if (signals.length === 0 && matching['parser']) {
+        signals.push('parser');
+    }
+    return {
+        projection_version: 1,
+        signals,
+        issues: [],
+        decisions: { transfer, history, learning, llm },
+        effective: {
+            category_id: null,
+            source_account_id: null,
+            destination_account_id: null,
+        },
+    };
 }
 
 function createSignals(transaction: ImportTransaction) {
@@ -59,6 +125,31 @@ function createSignals(transaction: ImportTransaction) {
 }
 
 describe('useImportCheckDataSignals', () => {
+    test('uses the typed snapshot as the production membership authority', () => {
+        const transaction = createTransaction();
+        transaction.previewState = {
+            projection_version: 1,
+            signals: ['parser'],
+            issues: [],
+            decisions: {
+                transfer: { status: 'absent', has_evidence: false },
+                history: { status: 'absent', has_evidence: false },
+                learning: { status: 'absent', has_evidence: false },
+                llm: { status: 'absent', has_evidence: false },
+            },
+            effective: {
+                category_id: null,
+                source_account_id: null,
+                destination_account_id: null,
+            },
+        };
+
+        const viewModel = createSignals(transaction).getImportPreviewSignalViewModel(transaction);
+
+        expect(matchesImportPreviewSignalFilter(viewModel, 'parser')).toBe(true);
+        expect(matchesImportPreviewSignalFilter(viewModel, 'learning')).toBe(false);
+    });
+
     test('projects learning and LLM authority, reuses cache, and invalidates it on signal changes', () => {
         const transaction = createTransaction({
             llm: {
@@ -133,33 +224,16 @@ describe('useImportCheckDataSignals', () => {
         expect(signals.getImportPreviewHistoryRewriteOperation(transaction)).toBeNull();
     });
 
-    test.each([
-        [false, false, false, false, false, null],
-        [true, true, false, false, false, 'pending'],
-        [true, false, true, false, false, 'accepted'],
-        [true, false, false, true, false, 'rejected'],
-        [true, false, false, false, true, 'skipped'],
-        [true, false, false, false, false, null]
-    ] as const)(
-        'derives legacy learning status from transaction helpers',
-        (hasLearning, pending, accepted, rejected, skipped, expected) => {
-            const transaction = createTransaction({ learning: { reason: 'legacy signal' } });
-            transaction.parserId = '';
-            transaction.parserTags = [];
-            transaction.hasLearningRecommendation = () => hasLearning;
-            transaction.hasPendingLearningRecommendation = () => pending;
-            transaction.isLearningRecommendationAccepted = () => accepted;
-            transaction.isLearningRecommendationRejected = () => rejected;
-            transaction.isLearningRecommendationSkipped = () => skipped;
-            transaction.isTransferProtectedLearningSkip = () => false;
+    test.each(['pending', 'accepted', 'rejected', 'skipped'] as const)(
+        'projects typed learning decision status %s',
+        expected => {
+            const transaction = createTransaction({
+                learning: { review_status: expected, reason: 'typed signal' },
+            });
 
-            const viewModel = createSignals(transaction).getImportPreviewSignalViewModel(transaction);
-            if (expected !== null) {
-                expect(viewModel.learning?.status).toBe(expected);
-            } else {
-                expect(viewModel).toBeDefined();
-            }
-        }
+            expect(createSignals(transaction).getImportPreviewSignalViewModel(transaction).learning?.status)
+                .toBe(expected);
+        },
     );
 
     test('preserves explicit-null status authority and cache sentinel values', () => {

@@ -197,6 +197,7 @@ export function buildImportTransactionFromPreviewRecord(
         dedupType: item.dedup_type || '',
         dedupSourceIds: item.dedup_source_ids || [],
         matching: matchingPayload,
+        previewState: item.preview_state,
         isManuallyAnnotated: !!item.preview_is_manually_annotated,
         selected: !!(item.preview_selected ?? item.selected)
     };

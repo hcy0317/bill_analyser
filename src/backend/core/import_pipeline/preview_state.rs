@@ -307,12 +307,57 @@ fn effective_identity(id: Option<i64>, valid: bool) -> Option<i64> {
     id.filter(|id| *id > 0 && valid)
 }
 
+/// Attach the versioned preview-state snapshot to an API-ready canonical row.
+///
+/// Staging identity validation has already normalized the row and recorded any
+/// rejected identity in `matching.identity_validation`. The response projector
+/// consumes that evidence instead of querying taxonomy tables for every row.
+pub fn attach_import_preview_state_snapshot_to_canonical_row(
+    preview_item: &mut Map<String, Value>,
+) {
+    let identity = canonical_row_identity_input(preview_item);
+    let snapshot = derive_preview_state_from_legacy_row_with_identity(preview_item, identity);
+    preview_item.insert(
+        "preview_state".to_string(),
+        serde_json::to_value(snapshot).unwrap_or_else(|_| json!({})),
+    );
+}
+
 fn derive_preview_state_from_legacy_row(
     preview_item: &Map<String, Value>,
     categories_by_id: &BTreeMap<i64, CategoryLookup>,
     accounts_by_id: &BTreeMap<i64, AccountLookup>,
 ) -> PreviewState {
     let preview_type = string_field_from_map(preview_item, "preview_type");
+    let category_id = integer_lookup_key(preview_item.get("category_id"));
+    let source_account_id = integer_lookup_key(preview_item.get("preview_source_account_id"));
+    let destination_account_id =
+        integer_lookup_key(preview_item.get("preview_destination_account_id"));
+
+    derive_preview_state_from_legacy_row_with_identity(
+        preview_item,
+        PreviewIdentityInput {
+            category_required: preview_category_required_for_state(&preview_type),
+            category_id,
+            category_valid: category_id.is_some_and(|id| categories_by_id.contains_key(&id)),
+            source_account_required: true,
+            source_account_id,
+            source_account_valid: source_account_id
+                .is_some_and(|id| accounts_by_id.contains_key(&id)),
+            destination_account_required: preview_destination_account_required_for_state(
+                &preview_type,
+            ),
+            destination_account_id,
+            destination_account_valid: destination_account_id
+                .is_some_and(|id| accounts_by_id.contains_key(&id)),
+        },
+    )
+}
+
+fn derive_preview_state_from_legacy_row_with_identity(
+    preview_item: &Map<String, Value>,
+    identity: PreviewIdentityInput,
+) -> PreviewState {
     let matching = preview_matching_payload(preview_item);
     let parser_present = !string_field_from_map(preview_item, "preview_parser_id")
         .trim()
@@ -342,11 +387,6 @@ fn derive_preview_state_from_legacy_row(
         })
         .and_then(|level| parse_preview_learning_level(&level));
 
-    let category_id = integer_lookup_key(preview_item.get("category_id"));
-    let source_account_id = integer_lookup_key(preview_item.get("preview_source_account_id"));
-    let destination_account_id =
-        integer_lookup_key(preview_item.get("preview_destination_account_id"));
-
     PreviewStateKernel::derive(PreviewStateInput {
         parser_present,
         platform_duplicate: dedup_type.trim().eq_ignore_ascii_case("platform_bank"),
@@ -355,22 +395,77 @@ fn derive_preview_state_from_legacy_row(
         history,
         learning,
         llm,
-        identity: PreviewIdentityInput {
-            category_required: preview_category_required_for_state(&preview_type),
-            category_id,
-            category_valid: category_id.is_some_and(|id| categories_by_id.contains_key(&id)),
-            source_account_required: true,
-            source_account_id,
-            source_account_valid: source_account_id
-                .is_some_and(|id| accounts_by_id.contains_key(&id)),
-            destination_account_required: preview_destination_account_required_for_state(
-                &preview_type,
-            ),
-            destination_account_id,
-            destination_account_valid: destination_account_id
-                .is_some_and(|id| accounts_by_id.contains_key(&id)),
-        },
+        identity,
     })
+}
+
+fn canonical_row_identity_input(preview_item: &Map<String, Value>) -> PreviewIdentityInput {
+    let preview_type = string_field_from_map(preview_item, "preview_type");
+    let (category_id, category_required, category_valid) =
+        canonical_identity_field(preview_item, "category_id", "category_id");
+    let (source_account_id, _, source_account_valid) =
+        canonical_identity_field(
+            preview_item,
+            "preview_source_account_id",
+            "source_account_id",
+        );
+    let (destination_account_id, destination_account_required, destination_account_valid) =
+        canonical_identity_field(
+            preview_item,
+            "preview_destination_account_id",
+            "destination_account_id",
+        );
+
+    PreviewIdentityInput {
+        category_required: category_required
+            || preview_category_required_for_state(&preview_type),
+        category_id,
+        category_valid,
+        source_account_required: true,
+        source_account_id,
+        source_account_valid,
+        destination_account_required: destination_account_required
+            || preview_destination_account_required_for_state(&preview_type),
+        destination_account_id,
+        destination_account_valid,
+    }
+}
+
+fn canonical_identity_field(
+    preview_item: &Map<String, Value>,
+    row_key: &str,
+    issue_field: &str,
+) -> (Option<i64>, bool, bool) {
+    let current_id = integer_lookup_key(preview_item.get(row_key));
+    let issue = preview_matching_payload(preview_item)
+        .and_then(|matching| object_field(matching.get("identity_validation")))
+        .and_then(|validation| validation.get("issues"))
+        .and_then(Value::as_array)
+        .and_then(|issues| {
+            issues.iter().find_map(|issue| {
+                let issue = issue.as_object()?;
+                (string_field_from_map(issue, "field") == issue_field).then_some(issue)
+            })
+        });
+
+    let Some(issue) = issue else {
+        return (
+            current_id,
+            current_id.is_some(),
+            current_id.is_some_and(|id| id > 0),
+        );
+    };
+    let reason = string_field_from_map(issue, "reason");
+    if reason == "missing" {
+        return (None, true, false);
+    }
+    let rejected_id = current_id
+        .or_else(|| integer_lookup_key(issue.get("value")))
+        .or(Some(0));
+    if reason == "same_as_source_account" {
+        return (rejected_id, true, true);
+    }
+    (rejected_id, true, false)
 }
 
 fn parser_section_has_evidence(section: &Map<String, Value>) -> bool {

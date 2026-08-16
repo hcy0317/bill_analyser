@@ -11,6 +11,10 @@ export function matchesImportPreviewSignalFilter(
         return true;
     }
 
+    if (viewModel.signalFamilies) {
+        return viewModel.signalFamilies.includes(filter);
+    }
+
     const normalizedDedupType = normalizeDedupType(viewModel.dedup?.dedupType);
     if (filter === 'parser') {
         return !!viewModel.parser

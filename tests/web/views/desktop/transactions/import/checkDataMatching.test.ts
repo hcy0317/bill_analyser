@@ -1,4 +1,5 @@
 import { describe, expect, test } from '@jest/globals';
+import { previewStateSnapshot } from '../../../../helpers/importPreviewState.ts';
 
 import {
     buildImportPreviewHistoryRewriteAcknowledgement,
@@ -556,6 +557,7 @@ describe('checkDataMatching helpers', () => {
             history_operation_id: 'history:canonical',
             history_acknowledgement_token: 'ack-token',
             history_destructive_ack_required: true,
+            preview_state: previewStateSnapshot(['history']),
             history_summary: {
                 bill_id: 9001,
                 date_time: '2026-07-01 09:30:00',
@@ -615,6 +617,7 @@ describe('checkDataMatching helpers', () => {
             learning_title: '',
             learning_summary: '',
             learning_mode: '',
+            preview_state: previewStateSnapshot(['parser']),
         }));
         const numericLearningIndex = buildImportPreviewIndexSignalViewModel(mapImportPreviewIndexResponseItem({
             id: 3,
@@ -625,6 +628,7 @@ describe('checkDataMatching helpers', () => {
             learning_summary: '',
             learning_mode: '',
             learning_score: 0.82,
+            preview_state: previewStateSnapshot(['learning']),
         }));
         const numericLlmIndex = buildImportPreviewIndexSignalViewModel(mapImportPreviewIndexResponseItem({
             id: 4,
@@ -633,6 +637,7 @@ describe('checkDataMatching helpers', () => {
             llm_status: 'pending',
             llm_title: '',
             llm_confidence: 0.71,
+            preview_state: previewStateSnapshot(['llm']),
         }));
 
         expect(matchesImportPreviewSignalFilter(learningIndex, 'parser')).toBe(true);

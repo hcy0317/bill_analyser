@@ -4,6 +4,7 @@
     "input": { "parser_present": true },
     "legacy_payload": {
       "preview_parser_id": "wechat",
+      "preview_source_account_id": 11,
       "preview_matching_feedback": {}
     },
     "expected_signals": ["parser"],
@@ -15,6 +16,7 @@
     "input": { "parser_present": true, "platform_duplicate": true },
     "legacy_payload": {
       "preview_parser_id": "wechat",
+      "preview_source_account_id": 11,
       "dedup_type": "platform_bank",
       "preview_matching_feedback": {}
     },
@@ -34,6 +36,7 @@
     },
     "legacy_payload": {
       "preview_parser_id": "wechat",
+      "preview_source_account_id": 11,
       "dedup_type": "platform_bank",
       "preview_matching_feedback": {
         "transfer": { "review_status": "pending", "candidate_type": "transfer" },
@@ -55,6 +58,8 @@
     },
     "legacy_payload": {
       "preview_type": "支出",
+      "category_id": 10,
+      "preview_source_account_id": 11,
       "preview_matching_feedback": {
         "transfer": {
           "review_status": "pending",
@@ -80,6 +85,7 @@
       "llm": { "status": "unknown", "has_evidence": true }
     },
     "legacy_payload": {
+      "preview_source_account_id": 11,
       "preview_matching_feedback": {
         "transfer": { "review_status": "__invalid_status__", "candidate_type": "transfer" },
         "reconciliation": {
@@ -144,6 +150,7 @@
     },
     "legacy_payload": {
       "preview_type": "transfer",
+      "category_id": 10,
       "preview_source_account_id": 23,
       "preview_destination_account_id": 23,
       "preview_matching_feedback": {

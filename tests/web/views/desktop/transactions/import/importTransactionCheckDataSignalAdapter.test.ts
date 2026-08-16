@@ -83,9 +83,10 @@ for (const componentPath of [
 
 import { ImportTransaction } from '@/models/imported_transaction.ts';
 import ImportTransactionCheckDataTab from '@/views/desktop/transactions/import/tabs/ImportTransactionCheckDataTab.vue';
+import { previewStateSnapshot } from '../../../../helpers/importPreviewState.ts';
 
 function createSignalTransaction(learning: Record<string, unknown> = {}, llm?: Record<string, unknown>): ImportTransaction {
-    return ImportTransaction.of({
+    const transaction = ImportTransaction.of({
         type: 3,
         categoryId: '1',
         originalCategoryName: '餐饮',
@@ -106,6 +107,42 @@ function createSignalTransaction(learning: Record<string, unknown> = {}, llm?: R
             ...(llm ? { llm } : {})
         }
     } as never, 0);
+    const signals: Array<'parser' | 'learning' | 'llm'> = [];
+    const statuses: Partial<Record<'learning' | 'llm', 'pending' | 'accepted' | 'rejected' | 'skipped'>> = {};
+    const addFamily = (family: 'learning' | 'llm', section: Record<string, unknown> | undefined): void => {
+        if (!section || section['review_status'] === null || section['suppressed'] === true) {
+            return;
+        }
+        const status = String(
+            section['review_status']
+            || section['status']
+            || section['lifecycle_status']
+            || section['signal_state']
+            || '',
+        ).trim().toLowerCase();
+        const hasEvidence = Object.entries(section).some(([key, value]) => (
+            !['review_status', 'status', 'lifecycle_status', 'signal_state', 'suppressed'].includes(key)
+            && value !== ''
+            && value !== null
+            && value !== undefined
+            && value !== 0
+            && value !== false
+        ));
+        if (!hasEvidence && !['accepted', 'rejected', 'skipped'].includes(status)) {
+            return;
+        }
+        signals.push(family);
+        statuses[family] = ['accepted', 'rejected', 'skipped'].includes(status)
+            ? status as 'accepted' | 'rejected' | 'skipped'
+            : 'pending';
+    };
+    addFamily('learning', learning);
+    addFamily('llm', llm);
+    if (signals.length === 0) {
+        signals.push('parser');
+    }
+    transaction.previewState = previewStateSnapshot(signals, statuses);
+    return transaction;
 }
 
 function createBindings(transaction: ImportTransaction): any {
@@ -201,6 +238,7 @@ describe('desktop import signal adapter', () => {
         expect(firstView.parser).toBeNull();
 
         transaction.matching!.llm!.suggested_category_id = 0;
+        transaction.previewState = previewStateSnapshot(['parser']);
         const secondView = bindings.getImportPreviewSignalViewModel(transaction);
         expect(secondView.llm).toBeNull();
         expect(secondView.parser).toEqual(expect.any(Object));
@@ -227,6 +265,7 @@ describe('desktop import signal adapter', () => {
         });
 
         (learningTransaction.matching!.learning as any).review_status = null;
+        learningTransaction.previewState = previewStateSnapshot(['parser']);
         expect(learningBindings.getImportPreviewSignalViewModel(learningTransaction)).toMatchObject({
             learning: null,
             parser: expect.any(Object)
@@ -242,6 +281,7 @@ describe('desktop import signal adapter', () => {
         });
 
         (llmTransaction.matching!.llm as any).review_status = null;
+        llmTransaction.previewState = previewStateSnapshot(['parser']);
         expect(llmBindings.getImportPreviewSignalViewModel(llmTransaction)).toMatchObject({
             llm: null,
             parser: expect.any(Object)
@@ -283,7 +323,10 @@ describe('desktop import signal adapter', () => {
             reason: 'legacy-memory'
         }]]);
         bindings.applyLLMSignalMemoryToTransactions([transaction]);
-        expect(bindings.getImportPreviewSignalViewModel(transaction).llm).toMatchObject({ status: 'accepted' });
+        expect(bindings.getImportPreviewSignalViewModel(transaction)).toMatchObject({
+            llm: null,
+            parser: expect.any(Object)
+        });
 
         bindings.recordCurrentV2ServerLLMAuthority([transaction, createSignalTransaction()], currentV2Metadata);
         expect(bindings.getImportPreviewSignalViewModel(transaction)).toMatchObject({
