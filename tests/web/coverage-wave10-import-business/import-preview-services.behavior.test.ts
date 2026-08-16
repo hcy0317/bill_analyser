@@ -165,6 +165,109 @@ describe('import preview lifecycle service behavior', () => {
         expect(services.getImportPreviewRowVersionConflict(new Error('network'))).toBeNull();
     });
 
+    test('patches selection with the collection token and recognizes only its typed conflict', async () => {
+        axiosPut.mockResolvedValueOnce(dataEnvelope({
+            updated: 2,
+            selectionAction: 'patch',
+            metadata: { selection_hash: 'fnv1a32:22222222' }
+        }));
+
+        const response = await services.patchImportPreviewSelection({
+            sessionId: 'session/selection',
+            expectedSelectionHash: 'fnv1a32:11111111',
+            selectedIds: [7],
+            deselectedIds: [8]
+        });
+
+        expect(axiosPut).toHaveBeenCalledWith(
+            'bills/import/v2/preview/session%2Fselection/selection',
+            {
+                selectionAction: 'patch',
+                expected_selection_hash: 'fnv1a32:11111111',
+                selected_ids: [7],
+                deselected_ids: [8]
+            }
+        );
+        expect(response.data.result.metadata.selection_hash).toBe('fnv1a32:22222222');
+
+        axiosPut.mockResolvedValueOnce(dataEnvelope({
+            updated: 1,
+            selectionAction: 'patch',
+            metadata: { selection_hash: 'fnv1a32:33333333' }
+        }));
+        await services.patchImportPreviewSelection({
+            sessionId: 'legacy-selection',
+            selectedIds: [9],
+            deselectedIds: []
+        });
+        expect(axiosPut).toHaveBeenNthCalledWith(
+            2,
+            'bills/import/v2/preview/legacy-selection/selection',
+            {
+                selectionAction: 'patch',
+                selected_ids: [9],
+                deselected_ids: []
+            }
+        );
+
+        const conflict = services.getImportPreviewSelectionConflict({
+            response: {
+                status: 409,
+                data: {
+                    code: 'PREVIEW_SELECTION_CONFLICT',
+                    data: {
+                        expected_selection_hash: 'fnv1a32:11111111',
+                        actual_selection_hash: 'fnv1a32:22222222',
+                        metadata: { selection_hash: 'fnv1a32:22222222' },
+                        previewItems: [{ id: 7, preview_selected: false }]
+                    }
+                }
+            }
+        });
+        expect(conflict).toEqual({
+            expected_selection_hash: 'fnv1a32:11111111',
+            actual_selection_hash: 'fnv1a32:22222222',
+            metadata: { selection_hash: 'fnv1a32:22222222' },
+            previewItems: [{ id: 7, preview_selected: false }]
+        });
+        expect(services.getImportPreviewSelectionConflict({
+            response: { status: 409, data: { code: 'PREVIEW_ROW_VERSION_CONFLICT' } }
+        })).toBeNull();
+        for (const malformed of [
+            { response: { status: 409, data: { code: 'PREVIEW_SELECTION_CONFLICT' } } },
+            {
+                response: {
+                    status: 409,
+                    data: {
+                        code: 'PREVIEW_SELECTION_CONFLICT',
+                        data: {
+                            expected_selection_hash: '',
+                            actual_selection_hash: 'fnv1a32:22222222',
+                            metadata: {},
+                            previewItems: []
+                        }
+                    }
+                }
+            },
+            {
+                response: {
+                    status: 409,
+                    data: {
+                        code: 'PREVIEW_SELECTION_CONFLICT',
+                        data: {
+                            expected_selection_hash: 'fnv1a32:11111111',
+                            actual_selection_hash: 'fnv1a32:22222222',
+                            metadata: {},
+                            previewItems: [null]
+                        }
+                    }
+                }
+            }
+        ]) {
+            expect(services.getImportPreviewSelectionConflict(malformed)).toBeNull();
+        }
+    });
+
     test('omits absent preview filters and includes false/zero values when they are explicit', async () => {
         await services.getImportPreviewPage({ sessionId: 'plain session' });
         expect(axiosGet).toHaveBeenNthCalledWith(1, 'bills/import/v2/preview/plain%20session', { params: {} });

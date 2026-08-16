@@ -103,3 +103,21 @@ export interface ImportPreviewRowVersionConflict {
     actual_row_version: number;
     previewItem: ImportPreviewRecord;
 }
+
+export interface ImportPreviewSelectionMetadata {
+    selection_hash?: string;
+    [field: string]: unknown;
+}
+
+export interface ImportPreviewSelectionPatchResponse {
+    updated: number;
+    selectionAction: 'patch';
+    metadata: ImportPreviewSelectionMetadata;
+}
+
+export interface ImportPreviewSelectionConflict {
+    expected_selection_hash: string;
+    actual_selection_hash: string;
+    metadata: ImportPreviewSelectionMetadata;
+    previewItems: ImportPreviewRecord[];
+}

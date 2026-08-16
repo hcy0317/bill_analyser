@@ -3035,24 +3035,37 @@ async function flushPreviewSelectionAndBuildActionScope(): Promise<Record<string
     });
     const patch = buildSelectionPatch(rows);
     if (patch.selectedIds.length || patch.deselectedIds.length) {
-        const token = getCurrentToken();
-        const response = await fetch(`/api/bills/import/v2/preview/${encodeURIComponent(props.sessionId)}/selection`, {
-            method: 'PUT',
-            headers: {
-                'Content-Type': 'application/json',
-                ...(token ? { Authorization: `Bearer ${token}` } : {})
-            },
-            body: JSON.stringify({
-                selectionAction: 'patch',
+        try {
+            const response = await services.patchImportPreviewSelection({
+                sessionId: props.sessionId,
+                expectedSelectionHash: String(previewMetadata.value.selection_hash || '').trim() || undefined,
                 selectedIds: patch.selectedIds,
                 deselectedIds: patch.deselectedIds
-            })
-        });
-        const result = await response.json();
-        if (!response.ok || !result.success) throw new Error(result.error || 'Failed to flush preview selection');
-        serverPagedSelectionMetadataOverride.value = result.data?.metadata || null;
-        serverPagedSelectionBaselines.value = new Map();
-        recordServerPagedSelectionBaselines(getUniqueTrackedServerPagedTransactions());
+            });
+            serverPagedSelectionMetadataOverride.value = response.data.result.metadata
+                ? response.data.result.metadata as ImportPreviewMetadata
+                : null;
+            serverPagedSelectionBaselines.value = new Map();
+            recordServerPagedSelectionBaselines(getUniqueTrackedServerPagedTransactions());
+        } catch (error) {
+            const conflict = services.getImportPreviewSelectionConflict(error);
+            if (conflict) {
+                serverPagedSelectionMetadataOverride.value = conflict.metadata as ImportPreviewMetadata;
+                for (const previewItem of conflict.previewItems) {
+                    const target = getTrackedTransactionByPreviewId(Number(previewItem.id));
+                    if (!target) {
+                        continue;
+                    }
+                    target.selected = typeof previewItem.preview_selected === 'boolean'
+                        ? previewItem.preview_selected
+                        : !!previewItem.selected;
+                }
+                serverPagedSelectionBaselines.value = new Map();
+                recordServerPagedSelectionBaselines(getUniqueTrackedServerPagedTransactions());
+                throw new Error('Preview selection changed, please review before retrying');
+            }
+            throw error;
+        }
     }
     return buildPreviewActionScope();
 }

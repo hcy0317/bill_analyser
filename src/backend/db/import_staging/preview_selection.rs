@@ -187,6 +187,88 @@ pub fn update_preview_selection(
     })
 }
 
+/// 在同一个 session 锁事务内校验集合快照并应用显式 selection patch。
+pub fn patch_preview_selection(
+    pool: &PostgresPool,
+    session_id: &str,
+    selected_ids: &[i64],
+    deselected_ids: &[i64],
+    expected_selection_hash: Option<&str>,
+    user_id: UserId,
+) -> DbResult<usize> {
+    block_on_db(async move {
+        let user_id = user_id_i64(user_id)?;
+        let mut tx = pool.begin().await?;
+        let session_db_id =
+            lock_active_import_session_on_tx(&mut tx, session_id, user_id).await?;
+        let selected_snapshot = sqlx::query_scalar::<_, i64>(
+            "SELECT id FROM import_preview_rows WHERE session_id = $1 AND user_id = $2 AND selected = true ORDER BY id ASC",
+        )
+        .bind(session_db_id)
+        .bind(user_id)
+        .fetch_all(&mut *tx)
+        .await?;
+        let actual_selection_hash = preview_id_snapshot_hash(&selected_snapshot);
+        if let Some(expected) = expected_selection_hash {
+            if expected != actual_selection_hash {
+                return Err(DbError::preview_selection_conflict(
+                    expected,
+                    &actual_selection_hash,
+                ));
+            }
+        }
+
+        let target_ids = selected_ids
+            .iter()
+            .chain(deselected_ids.iter())
+            .copied()
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+        if !target_ids.is_empty() {
+            let scoped_count = sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM import_preview_rows WHERE session_id = $1 AND user_id = $2 AND id = ANY($3)",
+            )
+            .bind(session_db_id)
+            .bind(user_id)
+            .bind(&target_ids)
+            .fetch_one(&mut *tx)
+            .await?;
+            if usize::try_from(scoped_count).unwrap_or(usize::MAX) != target_ids.len() {
+                return Err(DbError::PreviewSelectionTargetMismatch {
+                    session_id: session_id.to_string(),
+                });
+            }
+        }
+
+        let mut updated = 0_u64;
+        for (ids, selected) in [(selected_ids, true), (deselected_ids, false)] {
+            if ids.is_empty() {
+                continue;
+            }
+            updated += sqlx::query(
+                r#"
+                UPDATE import_preview_rows
+                SET selected = $1,
+                    preview_payload = jsonb_set(preview_payload, '{preview_selected}', to_jsonb($1::boolean), true),
+                    updated_at = now(),
+                    version = version + 1
+                WHERE session_id = $2 AND user_id = $3 AND id = ANY($4)
+                "#,
+            )
+            .bind(selected)
+            .bind(session_db_id)
+            .bind(user_id)
+            .bind(ids)
+            .execute(&mut *tx)
+            .await?
+            .rows_affected();
+        }
+        tx.commit().await?;
+        Ok(usize::try_from(updated).unwrap_or(usize::MAX))
+    })
+}
+
 async fn lock_active_preview_parent_for_ids_on_tx(
     tx: &mut sqlx::Transaction<'_, Postgres>,
     preview_ids: &[i64],

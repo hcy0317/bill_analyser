@@ -136,7 +136,7 @@ pub use import_staging::{
     insert_parser_template, insert_parser_templates_batch, insert_preview_bill,
     insert_preview_bills_batch, mark_unprocessed_parser_templates_processed_for_session,
     parser_template_draft_from_standard_bill, parser_template_drafts_from_standard_bills,
-    preview_draft_from_dedup_bill, preview_draft_from_history_duplicate,
+    patch_preview_selection, preview_draft_from_dedup_bill, preview_draft_from_history_duplicate,
     preview_draft_from_history_transfer, preview_drafts_from_dedup_bills, preview_id_snapshot_hash,
     query_preview_page_by_session, record_import_learning_lifecycle_feedback,
     replace_preview_selection_with_patches, reset_session_preview_selection,

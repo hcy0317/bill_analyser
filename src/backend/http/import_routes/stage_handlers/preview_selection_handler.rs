@@ -1,5 +1,4 @@
 /// 处理跨页 selection action，并把 all/valid/needs-review/invert 语义委托给 DB 查询更新。
-use bill_analyser_db::update_preview_selection;
 
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn import_preview_selection_runtime_handler(
@@ -39,19 +38,49 @@ pub async fn import_preview_selection_runtime_handler(
         let deselected_ids = limited_id_list_field_from_object(object, &["deselected_ids", "deselectedIds"], 5000)
             .and_then(|ids| ids.ok_or_else(|| import_v2_error_response(400, "deselected_ids is required")));
         let deselected_ids = match deselected_ids { Ok(ids) => ids, Err(response) => return route_response(response) };
-        for preview_id in selected_ids.iter().chain(deselected_ids.iter()) {
-            match get_preview_bill_by_id(runtime.connection(), *preview_id, user_id) {
-                Ok(Some(row)) if row.session_id == session_id => {}
-                Ok(_) => return route_response(import_v2_error_response(400, "Preview selection is outside this session")),
-                Err(error) => return route_response(db_error_response(error)),
+        let selected_set = selected_ids.iter().copied().collect::<BTreeSet<_>>();
+        if deselected_ids.iter().any(|preview_id| selected_set.contains(preview_id)) {
+            return route_response(import_v2_error_response(
+                400,
+                "Preview selection patch contains overlapping ids",
+            ));
+        }
+        let expected_selection_hash = match expected_selection_hash_from_payload(object) {
+            Ok(hash) => hash,
+            Err(response) => return route_response(response),
+        };
+        let updated = match patch_preview_selection(
+            runtime.connection(),
+            &session_id,
+            &selected_ids,
+            &deselected_ids,
+            expected_selection_hash.as_deref(),
+            user_id,
+        ) {
+            Ok(updated) => updated,
+            Err(DbError::PreviewSelectionConflict { expected, actual }) => {
+                let response = preview_selection_conflict_response(
+                    runtime.connection(),
+                    &session_id,
+                    user_id,
+                    &selected_ids,
+                    &deselected_ids,
+                    &expected,
+                    &actual,
+                );
+                return route_response(match response {
+                    Ok(response) => response,
+                    Err(error) => db_error_response(error),
+                });
             }
-        }
-        if let Err(error) = update_preview_selection(runtime.connection(), &selected_ids, true, user_id) {
-            return route_response(db_error_response(error));
-        }
-        if let Err(error) = update_preview_selection(runtime.connection(), &deselected_ids, false, user_id) {
-            return route_response(db_error_response(error));
-        }
+            Err(DbError::PreviewSelectionTargetMismatch { .. }) => {
+                return route_response(import_v2_error_response(
+                    400,
+                    "Preview selection is outside this session",
+                ));
+            }
+            Err(error) => return route_response(db_error_response(error)),
+        };
         let metadata = match query_preview_page_by_session(
             runtime.connection(), &session_id, user_id,
             &ImportPreviewPageRequest { page: 1, page_size: 1, ..ImportPreviewPageRequest::default() },
@@ -60,7 +89,7 @@ pub async fn import_preview_selection_runtime_handler(
             Err(error) => return route_response(db_error_response(error)),
         };
         return route_response(import_v2_data_response(json!({
-            "updated": selected_ids.len() + deselected_ids.len(),
+            "updated": updated,
             "selectionAction": "patch",
             "metadata": metadata,
         })));
@@ -194,6 +223,74 @@ pub async fn import_preview_selection_runtime_handler(
         "selectionAction": action,
         "metadata": metadata,
     })))
+}
+
+fn expected_selection_hash_from_payload(
+    object: &Map<String, Value>,
+) -> Result<Option<String>, ImportV2RouteResponse> {
+    let Some(value) = first_value(
+        object,
+        &["expected_selection_hash", "expectedSelectionHash"],
+    ) else {
+        return Ok(None);
+    };
+    let Some(hash) = value.as_str().map(str::trim) else {
+        return Err(import_v2_error_response(400, "Invalid expected_selection_hash"));
+    };
+    let suffix = hash.strip_prefix("fnv1a32:");
+    if suffix.is_none_or(|suffix| {
+        suffix.len() != 8 || !suffix.bytes().all(|byte| byte.is_ascii_hexdigit())
+    }) {
+        return Err(import_v2_error_response(400, "Invalid expected_selection_hash"));
+    }
+    Ok(Some(hash.to_ascii_lowercase()))
+}
+
+fn preview_selection_conflict_response(
+    pool: &PostgresPool,
+    session_id: &str,
+    user_id: UserId,
+    selected_ids: &[i64],
+    deselected_ids: &[i64],
+    expected: &str,
+    actual: &str,
+) -> Result<ImportV2RouteResponse, DbError> {
+    let target_ids = selected_ids
+        .iter()
+        .chain(deselected_ids.iter())
+        .copied()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    let preview_items = get_preview_by_ids(pool, session_id, &target_ids, user_id)?
+        .into_iter()
+        .map(preview_row_to_value)
+        .collect::<Vec<_>>();
+    let metadata = query_preview_page_by_session(
+        pool,
+        session_id,
+        user_id,
+        &ImportPreviewPageRequest {
+            page: 1,
+            page_size: 1,
+            ..ImportPreviewPageRequest::default()
+        },
+    )?;
+    let metadata = serde_json::to_value(metadata.metadata).unwrap_or_else(|_| json!({}));
+    Ok(ImportV2RouteResponse {
+        status_code: 409,
+        body: json!({
+            "success": false,
+            "error": "Preview selection changed, please refresh",
+            "code": "PREVIEW_SELECTION_CONFLICT",
+            "data": {
+                "expected_selection_hash": expected,
+                "actual_selection_hash": actual,
+                "metadata": metadata,
+                "previewItems": preview_items,
+            },
+        }),
+    })
 }
 
 fn preview_selection_action_from_payload(

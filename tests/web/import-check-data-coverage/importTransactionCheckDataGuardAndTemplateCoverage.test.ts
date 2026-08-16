@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, jest, test } from '@jest/globals';
 
 const mockGetLLMMemoryEvents = jest.fn<(...args: Array<unknown>) => Promise<any>>();
+const mockPatchImportPreviewSelection = jest.fn<(...args: Array<unknown>) => Promise<any>>();
+const mockGetImportPreviewSelectionConflict = jest.fn<(...args: Array<unknown>) => any>();
 const mockLoadAllCategories = jest.fn();
 const mockLoadAllAccounts = jest.fn();
 let mockCurrentToken = 'coverage-token';
@@ -96,7 +98,11 @@ jest.mock('@/stores/transactionTag.ts', () => ({
 }));
 jest.mock('@/lib/services.ts', () => ({
     __esModule: true,
-    default: { getLLMMemoryEvents: mockGetLLMMemoryEvents }
+    default: {
+        getLLMMemoryEvents: mockGetLLMMemoryEvents,
+        patchImportPreviewSelection: mockPatchImportPreviewSelection,
+        getImportPreviewSelectionConflict: mockGetImportPreviewSelectionConflict
+    }
 }));
 jest.mock('@/lib/server_settings.ts', () => ({ isTransactionFromAIImageRecognitionEnabled: () => true }));
 jest.mock('@/lib/userstate.ts', () => ({ getCurrentToken: () => mockCurrentToken }));
@@ -380,6 +386,10 @@ beforeEach(() => {
     mockUiActions.length = 0;
     for (const key of Object.keys(mockSignalActions)) delete mockSignalActions[key];
     mockGetLLMMemoryEvents.mockResolvedValue({ data: { result: { events: [] } } });
+    mockPatchImportPreviewSelection.mockResolvedValue({
+        data: { result: { updated: 0, metadata: null } }
+    });
+    mockGetImportPreviewSelectionConflict.mockReturnValue(null);
     Object.defineProperty(globalThis, 'fetch', { configurable: true, writable: true, value: jest.fn() });
 });
 
@@ -536,30 +546,23 @@ describe('ImportTransactionCheckDataTab guard and template coverage', () => {
 
         selected.selected = true;
         deselected.selected = false;
-        fetchMock.mockResolvedValueOnce({
-            ok: true,
-            json: async () => ({ success: true, data: { metadata: { counts: { total: 3, selected: 2 } } } })
-        } as Response);
+        mockPatchImportPreviewSelection.mockResolvedValueOnce({
+            data: { result: { updated: 2, metadata: { counts: { total: 3, selected: 2 } } } }
+        });
         await expect(bindings.flushPreviewSelectionAndBuildActionScope()).resolves.toEqual(expect.any(Object));
-        expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({
-            selectionAction: 'patch',
+        expect(mockPatchImportPreviewSelection).toHaveBeenCalledWith(expect.objectContaining({
             selectedIds: [21],
             deselectedIds: [22]
-        });
+        }));
 
         selected.selected = false;
         mockCurrentToken = '';
-        fetchMock.mockResolvedValueOnce({
-            ok: false,
-            json: async () => ({ success: true })
-        } as Response);
+        mockPatchImportPreviewSelection.mockRejectedValueOnce(new Error('Failed to flush preview selection'));
         await expect(bindings.flushPreviewSelectionAndBuildActionScope()).rejects.toThrow('Failed to flush preview selection');
 
-        fetchMock.mockResolvedValueOnce({
-            ok: true,
-            json: async () => ({ success: false, error: '' })
-        } as Response);
+        mockPatchImportPreviewSelection.mockRejectedValueOnce(new Error('Failed to flush preview selection'));
         await expect(bindings.flushPreviewSelectionAndBuildActionScope()).rejects.toThrow('Failed to flush preview selection');
+        expect(fetchMock).not.toHaveBeenCalled();
 
         const missingTransactions = (ImportTransactionCheckDataTab as any).setup({
             ...propsFor({ transactions: [] }),

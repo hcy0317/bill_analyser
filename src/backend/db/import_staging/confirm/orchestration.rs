@@ -422,6 +422,8 @@ fn confirm_rollback_reason(error: &DbError) -> &'static str {
         }
         DbError::InvalidOperation(_) => "invalid_operation",
         DbError::PreviewVersionConflict { .. } => "preview_version_conflict",
+        DbError::PreviewSelectionConflict { .. } => "preview_selection_conflict",
+        DbError::PreviewSelectionTargetMismatch { .. } => "preview_selection_target_mismatch",
         DbError::Postgres(_) => "postgres",
         DbError::Io(_) => "io",
         DbError::UnsafePath(_) => "unsafe_path",

@@ -12,6 +12,8 @@ const mockGetImportLearningSuggestions = jest.fn<(...args: Array<any>) => Promis
 const mockPromoteImportLearning = jest.fn<(...args: Array<any>) => Promise<any>>();
 const mockReviewImportTransferDecision = jest.fn<(...args: Array<any>) => Promise<any>>();
 const mockGetImportPreviewRowVersionConflict = jest.fn<(...args: Array<any>) => any>();
+const mockPatchImportPreviewSelection = jest.fn<(...args: Array<any>) => Promise<any>>();
+const mockGetImportPreviewSelectionConflict = jest.fn<(...args: Array<any>) => any>();
 
 const mockExpenseChild = {
     id: '8',
@@ -131,7 +133,9 @@ jest.mock('@/lib/services.ts', () => ({
         getImportLearningSuggestions: mockGetImportLearningSuggestions,
         promoteImportLearning: mockPromoteImportLearning,
         reviewImportTransferDecision: mockReviewImportTransferDecision,
-        getImportPreviewRowVersionConflict: mockGetImportPreviewRowVersionConflict
+        getImportPreviewRowVersionConflict: mockGetImportPreviewRowVersionConflict,
+        patchImportPreviewSelection: mockPatchImportPreviewSelection,
+        getImportPreviewSelectionConflict: mockGetImportPreviewSelectionConflict
     }
 }));
 jest.mock('@/lib/server_settings.ts', () => ({ isTransactionFromAIImageRecognitionEnabled: () => false }));
@@ -286,6 +290,19 @@ beforeEach(() => {
     mockGetImportLearningSuggestions.mockResolvedValue({ data: { result: { suggestions: [] } } });
     mockPromoteImportLearning.mockResolvedValue({ data: { result: { rules_total: 0 } } });
     mockGetImportPreviewRowVersionConflict.mockReturnValue(null);
+    mockPatchImportPreviewSelection.mockResolvedValue({
+        data: {
+            result: {
+                updated: 0,
+                metadata: {
+                    counts: { total: 3, selected: 0, selected_total: 0, selected_invalid: 0 },
+                    facets: {},
+                    selection_hash: 'fnv1a32:811c9dc5'
+                }
+            }
+        }
+    });
+    mockGetImportPreviewSelectionConflict.mockReturnValue(null);
     Object.defineProperty(globalThis, 'fetch', { configurable: true, writable: true, value: mockFetch });
 });
 
@@ -398,36 +415,31 @@ describe('desktop import category, account, and decision baselines', () => {
                 selection_hash: 'fnv1a32:811c9dc5'
             });
             selected.selected = true;
-            mockFetch.mockResolvedValueOnce({
-                ok: true,
-                json: async () => ({
-                    success: true,
-                    data: {
+            mockPatchImportPreviewSelection.mockResolvedValueOnce({
+                data: {
+                    result: {
+                        updated: 1,
                         metadata: {
                             counts: { total: 3, selected: 1, selected_total: 1, selected_invalid: 0 },
                             facets: {},
                             selection_hash: 'fnv1a32:resolved-selection'
                         }
                     }
-                })
+                }
             });
 
             await bindings.applyLLMPreviewRecommendations();
             await bindings.analyzeSelectedPreviewWithLLM();
             await bindings.promoteSelectedToLongTermLearning();
 
-            expect(mockFetch).toHaveBeenCalledTimes(1);
-            expect(mockFetch).toHaveBeenCalledWith(
-                '/api/bills/import/v2/preview/action-session/selection',
-                expect.objectContaining({
-                    method: 'PUT',
-                    body: JSON.stringify({
-                        selectionAction: 'patch',
-                        selectedIds: [151],
-                        deselectedIds: []
-                    })
-                })
-            );
+            expect(mockFetch).not.toHaveBeenCalled();
+            expect(mockPatchImportPreviewSelection).toHaveBeenCalledTimes(1);
+            expect(mockPatchImportPreviewSelection).toHaveBeenCalledWith({
+                sessionId: 'action-session',
+                expectedSelectionHash: 'fnv1a32:811c9dc5',
+                selectedIds: [151],
+                deselectedIds: []
+            });
             const expectedScope = {
                 kind: 'selected',
                 selection_hash: 'fnv1a32:resolved-selection'
@@ -444,12 +456,43 @@ describe('desktop import category, account, and decision baselines', () => {
                     previewUpdates: [expect.objectContaining({ id: 151 })]
                 }));
             }
-            expect(mockFetch.mock.invocationCallOrder[0]).toBeLessThan(
+            expect(mockPatchImportPreviewSelection.mock.invocationCallOrder[0]).toBeLessThan(
                 mockLlmPreviewRecommend.mock.invocationCallOrder[0]!
             );
         } finally {
             warnSpy.mockRestore();
         }
+    });
+
+    test('rebases a typed selection conflict and does not retry the stale patch', async () => {
+        const selected = createTransaction(155, { selected: false });
+        const bindings = createServerPagedBindings([selected], {
+            counts: { total: 1, selected: 0, selected_total: 0, selected_invalid: 0 },
+            facets: {},
+            selection_hash: 'fnv1a32:11111111'
+        });
+        selected.selected = true;
+        const conflictError = new Error('selection conflict');
+        mockPatchImportPreviewSelection.mockRejectedValueOnce(conflictError);
+        mockGetImportPreviewSelectionConflict.mockReturnValueOnce({
+            expected_selection_hash: 'fnv1a32:11111111',
+            actual_selection_hash: 'fnv1a32:22222222',
+            metadata: {
+                counts: { total: 1, selected: 0, selected_total: 0, selected_invalid: 0 },
+                facets: {},
+                selection_hash: 'fnv1a32:22222222'
+            },
+            previewItems: [{ id: 155, preview_selected: false }]
+        });
+
+        await expect(bindings.flushPreviewSelectionAndBuildActionScope())
+            .rejects.toThrow('Preview selection changed, please review before retrying');
+
+        expect(selected.selected).toBe(false);
+        expect(bindings.previewMetadata.value.selection_hash).toBe('fnv1a32:22222222');
+        expect(mockPatchImportPreviewSelection).toHaveBeenCalledTimes(1);
+        await expect(bindings.flushPreviewSelectionAndBuildActionScope()).resolves.toEqual(expect.any(Object));
+        expect(mockPatchImportPreviewSelection).toHaveBeenCalledTimes(1);
     });
 
     test('keeps selected scope when the active filter hides every selected row', async () => {

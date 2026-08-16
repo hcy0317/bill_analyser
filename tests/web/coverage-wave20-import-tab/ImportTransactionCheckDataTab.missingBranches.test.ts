@@ -12,6 +12,8 @@ const mockUpdateImportPreviewItem = jest.fn<(...args: Array<any>) => Promise<any
 const mockReviewImportTransferDecision = jest.fn<(...args: Array<any>) => Promise<any>>();
 const mockReclassifyImportPreview = jest.fn<(...args: Array<any>) => Promise<any>>();
 const mockGetImportPreviewRowVersionConflict = jest.fn<(...args: Array<any>) => any>();
+const mockPatchImportPreviewSelection = jest.fn<(...args: Array<any>) => Promise<any>>();
+const mockGetImportPreviewSelectionConflict = jest.fn<(...args: Array<any>) => any>();
 const mockLlmPreviewRecommend = jest.fn<(...args: Array<any>) => Promise<any>>();
 const mockAnalyzeLLMTransactions = jest.fn<(...args: Array<any>) => Promise<any>>();
 const mockGetImportLearningSuggestions = jest.fn<(...args: Array<any>) => Promise<any>>();
@@ -151,6 +153,8 @@ jest.mock('@/lib/services.ts', () => ({
         reviewImportTransferDecision: mockReviewImportTransferDecision,
         reclassifyImportPreview: mockReclassifyImportPreview,
         getImportPreviewRowVersionConflict: mockGetImportPreviewRowVersionConflict,
+        patchImportPreviewSelection: mockPatchImportPreviewSelection,
+        getImportPreviewSelectionConflict: mockGetImportPreviewSelectionConflict,
         llmPreviewRecommend: mockLlmPreviewRecommend,
         analyzeLLMTransactions: mockAnalyzeLLMTransactions,
         getImportLearningSuggestions: mockGetImportLearningSuggestions,
@@ -351,6 +355,10 @@ beforeEach(() => {
     mockGetImportLearningSuggestions.mockResolvedValue({ data: { result: { suggestions: [] } } });
     mockPromoteImportLearning.mockResolvedValue({ data: { result: { rules_total: 0 } } });
     mockGetImportPreviewRowVersionConflict.mockReturnValue(null);
+    mockPatchImportPreviewSelection.mockResolvedValue({
+        data: { result: { updated: 0, metadata: null } }
+    });
+    mockGetImportPreviewSelectionConflict.mockReturnValue(null);
     Object.defineProperty(globalThis, 'fetch', { configurable: true, writable: true, value: mockFetch });
 });
 
@@ -592,7 +600,9 @@ describe('ImportTransactionCheckDataTab uncovered server, LLM, and management br
 
         props.importTransactions[0] = selected;
         selected.selected = false;
-        mockFetch.mockResolvedValueOnce(response({ json: { success: true, data: {} } }));
+        mockPatchImportPreviewSelection.mockResolvedValueOnce({
+            data: { result: { updated: 1, metadata: undefined } }
+        });
         await bindings.flushPreviewSelectionAndBuildActionScope();
         expect(bindings.serverPagedSelectionMetadataOverride.value).toBeNull();
     });

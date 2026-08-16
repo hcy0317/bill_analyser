@@ -18,6 +18,10 @@ pub enum DbError {
         expected: i64,
         actual: i64,
     },
+    #[error("preview selection version conflict: expected {expected}, actual {actual}")]
+    PreviewSelectionConflict { expected: String, actual: String },
+    #[error("preview selection target is outside session {session_id}")]
+    PreviewSelectionTargetMismatch { session_id: String },
     #[error("postgres error: {0}")]
     Postgres(#[from] sqlx::Error),
     #[error("io error: {0}")]
@@ -30,6 +34,13 @@ impl DbError {
             preview_id,
             expected,
             actual,
+        }
+    }
+
+    pub(crate) fn preview_selection_conflict(expected: &str, actual: &str) -> Self {
+        Self::PreviewSelectionConflict {
+            expected: expected.to_string(),
+            actual: actual.to_string(),
         }
     }
 }
