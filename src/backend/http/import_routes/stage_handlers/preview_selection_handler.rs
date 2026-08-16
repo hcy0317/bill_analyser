@@ -98,6 +98,10 @@ pub async fn import_preview_selection_runtime_handler(
         Ok(action) => action,
         Err(response) => return route_response(response),
     };
+    let expected_selection_hash = match expected_selection_hash_from_payload(object) {
+        Ok(hash) => hash,
+        Err(response) => return route_response(response),
+    };
     let update_items = match preview_update_items_from_payload(&payload) {
         Ok(update_items) => update_items,
         Err(response) => return route_response(response),
@@ -147,6 +151,10 @@ pub async fn import_preview_selection_runtime_handler(
     };
     let mut patches = Vec::with_capacity(update_by_preview_id.len());
     for (preview_id, item) in update_by_preview_id {
+        let expected_row_version = match expected_row_version_from_payload(item) {
+            Ok(expected_row_version) => expected_row_version,
+            Err(response) => return route_response(response),
+        };
         let patch = match build_preview_patch_from_payload_with_loaded_categories(
             preview_id,
             item,
@@ -155,7 +163,10 @@ pub async fn import_preview_selection_runtime_handler(
             Ok(patch) => patch,
             Err(response) => return route_response(response),
         };
-        patches.push(patch);
+        patches.push(attach_optional_expected_row_version(
+            patch,
+            expected_row_version,
+        ));
     }
     let filters = import_preview_query_filters_from_payload(object);
     let selection_request = ImportPreviewPageRequest {
@@ -193,11 +204,50 @@ pub async fn import_preview_selection_runtime_handler(
         &session_id,
         user_id,
         &patches,
-        selection_mode,
-        selection_target,
-        &selection_request,
+        ImportPreviewConditionalSelectionCommand {
+            mode: selection_mode,
+            target: selection_target,
+            request: &selection_request,
+            expected_selection_hash: expected_selection_hash.as_deref(),
+        },
     ) {
         Ok(result) => result,
+        Err(DbError::PreviewSelectionConflict { expected, actual }) => {
+            let response = preview_selection_conflict_response(
+                runtime.connection(),
+                &session_id,
+                user_id,
+                &preview_ids,
+                &[],
+                &expected,
+                &actual,
+            );
+            return route_response(match response {
+                Ok(response) => response,
+                Err(error) => db_error_response(error),
+            });
+        }
+        Err(DbError::PreviewVersionConflict {
+            preview_id,
+            expected,
+            ..
+        }) => {
+            let latest_row = match get_preview_bill_by_id(
+                runtime.connection(),
+                preview_id,
+                user_id,
+            ) {
+                Ok(Some(row)) if row.session_id == session_id => row,
+                Ok(Some(_)) | Ok(None) => {
+                    return route_response(import_v2_error_response(
+                        404,
+                        "Preview bill not found",
+                    ));
+                }
+                Err(error) => return route_response(db_error_response(error)),
+            };
+            return route_response(preview_row_version_conflict_response(expected, latest_row));
+        }
         Err(error) => return route_response(db_error_response(error)),
     };
     let metadata = match query_preview_page_by_session(
@@ -216,12 +266,22 @@ pub async fn import_preview_selection_runtime_handler(
         Ok(result) => serde_json::to_value(result.metadata).unwrap_or_else(|_| json!({})),
         Err(error) => return route_response(db_error_response(error)),
     };
+    let preview_items = match get_preview_by_ids(
+        runtime.connection(),
+        &session_id,
+        &preview_ids,
+        user_id,
+    ) {
+        Ok(rows) => rows.into_iter().map(preview_row_to_value).collect::<Vec<_>>(),
+        Err(error) => return route_response(db_error_response(error)),
+    };
 
     route_response(import_v2_data_response(json!({
         "updated": mutation.updated_selection,
         "applied_preview_updates": mutation.applied_preview_updates,
         "selectionAction": action,
         "metadata": metadata,
+        "previewItems": preview_items,
     })))
 }
 

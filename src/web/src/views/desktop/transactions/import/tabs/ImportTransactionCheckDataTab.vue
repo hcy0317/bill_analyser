@@ -2963,7 +2963,8 @@ function buildConditionalSelectionPreviewUpdates(
         return [];
     }
     return buildPreviewUpdatesForTransactions(
-        getTrackedTransactionsForSelection().filter(hasServerPagedValidityDraftChanges)
+        getTrackedTransactionsForSelection().filter(hasServerPagedValidityDraftChanges),
+        true
     );
 }
 
@@ -4633,38 +4634,51 @@ async function applyServerPagedSelection(action: ServerPagedSelectionAction): Pr
     applySelectionActionToLocalTransactions(action, importTransactions.value);
     serverPagedSelectionBusy.value = true;
     try {
-        const token = getCurrentToken();
-        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-        if (token) {
-            headers['Authorization'] = `Bearer ${token}`;
-        }
-
-        const response = await fetch(
-            `/api/bills/import/v2/preview/${encodeURIComponent(props.sessionId)}/selection`,
-            {
-                method: 'PUT',
-                headers,
-                body: JSON.stringify({
-                    selectionAction: action,
-                    filters: buildServerPreviewQueryFilters(),
-                    ...(previewUpdates.length > 0 ? { preview_updates: previewUpdates } : {})
-                })
+        const response = await services.applyImportPreviewSelectionAction({
+            sessionId: props.sessionId,
+            selectionAction: action,
+            filters: buildServerPreviewQueryFilters(),
+            expectedSelectionHash: String(previewMetadata.value.selection_hash || '').trim() || undefined,
+            previewUpdates: previewUpdates.length > 0 ? previewUpdates : undefined
+        });
+        const result = response.data.result;
+        serverPagedSelectionMetadataOverride.value = result.metadata as ImportPreviewMetadata;
+        for (const previewItem of result.previewItems) {
+            const transaction = getTrackedTransactionByPreviewId(Number(previewItem.id));
+            if (!transaction) {
+                continue;
             }
-        );
-        if (!response.ok) {
-            throw new Error(await response.text());
+            syncTransactionFromPreviewDecision(transaction, previewItem);
+            rebaseImportPreviewTextSyncConflict(transaction, previewItem);
         }
-
-        const result = await response.json();
-        if (!result.success) {
-            throw new Error(result.error || 'Failed to update preview selection');
-        }
-
-        serverPagedSelectionMetadataOverride.value = result.data?.metadata || null;
         reconcileServerPagedDraftsAfterSelection(previewUpdates);
     } catch (error) {
         for (const { transaction, selected } of selectionSnapshot) {
             transaction.selected = selected;
+        }
+        const selectionConflict = services.getImportPreviewSelectionConflict(error);
+        const rowConflict = services.getImportPreviewRowVersionConflict(error);
+        if (selectionConflict) {
+            serverPagedSelectionMetadataOverride.value = selectionConflict.metadata as ImportPreviewMetadata;
+            for (const previewItem of selectionConflict.previewItems) {
+                const transaction = getTrackedTransactionByPreviewId(Number(previewItem.id));
+                if (!transaction) {
+                    continue;
+                }
+                syncTransactionFromPreviewDecision(transaction, previewItem);
+                rebaseImportPreviewTextSyncConflict(transaction, previewItem);
+            }
+            reconcileServerPagedDraftsAfterSelection(previewUpdates);
+        } else if (rowConflict) {
+            const conflictPreviewId = Number(rowConflict.previewItem.id);
+            const transaction = getTrackedTransactionByPreviewId(conflictPreviewId);
+            if (transaction) {
+                syncTransactionFromPreviewDecision(transaction, rowConflict.previewItem);
+                rebaseImportPreviewTextSyncConflict(transaction, rowConflict.previewItem);
+                reconcileServerPagedDraftsAfterSelection(previewUpdates.filter(
+                    update => getPreviewUpdateId(update) === conflictPreviewId
+                ));
+            }
         }
         snackbar.value?.showError(getActionErrorMessage(error, 'Failed to update preview selection'));
     } finally {

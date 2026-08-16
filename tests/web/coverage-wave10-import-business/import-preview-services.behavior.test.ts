@@ -311,6 +311,43 @@ describe('import preview lifecycle service behavior', () => {
         }
     });
 
+    test('applies a conditional selection through the typed service with both CAS tokens', async () => {
+        axiosPut.mockResolvedValueOnce(dataEnvelope({
+            updated: 1,
+            applied_preview_updates: 1,
+            selectionAction: 'select_valid',
+            metadata: { selection_hash: 'fnv1a32:22222222' },
+            previewItems: [{ id: 7, row_version: 4, preview_selected: true }]
+        }));
+
+        const response = await services.applyImportPreviewSelectionAction({
+            sessionId: 'session/conditional',
+            selectionAction: 'select_valid',
+            filters: { category: '8' },
+            expectedSelectionHash: 'fnv1a32:11111111',
+            previewUpdates: [{
+                id: 7,
+                expected_row_version: 3,
+                category_id: 8
+            }]
+        });
+
+        expect(axiosPut).toHaveBeenCalledWith(
+            'bills/import/v2/preview/session%2Fconditional/selection',
+            {
+                selectionAction: 'select_valid',
+                filters: { category: '8' },
+                expected_selection_hash: 'fnv1a32:11111111',
+                preview_updates: [{
+                    id: 7,
+                    expected_row_version: 3,
+                    category_id: 8
+                }]
+            }
+        );
+        expect(response.data.result.previewItems[0]?.row_version).toBe(4);
+    });
+
     test('omits absent preview filters and includes false/zero values when they are explicit', async () => {
         await services.getImportPreviewPage({ sessionId: 'plain session' });
         expect(axiosGet).toHaveBeenNthCalledWith(1, 'bills/import/v2/preview/plain%20session', { params: {} });

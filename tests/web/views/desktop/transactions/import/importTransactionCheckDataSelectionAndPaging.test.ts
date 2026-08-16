@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, jest, test } from '@jest/globals';
 
 const mockGetLLMMemoryEvents = jest.fn<(...args: Array<unknown>) => Promise<any>>();
+const mockApplyImportPreviewSelectionAction = jest.fn<(...args: Array<unknown>) => Promise<any>>();
+const mockGetImportPreviewSelectionConflict = jest.fn<(...args: Array<unknown>) => any>();
+const mockGetImportPreviewRowVersionConflict = jest.fn<(...args: Array<unknown>) => any>();
 const mockShowError = jest.fn();
 const mockShowMessage = jest.fn();
 const mockFetch = jest.fn<(...args: Array<any>) => Promise<any>>();
@@ -93,7 +96,12 @@ jest.mock('@/stores/transactionTag.ts', () => ({
 }));
 jest.mock('@/lib/services.ts', () => ({
     __esModule: true,
-    default: { getLLMMemoryEvents: mockGetLLMMemoryEvents }
+    default: {
+        getLLMMemoryEvents: mockGetLLMMemoryEvents,
+        applyImportPreviewSelectionAction: mockApplyImportPreviewSelectionAction,
+        getImportPreviewSelectionConflict: mockGetImportPreviewSelectionConflict,
+        getImportPreviewRowVersionConflict: mockGetImportPreviewRowVersionConflict
+    }
 }));
 jest.mock('@/lib/server_settings.ts', () => ({
     isTransactionFromAIImageRecognitionEnabled: () => false
@@ -224,6 +232,8 @@ function createBindings(options: {
 beforeEach(() => {
     jest.clearAllMocks();
     mockGetLLMMemoryEvents.mockResolvedValue({ data: { result: { events: [] } } });
+    mockGetImportPreviewSelectionConflict.mockReturnValue(null);
+    mockGetImportPreviewRowVersionConflict.mockReturnValue(null);
     Object.defineProperty(globalThis, 'fetch', {
         configurable: true,
         writable: true,
@@ -605,6 +615,7 @@ describe('desktop import selection, paging, and edit contracts', () => {
                 total: 8,
                 metadata: {
                     counts: { total: 8, selected: 0 },
+                    selection_hash: 'fnv1a32:10000000',
                     facets: { categories: [{ value: '8', label: 'Cafe', count: 8 }] }
                 }
             });
@@ -612,36 +623,32 @@ describe('desktop import selection, paging, and edit contracts', () => {
             bindings.filters.value.category = 'Cafe';
             await Promise.resolve();
             emit.mockClear();
-            mockFetch.mockResolvedValueOnce({
-                ok: true,
-                json: async () => ({
-                    success: true,
-                    data: {
+            mockApplyImportPreviewSelectionAction.mockResolvedValueOnce({
+                data: {
+                    result: {
+                        updated: 8,
+                        applied_preview_updates: 0,
+                        selectionAction: 'select_all',
                         metadata: {
                             counts: { total: 8, selected: 8 },
+                            selection_hash: 'fnv1a32:20000000',
                             facets: { categories: [{ value: '8', label: 'Cafe', count: 8 }] }
-                        }
+                        },
+                        previewItems: []
                     }
-                })
+                }
             });
 
             await bindings.selectAll();
 
             expect([first.selected, second.selected]).toEqual([true, true]);
-            expect(mockFetch).toHaveBeenCalledWith(
-                '/api/bills/import/v2/preview/selection%2Fsession/selection',
-                {
-                    method: 'PUT',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        Authorization: 'Bearer selection-token'
-                    },
-                    body: JSON.stringify({
-                        selectionAction: 'select_all',
-                        filters: { category: '8' }
-                    })
-                }
-            );
+            expect(mockApplyImportPreviewSelectionAction).toHaveBeenCalledWith({
+                sessionId: 'selection/session',
+                selectionAction: 'select_all',
+                filters: { category: '8' },
+                expectedSelectionHash: 'fnv1a32:10000000',
+                previewUpdates: undefined
+            });
             expect(bindings.previewMetadata.value.counts.selected).toBe(8);
             expect(emit).not.toHaveBeenCalledWith(
                 'requestPage',
@@ -650,26 +657,23 @@ describe('desktop import selection, paging, and edit contracts', () => {
                 expect.anything()
             );
 
-            mockFetch.mockResolvedValueOnce({ ok: false, text: async () => 'selection conflict' });
+            mockApplyImportPreviewSelectionAction.mockRejectedValueOnce(new Error('selection conflict'));
             await bindings.selectNone();
 
             expect([first.selected, second.selected]).toEqual([true, true]);
-            expect(mockFetch).toHaveBeenLastCalledWith(
-                '/api/bills/import/v2/preview/selection%2Fsession/selection',
-                expect.objectContaining({
-                    method: 'PUT',
-                    body: JSON.stringify({
-                        selectionAction: 'select_none',
-                        filters: { category: '8' }
-                    })
-                })
-            );
+            expect(mockApplyImportPreviewSelectionAction).toHaveBeenLastCalledWith({
+                sessionId: 'selection/session',
+                selectionAction: 'select_none',
+                filters: { category: '8' },
+                expectedSelectionHash: 'fnv1a32:20000000',
+                previewUpdates: undefined
+            });
             expect(bindings.serverPagedSelectionBusy.value).toBe(false);
 
             bindings.serverPagedSelectionBusy.value = true;
-            const fetchCallsBeforeBusyAction = mockFetch.mock.calls.length;
+            const callsBeforeBusyAction = mockApplyImportPreviewSelectionAction.mock.calls.length;
             await bindings.selectInvert();
-            expect(mockFetch).toHaveBeenCalledTimes(fetchCallsBeforeBusyAction);
+            expect(mockApplyImportPreviewSelectionAction).toHaveBeenCalledTimes(callsBeforeBusyAction);
             expect([first.selected, second.selected]).toEqual([true, true]);
         } finally {
             warnSpy.mockRestore();
@@ -704,7 +708,7 @@ describe('desktop import selection, paging, and edit contracts', () => {
                 metadata: { counts: { total: 1, selected: 0 } }
             });
             const selectionResponse = deferred<any>();
-            mockFetch.mockImplementationOnce(() => selectionResponse.promise);
+            mockApplyImportPreviewSelectionAction.mockImplementationOnce(() => selectionResponse.promise);
 
             const selectionRun = bindings.selectAll();
             staleResponse.resolve('stale');
@@ -715,19 +719,22 @@ describe('desktop import selection, paging, and edit contracts', () => {
             expect(row.selected).toBe(true);
 
             selectionResponse.resolve({
-                ok: true,
-                json: async () => ({
-                    success: true,
-                    data: { metadata: { counts: { total: 1, selected: 1 } } }
-                })
+                data: {
+                    result: {
+                        updated: 1,
+                        applied_preview_updates: 0,
+                        selectionAction: 'select_all',
+                        metadata: { counts: { total: 1, selected: 1 } },
+                        previewItems: []
+                    }
+                }
             });
             await selectionRun;
 
             expect(row.selected).toBe(true);
             expect(bindings.previewMetadata.value.counts.selected).toBe(1);
             expect(emit).toHaveBeenCalledWith('invalidatePageRequest');
-            expect(mockFetch).toHaveBeenCalledTimes(1);
-            expect(mockFetch.mock.calls[0]?.[1]).toEqual(expect.objectContaining({ method: 'PUT' }));
+            expect(mockApplyImportPreviewSelectionAction).toHaveBeenCalledTimes(1);
         } finally {
             warnSpy.mockRestore();
         }
@@ -742,12 +749,16 @@ describe('desktop import selection, paging, and edit contracts', () => {
             selected: false
         });
         try {
+            (edited as ImportTransaction & { _rowVersion: number })._rowVersion = 3;
             const bindings = createBindings({
                 transactions: [edited],
                 serverPaged: true,
                 sessionId: 'conditional/selection',
                 total: 1,
-                metadata: { counts: { total: 1, selected: 0 } }
+                metadata: {
+                    counts: { total: 1, selected: 0 },
+                    selection_hash: 'fnv1a32:11111111'
+                }
             });
             edited.categoryId = '8';
             edited.isManuallyAnnotated = true;
@@ -759,20 +770,44 @@ describe('desktop import selection, paging, and edit contracts', () => {
                     data: { metadata: { counts: { total: 1, selected: 1 } } }
                 })
             });
+            mockApplyImportPreviewSelectionAction.mockResolvedValueOnce({
+                data: {
+                    result: {
+                        updated: 1,
+                        applied_preview_updates: 1,
+                        selectionAction: 'select_valid',
+                        metadata: {
+                            counts: { total: 1, selected: 1 },
+                            selection_hash: 'fnv1a32:22222222'
+                        },
+                        previewItems: [{
+                            id: 43,
+                            row_version: 4,
+                            preview_type: '支出',
+                            preview_amount_cents: edited.sourceAmountCents,
+                            preview_destination_amount_cents: edited.destinationAmountCents,
+                            category_id: 8,
+                            preview_selected: true
+                        }]
+                    }
+                }
+            });
 
             await bindings.selectAllValid();
 
-            expect(mockFetch).toHaveBeenCalledTimes(1);
-            const request = mockFetch.mock.calls[0]?.[1];
-            expect(JSON.parse(request.body)).toEqual({
+            expect(mockApplyImportPreviewSelectionAction).toHaveBeenCalledWith({
+                sessionId: 'conditional/selection',
                 selectionAction: 'select_valid',
                 filters: {},
-                preview_updates: [expect.objectContaining({
+                expectedSelectionHash: 'fnv1a32:11111111',
+                previewUpdates: [expect.objectContaining({
                     id: 43,
+                    expected_row_version: 3,
                     category_id: 8,
                     is_manually_annotated: true
                 })]
             });
+            expect((edited as ImportTransaction & { _rowVersion: number })._rowVersion).toBe(4);
             expect(edited.selected).toBe(true);
             expect(bindings.previewMetadata.value.counts.selected).toBe(1);
         } finally {
@@ -790,12 +825,16 @@ describe('desktop import selection, paging, and edit contracts', () => {
             selected: false
         });
         try {
+            (previousPage as ImportTransaction & { _rowVersion: number })._rowVersion = 5;
             const bindings = createBindings({
                 transactions: [currentPage],
                 serverPaged: true,
                 sessionId: 'cross-page/selection',
                 total: 2,
-                metadata: { counts: { total: 2, selected: 0 } }
+                metadata: {
+                    counts: { total: 2, selected: 0 },
+                    selection_hash: 'fnv1a32:30000000'
+                }
             });
             bindings.serverPagedDraftBaselines.value = new Map([[
                 45,
@@ -804,25 +843,39 @@ describe('desktop import selection, paging, and edit contracts', () => {
             previousPage.categoryId = '8';
             previousPage.isManuallyAnnotated = true;
             bindings.serverPagedDrafts.value = new Map([[45, previousPage]]);
-            mockFetch.mockResolvedValueOnce({
-                ok: true,
-                json: async () => ({
-                    success: true,
-                    data: { metadata: { counts: { total: 2, selected: 2 } } }
-                })
+            mockApplyImportPreviewSelectionAction.mockResolvedValueOnce({
+                data: {
+                    result: {
+                        updated: 2,
+                        applied_preview_updates: 1,
+                        selectionAction: 'select_valid',
+                        metadata: { counts: { total: 2, selected: 2 } },
+                        previewItems: [{
+                            id: 45,
+                            row_version: 6,
+                            preview_type: '支出',
+                            preview_amount_cents: previousPage.sourceAmountCents,
+                            preview_destination_amount_cents: previousPage.destinationAmountCents,
+                            category_id: 8,
+                            preview_selected: true
+                        }]
+                    }
+                }
             });
 
             await bindings.selectAllValid();
 
-            expect(mockFetch).toHaveBeenCalledTimes(1);
-            const request = mockFetch.mock.calls[0]?.[1];
-            expect(JSON.parse(request.body).preview_updates).toEqual([
+            expect(mockApplyImportPreviewSelectionAction).toHaveBeenCalledWith(expect.objectContaining({
+                expectedSelectionHash: 'fnv1a32:30000000',
+                previewUpdates: [
                 expect.objectContaining({
                     id: 45,
+                    expected_row_version: 5,
                     category_id: 8,
                     is_manually_annotated: true
                 })
-            ]);
+                ]
+            }));
         } finally {
             warnSpy.mockRestore();
         }
@@ -847,12 +900,16 @@ describe('desktop import selection, paging, and edit contracts', () => {
             previousPage.comment = 'edited on previous page';
             previousPage.selected = true;
             bindings.serverPagedDrafts.value = new Map([[47, previousPage]]);
-            mockFetch.mockResolvedValueOnce({
-                ok: true,
-                json: async () => ({
-                    success: true,
-                    data: { metadata: { counts: { total: 2, selected: 2 } } }
-                })
+            mockApplyImportPreviewSelectionAction.mockResolvedValueOnce({
+                data: {
+                    result: {
+                        updated: 2,
+                        applied_preview_updates: 0,
+                        selectionAction: 'select_all',
+                        metadata: { counts: { total: 2, selected: 2 } },
+                        previewItems: []
+                    }
+                }
             });
 
             await bindings.selectAll();
@@ -869,33 +926,197 @@ describe('desktop import selection, paging, and edit contracts', () => {
         const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
         const edited = createTransaction({ id: 48, categoryId: '', sourceAccountId: 'wallet' });
         try {
+            (edited as ImportTransaction & { _rowVersion: number })._rowVersion = 1;
             const bindings = createBindings({
                 transactions: [edited],
                 serverPaged: true,
                 sessionId: 'repeat/conditional-selection',
                 total: 1,
-                metadata: { counts: { total: 1, selected: 0 } }
+                metadata: {
+                    counts: { total: 1, selected: 0 },
+                    selection_hash: 'fnv1a32:40000000'
+                }
             });
-            mockFetch.mockResolvedValueOnce({
-                ok: true,
-                json: async () => ({ success: true, data: { metadata: { counts: { total: 1, selected: 1 } } } })
+            mockApplyImportPreviewSelectionAction.mockResolvedValueOnce({
+                data: {
+                    result: {
+                        updated: 1,
+                        applied_preview_updates: 0,
+                        selectionAction: 'select_all',
+                        metadata: {
+                            counts: { total: 1, selected: 1 },
+                            selection_hash: 'fnv1a32:50000000'
+                        },
+                        previewItems: []
+                    }
+                }
             });
             await bindings.selectAll();
 
             edited.categoryId = '8';
             edited.isManuallyAnnotated = true;
             bindings.onTransactionDataDraftChange(edited);
-            mockFetch.mockResolvedValueOnce({
-                ok: true,
-                json: async () => ({ success: true, data: { metadata: { counts: { total: 1, selected: 1 } } } })
+            mockApplyImportPreviewSelectionAction.mockResolvedValueOnce({
+                data: {
+                    result: {
+                        updated: 1,
+                        applied_preview_updates: 1,
+                        selectionAction: 'select_valid',
+                        metadata: { counts: { total: 1, selected: 1 } },
+                        previewItems: [{
+                            id: 48,
+                            row_version: 2,
+                            preview_type: '支出',
+                            preview_amount_cents: edited.sourceAmountCents,
+                            preview_destination_amount_cents: edited.destinationAmountCents,
+                            category_id: 8,
+                            preview_selected: true
+                        }]
+                    }
+                }
             });
             await bindings.selectAllValid();
 
-            expect(mockFetch).toHaveBeenCalledTimes(2);
-            const request = mockFetch.mock.calls[1]?.[1];
-            expect(JSON.parse(request.body).preview_updates).toEqual([
-                expect.objectContaining({ id: 48, category_id: 8, is_manually_annotated: true })
-            ]);
+            expect(mockApplyImportPreviewSelectionAction).toHaveBeenCalledTimes(2);
+            expect(mockApplyImportPreviewSelectionAction).toHaveBeenLastCalledWith(expect.objectContaining({
+                expectedSelectionHash: 'fnv1a32:50000000',
+                previewUpdates: [expect.objectContaining({
+                    id: 48,
+                    expected_row_version: 1,
+                    category_id: 8,
+                    is_manually_annotated: true
+                })]
+            }));
+        } finally {
+            warnSpy.mockRestore();
+        }
+    });
+
+    test('selection conflict rebases metadata and authoritative rows without retrying', async () => {
+        const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+        const edited = createTransaction({
+            id: 53,
+            categoryId: '',
+            sourceAccountId: 'wallet',
+            selected: false
+        });
+        const conflictError = new Error('selection changed');
+        try {
+            (edited as ImportTransaction & { _rowVersion: number })._rowVersion = 2;
+            const bindings = createBindings({
+                transactions: [edited],
+                serverPaged: true,
+                sessionId: 'selection-conflict',
+                total: 1,
+                metadata: {
+                    counts: { total: 1, selected: 0 },
+                    selection_hash: 'fnv1a32:60000000'
+                }
+            });
+            bindings.snackbar.value = { showError: mockShowError, showMessage: mockShowMessage };
+            edited.categoryId = '8';
+            edited.isManuallyAnnotated = true;
+            bindings.onTransactionDataDraftChange(edited);
+            mockApplyImportPreviewSelectionAction.mockRejectedValueOnce(conflictError);
+            mockGetImportPreviewSelectionConflict.mockImplementationOnce(error => (
+                error === conflictError
+                    ? {
+                        expected_selection_hash: 'fnv1a32:60000000',
+                        actual_selection_hash: 'fnv1a32:70000000',
+                        metadata: {
+                            counts: { total: 1, selected: 0 },
+                            selection_hash: 'fnv1a32:70000000'
+                        },
+                        previewItems: [{
+                            id: 53,
+                            row_version: 2,
+                            preview_type: '支出',
+                            preview_amount_cents: edited.sourceAmountCents,
+                            preview_destination_amount_cents: edited.destinationAmountCents,
+                            preview_selected: false
+                        }]
+                    }
+                    : null
+            ));
+
+            await bindings.selectAllValid();
+
+            expect(mockApplyImportPreviewSelectionAction).toHaveBeenCalledTimes(1);
+            expect(edited.selected).toBe(false);
+            expect(edited.categoryId).toBe('');
+            expect((edited as ImportTransaction & { _rowVersion: number })._rowVersion).toBe(2);
+            expect(bindings.previewMetadata.value.selection_hash).toBe('fnv1a32:70000000');
+        } finally {
+            warnSpy.mockRestore();
+        }
+    });
+
+    test('row conflict rebases the authoritative row without retrying selection', async () => {
+        const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+        const edited = createTransaction({
+            id: 54,
+            categoryId: '',
+            sourceAccountId: 'wallet',
+            selected: false
+        });
+        const pending = createTransaction({
+            id: 55,
+            categoryId: '',
+            sourceAccountId: 'wallet',
+            selected: false
+        });
+        const conflictError = new Error('row changed');
+        try {
+            (edited as ImportTransaction & { _rowVersion: number })._rowVersion = 2;
+            (pending as ImportTransaction & { _rowVersion: number })._rowVersion = 2;
+            const bindings = createBindings({
+                transactions: [edited, pending],
+                serverPaged: true,
+                sessionId: 'row-conflict',
+                total: 2,
+                metadata: {
+                    counts: { total: 2, selected: 0 },
+                    selection_hash: 'fnv1a32:80000000'
+                }
+            });
+            bindings.snackbar.value = { showError: mockShowError, showMessage: mockShowMessage };
+            edited.categoryId = '8';
+            edited.isManuallyAnnotated = true;
+            bindings.onTransactionDataDraftChange(edited);
+            pending.categoryId = '8';
+            pending.isManuallyAnnotated = true;
+            bindings.onTransactionDataDraftChange(pending);
+            mockApplyImportPreviewSelectionAction.mockRejectedValueOnce(conflictError);
+            mockGetImportPreviewRowVersionConflict.mockImplementationOnce(error => (
+                error === conflictError
+                    ? {
+                        expected_row_version: 2,
+                        actual_row_version: 3,
+                        previewItem: {
+                            id: 54,
+                            row_version: 3,
+                            preview_type: '支出',
+                            preview_amount_cents: edited.sourceAmountCents,
+                            preview_destination_amount_cents: edited.destinationAmountCents,
+                            preview_selected: false
+                        }
+                    }
+                    : null
+            ));
+
+            await bindings.selectAllValid();
+
+            expect(mockApplyImportPreviewSelectionAction).toHaveBeenCalledTimes(1);
+            expect(edited.selected).toBe(false);
+            expect(edited.categoryId).toBe('');
+            expect((edited as ImportTransaction & { _rowVersion: number })._rowVersion).toBe(3);
+            expect(bindings.previewMetadata.value.selection_hash).toBe('fnv1a32:80000000');
+            expect(bindings.buildConditionalSelectionPreviewUpdates('select_valid'))
+                .toEqual([expect.objectContaining({
+                    id: 55,
+                    expected_row_version: 2,
+                    category_id: 8
+                })]);
         } finally {
             warnSpy.mockRestore();
         }

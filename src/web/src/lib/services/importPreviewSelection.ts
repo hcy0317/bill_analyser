@@ -1,7 +1,10 @@
 import axios from 'axios';
 
 import type {
+    ImportPreviewPatchPayload,
     ImportPreviewRecord,
+    ImportPreviewSelectionAction,
+    ImportPreviewSelectionActionResponse,
     ImportPreviewSelectionConflict,
     ImportPreviewSelectionMetadata,
     ImportPreviewSelectionPatchResponse
@@ -61,6 +64,34 @@ function getImportPreviewSelectionConflict(
 
 const importPreviewSelectionServices = {
     getImportPreviewSelectionConflict,
+    applyImportPreviewSelectionAction: ({
+        sessionId,
+        selectionAction,
+        filters,
+        expectedSelectionHash,
+        previewUpdates
+    }: {
+        sessionId: string,
+        selectionAction: ImportPreviewSelectionAction,
+        filters: object,
+        expectedSelectionHash?: string,
+        previewUpdates?: ImportPreviewPatchPayload[]
+    }): ApiResponsePromise<ImportPreviewSelectionActionResponse> => {
+        const payload: Record<string, unknown> = {
+            selectionAction,
+            filters
+        };
+        if (expectedSelectionHash) {
+            payload['expected_selection_hash'] = expectedSelectionHash;
+        }
+        if (previewUpdates?.length) {
+            payload['preview_updates'] = previewUpdates;
+        }
+        return axios.put<ApiDataResponse<ImportPreviewSelectionActionResponse>>(
+            `bills/import/v2/preview/${encodeURIComponent(sessionId)}/selection`,
+            payload
+        ).then(response => buildApiResponse(response, response.data?.data));
+    },
     // 中文说明：使用服务端 selection_hash 对跨页选择增量执行集合级 CAS。
     patchImportPreviewSelection: ({
         sessionId,

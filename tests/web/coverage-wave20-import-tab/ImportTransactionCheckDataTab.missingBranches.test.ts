@@ -13,6 +13,7 @@ const mockReviewImportTransferDecision = jest.fn<(...args: Array<any>) => Promis
 const mockUpdateImportPreviewRecurringMatch = jest.fn<(...args: Array<any>) => Promise<any>>();
 const mockReclassifyImportPreview = jest.fn<(...args: Array<any>) => Promise<any>>();
 const mockGetImportPreviewRowVersionConflict = jest.fn<(...args: Array<any>) => any>();
+const mockApplyImportPreviewSelectionAction = jest.fn<(...args: Array<any>) => Promise<any>>();
 const mockPatchImportPreviewSelection = jest.fn<(...args: Array<any>) => Promise<any>>();
 const mockGetImportPreviewSelectionConflict = jest.fn<(...args: Array<any>) => any>();
 const mockLlmPreviewRecommend = jest.fn<(...args: Array<any>) => Promise<any>>();
@@ -155,6 +156,7 @@ jest.mock('@/lib/services.ts', () => ({
         updateImportPreviewRecurringMatch: mockUpdateImportPreviewRecurringMatch,
         reclassifyImportPreview: mockReclassifyImportPreview,
         getImportPreviewRowVersionConflict: mockGetImportPreviewRowVersionConflict,
+        applyImportPreviewSelectionAction: mockApplyImportPreviewSelectionAction,
         patchImportPreviewSelection: mockPatchImportPreviewSelection,
         getImportPreviewSelectionConflict: mockGetImportPreviewSelectionConflict,
         llmPreviewRecommend: mockLlmPreviewRecommend,
@@ -358,6 +360,17 @@ beforeEach(() => {
     mockPromoteImportLearning.mockResolvedValue({ data: { result: { rules_total: 0 } } });
     mockUpdateImportPreviewRecurringMatch.mockReset();
     mockGetImportPreviewRowVersionConflict.mockReturnValue(null);
+    mockApplyImportPreviewSelectionAction.mockResolvedValue({
+        data: {
+            result: {
+                updated: 0,
+                applied_preview_updates: 0,
+                selectionAction: 'select_all',
+                metadata: {},
+                previewItems: []
+            }
+        }
+    });
     mockPatchImportPreviewSelection.mockResolvedValue({
         data: { result: { updated: 0, metadata: null } }
     });
@@ -1002,14 +1015,17 @@ describe('ImportTransactionCheckDataTab uncovered paging, computed, and display 
         expect(invalid.selected).toBe(true);
     });
 
-    test('server selection omits Authorization when no token is available', async () => {
+    test('server selection delegates authentication and transport to the typed service', async () => {
         const transaction = createTransaction(75, { selected: false });
         const { bindings } = createBindings([transaction], { serverPaged: true, total: 1 });
-        mockFetch.mockResolvedValueOnce(response({ json: { success: true, data: {} } }));
 
         await bindings.selectAll();
 
-        expect(mockFetch.mock.calls[0]?.[1]?.headers).not.toHaveProperty('Authorization');
+        expect(mockApplyImportPreviewSelectionAction).toHaveBeenCalledWith(expect.objectContaining({
+            selectionAction: 'select_all',
+            previewUpdates: undefined
+        }));
+        expect(mockFetch).not.toHaveBeenCalled();
     });
 });
 

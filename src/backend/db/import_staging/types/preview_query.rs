@@ -120,6 +120,14 @@ pub enum ImportPreviewSelectionTarget {
     NeedsReview,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct ImportPreviewConditionalSelectionCommand<'a> {
+    pub mode: ImportPreviewSelectionMode,
+    pub target: ImportPreviewSelectionTarget,
+    pub request: &'a ImportPreviewPageRequest,
+    pub expected_selection_hash: Option<&'a str>,
+}
+
 impl Default for ImportPreviewPageRequest {
     fn default() -> Self {
         Self {

@@ -4,5 +4,6 @@ include!("runtime/transfer_decisions.rs");
 include!("runtime/recurring_decision_row_cas.rs");
 include!("runtime/mutation_handlers.rs");
 include!("runtime/selection_patch_cas.rs");
+include!("runtime/conditional_selection_cas.rs");
 include!("runtime/preview_reclassify_row_cas.rs");
 include!("runtime/reclassification_handlers.rs");

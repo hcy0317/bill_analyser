@@ -115,6 +115,22 @@ export interface ImportPreviewSelectionPatchResponse {
     metadata: ImportPreviewSelectionMetadata;
 }
 
+export type ImportPreviewSelectionAction =
+    | 'select_all'
+    | 'select_valid'
+    | 'select_invalid'
+    | 'select_needs_annotation'
+    | 'select_none'
+    | 'invert';
+
+export interface ImportPreviewSelectionActionResponse {
+    updated: number;
+    applied_preview_updates: number;
+    selectionAction: ImportPreviewSelectionAction;
+    metadata: ImportPreviewSelectionMetadata;
+    previewItems: ImportPreviewRecord[];
+}
+
 export interface ImportPreviewSelectionConflict {
     expected_selection_hash: string;
     actual_selection_hash: string;

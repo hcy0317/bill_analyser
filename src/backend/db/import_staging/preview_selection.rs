@@ -171,7 +171,7 @@ pub fn update_preview_selection(
         query.push_bind(selected);
         query.push(", preview_payload = jsonb_set(preview_payload, '{preview_selected}', ");
         query.push_bind(Value::Bool(selected));
-        query.push("::jsonb, true), updated_at = now(), version = version + 1 WHERE user_id = ");
+        query.push("::jsonb, true), updated_at = now() WHERE user_id = ");
         query.push_bind(user_id);
         query.push(" AND session_id = ");
         query.push_bind(session_db_id);
@@ -201,22 +201,13 @@ pub fn patch_preview_selection(
         let mut tx = pool.begin().await?;
         let session_db_id =
             lock_active_import_session_on_tx(&mut tx, session_id, user_id).await?;
-        let selected_snapshot = sqlx::query_scalar::<_, i64>(
-            "SELECT id FROM import_preview_rows WHERE session_id = $1 AND user_id = $2 AND selected = true ORDER BY id ASC",
+        validate_expected_selection_hash_on_tx(
+            &mut tx,
+            session_db_id,
+            user_id,
+            expected_selection_hash,
         )
-        .bind(session_db_id)
-        .bind(user_id)
-        .fetch_all(&mut *tx)
         .await?;
-        let actual_selection_hash = preview_id_snapshot_hash(&selected_snapshot);
-        if let Some(expected) = expected_selection_hash {
-            if expected != actual_selection_hash {
-                return Err(DbError::preview_selection_conflict(
-                    expected,
-                    &actual_selection_hash,
-                ));
-            }
-        }
 
         let target_ids = selected_ids
             .iter()
@@ -251,8 +242,7 @@ pub fn patch_preview_selection(
                 UPDATE import_preview_rows
                 SET selected = $1,
                     preview_payload = jsonb_set(preview_payload, '{preview_selected}', to_jsonb($1::boolean), true),
-                    updated_at = now(),
-                    version = version + 1
+                    updated_at = now()
                 WHERE session_id = $2 AND user_id = $3 AND id = ANY($4)
                 "#,
             )
@@ -267,6 +257,32 @@ pub fn patch_preview_selection(
         tx.commit().await?;
         Ok(usize::try_from(updated).unwrap_or(usize::MAX))
     })
+}
+
+async fn validate_expected_selection_hash_on_tx(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    session_db_id: i64,
+    user_id: i64,
+    expected_selection_hash: Option<&str>,
+) -> DbResult<()> {
+    let Some(expected) = expected_selection_hash else {
+        return Ok(());
+    };
+    let selected_snapshot = sqlx::query_scalar::<_, i64>(
+        "SELECT id FROM import_preview_rows WHERE session_id = $1 AND user_id = $2 AND selected = true ORDER BY id ASC",
+    )
+    .bind(session_db_id)
+    .bind(user_id)
+    .fetch_all(&mut **tx)
+    .await?;
+    let actual_selection_hash = preview_id_snapshot_hash(&selected_snapshot);
+    if expected != actual_selection_hash {
+        return Err(DbError::preview_selection_conflict(
+            expected,
+            &actual_selection_hash,
+        ));
+    }
+    Ok(())
 }
 
 async fn lock_active_preview_parent_for_ids_on_tx(
@@ -323,8 +339,7 @@ pub fn reset_session_preview_selection(
             UPDATE import_preview_rows
             SET selected = false,
                 preview_payload = jsonb_set(preview_payload, '{preview_selected}', 'false'::jsonb, true),
-                updated_at = now(),
-                version = version + 1
+                updated_at = now()
             WHERE session_id = $1 AND user_id = $2
             "#,
         )
@@ -366,15 +381,20 @@ pub fn apply_preview_patches_and_update_selection_by_query(
     session_id: &str,
     user_id: UserId,
     patches: &[ImportPreviewPatch],
-    mode: ImportPreviewSelectionMode,
-    target: ImportPreviewSelectionTarget,
-    request: &ImportPreviewPageRequest,
+    command: ImportPreviewConditionalSelectionCommand<'_>,
 ) -> DbResult<ImportPreviewSelectionMutationResult> {
     block_on_db(async move {
         let user_id = user_id_i64(user_id)?;
         let mut tx = pool.begin().await?;
         let session_db_id =
             lock_active_import_session_on_tx(&mut tx, session_id, user_id).await?;
+        validate_expected_selection_hash_on_tx(
+            &mut tx,
+            session_db_id,
+            user_id,
+            command.expected_selection_hash,
+        )
+        .await?;
         let applied_preview_updates =
             apply_preview_patches_on_tx(&mut tx, session_db_id, user_id, patches).await?;
         if applied_preview_updates != patches.len() {
@@ -382,8 +402,13 @@ pub fn apply_preview_patches_and_update_selection_by_query(
                 "preview patch is outside this session".to_string(),
             ));
         }
-        let mut query =
-            build_preview_selection_update_query(session_db_id, user_id, mode, target, request);
+        let mut query = build_preview_selection_update_query(
+            session_db_id,
+            user_id,
+            command.mode,
+            command.target,
+            command.request,
+        );
         let updated_selection = query.build().execute(&mut *tx).await?.rows_affected();
         tx.commit().await?;
         Ok(ImportPreviewSelectionMutationResult {
@@ -422,7 +447,7 @@ fn build_preview_selection_update_query(
             query.push("NOT p.selected, preview_payload = jsonb_set(p.preview_payload, '{preview_selected}', to_jsonb(NOT p.selected), true)");
         }
     }
-    query.push(", updated_at = now(), version = version + 1 WHERE p.session_id = ");
+    query.push(", updated_at = now() WHERE p.session_id = ");
     query.push_bind(session_db_id);
     query.push(" AND p.user_id = ");
     query.push_bind(user_id);

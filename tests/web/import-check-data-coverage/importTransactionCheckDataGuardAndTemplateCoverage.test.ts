@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, jest, test } from '@jest/globals';
 
 const mockGetLLMMemoryEvents = jest.fn<(...args: Array<unknown>) => Promise<any>>();
+const mockApplyImportPreviewSelectionAction = jest.fn<(...args: Array<unknown>) => Promise<any>>();
 const mockPatchImportPreviewSelection = jest.fn<(...args: Array<unknown>) => Promise<any>>();
 const mockGetImportPreviewSelectionConflict = jest.fn<(...args: Array<unknown>) => any>();
+const mockGetImportPreviewRowVersionConflict = jest.fn<(...args: Array<unknown>) => any>();
 const mockLoadAllCategories = jest.fn();
 const mockLoadAllAccounts = jest.fn();
 let mockCurrentToken = 'coverage-token';
@@ -100,8 +102,10 @@ jest.mock('@/lib/services.ts', () => ({
     __esModule: true,
     default: {
         getLLMMemoryEvents: mockGetLLMMemoryEvents,
+        applyImportPreviewSelectionAction: mockApplyImportPreviewSelectionAction,
         patchImportPreviewSelection: mockPatchImportPreviewSelection,
-        getImportPreviewSelectionConflict: mockGetImportPreviewSelectionConflict
+        getImportPreviewSelectionConflict: mockGetImportPreviewSelectionConflict,
+        getImportPreviewRowVersionConflict: mockGetImportPreviewRowVersionConflict
     }
 }));
 jest.mock('@/lib/server_settings.ts', () => ({ isTransactionFromAIImageRecognitionEnabled: () => true }));
@@ -386,10 +390,22 @@ beforeEach(() => {
     mockUiActions.length = 0;
     for (const key of Object.keys(mockSignalActions)) delete mockSignalActions[key];
     mockGetLLMMemoryEvents.mockResolvedValue({ data: { result: { events: [] } } });
+    mockApplyImportPreviewSelectionAction.mockResolvedValue({
+        data: {
+            result: {
+                updated: 0,
+                applied_preview_updates: 0,
+                selectionAction: 'select_all',
+                metadata: {},
+                previewItems: []
+            }
+        }
+    });
     mockPatchImportPreviewSelection.mockResolvedValue({
         data: { result: { updated: 0, metadata: null } }
     });
     mockGetImportPreviewSelectionConflict.mockReturnValue(null);
+    mockGetImportPreviewRowVersionConflict.mockReturnValue(null);
     Object.defineProperty(globalThis, 'fetch', { configurable: true, writable: true, value: jest.fn() });
 });
 
@@ -496,12 +512,6 @@ describe('ImportTransactionCheckDataTab guard and template coverage', () => {
     test('server paging takes the authoritative selection path and server-only computed branches', async () => {
         const row = createTransaction(20, { selected: false });
         const bindings = createBindings({ transactions: [row], serverPaged: true, total: 0 });
-        const fetchMock = globalThis.fetch as jest.MockedFunction<typeof fetch>;
-        fetchMock.mockResolvedValue({
-            ok: true,
-            json: async () => ({ success: true, data: {} })
-        } as Response);
-
         bindings.countPerPage.value = 0;
         expect(bindings.totalImportTransactionCount.value).toBe(0);
         expect(bindings.tablePage.value).toBe(1);
@@ -516,12 +526,9 @@ describe('ImportTransactionCheckDataTab guard and template coverage', () => {
         await bindings.selectAll();
         await bindings.selectNone();
         await bindings.selectInvert();
-        expect(fetchMock).toHaveBeenCalledTimes(6);
+        expect(mockApplyImportPreviewSelectionAction).toHaveBeenCalledTimes(6);
 
-        fetchMock.mockResolvedValueOnce({
-            ok: true,
-            json: async () => ({ success: false, error: '' })
-        } as Response);
+        mockApplyImportPreviewSelectionAction.mockRejectedValueOnce(new Error('selection failed'));
         const selectionBeforeFailedRequest = row.selected;
         await bindings.selectAll();
         expect(row.selected).toBe(selectionBeforeFailedRequest);
