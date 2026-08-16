@@ -64,4 +64,17 @@ impl TransactionType {
             Self::Investment => "投资",
         }
     }
+
+    pub fn from_backend_name(raw_value: &str) -> Result<Self, RuntimeError> {
+        match raw_value.trim().to_ascii_lowercase().as_str() {
+            "收入" | "income" | "2" => Ok(Self::Income),
+            "支出" | "expense" | "3" => Ok(Self::Expense),
+            "转账" | "transfer" | "4" => Ok(Self::Transfer),
+            "投资" | "investment" | "5" => Ok(Self::Investment),
+            _ => Err(RuntimeError::new(
+                ErrorCode::InvalidInput,
+                "invalid backend transaction type",
+            )),
+        }
+    }
 }

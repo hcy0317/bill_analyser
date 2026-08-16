@@ -27,6 +27,25 @@ function testLcovParser() {
     assert.equal(records.get('src/backend/example.rs').executable.get(11), 0);
 }
 
+function testLcovParserMergesDuplicateSourceRecords() {
+    const records = parseLcov([
+        'SF:src/backend/example.rs',
+        'DA:10,3',
+        'DA:11,0',
+        'end_of_record',
+        'SF:src/backend/example.rs',
+        'DA:10,0',
+        'DA:11,5',
+        'DA:12,0',
+        'end_of_record',
+    ].join('\n'));
+
+    assert.equal(records.size, 1);
+    assert.equal(records.get('src/backend/example.rs').executable.get(10), 3);
+    assert.equal(records.get('src/backend/example.rs').executable.get(11), 5);
+    assert.equal(records.get('src/backend/example.rs').executable.get(12), 0);
+}
+
 function testUnifiedDiffParser() {
     const changed = parseUnifiedDiffChangedLines([
         'diff --git a/src/backend/example.rs b/src/backend/example.rs',
@@ -520,6 +539,7 @@ function testStructureQueueNormalizer() {
 }
 
 testLcovParser();
+testLcovParserMergesDuplicateSourceRecords();
 testUnifiedDiffParser();
 testChangedCoverageSummary();
 testChangedCoverageThresholdIsStrict();

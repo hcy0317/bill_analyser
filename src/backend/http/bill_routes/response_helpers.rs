@@ -15,6 +15,17 @@ fn open_postgres_runtime(
         })
 }
 
+fn open_ledger_queries(
+    state: &HttpAppState,
+) -> RouteResult<bill_analyser_db::PostgresLedgerQueries> {
+    state.ledger_queries().map_err(|error| {
+        Box::new(error_response(
+            status_or_internal(error.http_status_code()),
+            error.public_message(),
+        ))
+    })
+}
+
 fn user_id_from_headers(headers: &HeaderMap, config: &HttpShellConfig) -> RouteResult<UserId> {
     resolve_user_id_from_headers(headers, config, TRUSTED_USER_SECRET_HEADER).map_err(|error| {
         Box::new(error_response(

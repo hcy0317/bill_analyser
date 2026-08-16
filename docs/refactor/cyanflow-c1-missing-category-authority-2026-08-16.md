@@ -1,6 +1,7 @@
 # C1 Missing-category 权威收敛合同
 
-> 状态：`LOCAL_VERIFIED / DELIVERY_GATES_PENDING`
+> 状态：`MERGED / MISSING_CATEGORY_CANARY_COMPLETE`
+> 交付：PR `#291`，squash commit `f7fe42a55dcb2af26a09a313ac6629a8f2fe4108`
 
 本 canary 只收敛前端 missing-category issue 的读取权威，不改导入 schema、HTTP endpoint、服务端 writer 或视觉交互。数据库 patch transaction 继续是唯一持久 writer；本地分类草稿只作为当前 effective row 的临时输入。
 

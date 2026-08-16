@@ -13,7 +13,7 @@ use crate::{
     config::HttpShellConfig,
     database_runtime::{DatabaseRuntimeBoundary, RouteRepositoryRuntimeError},
 };
-use bill_analyser_db::{DbError, PostgresRepositoryRuntime};
+use bill_analyser_db::{DbError, PostgresLedgerQueries, PostgresRepositoryRuntime};
 
 #[derive(Debug, Clone)]
 pub struct HttpAppState {
@@ -84,6 +84,11 @@ impl HttpAppState {
         })?;
         *cached_runtime = Some(runtime.clone());
         Ok(runtime)
+    }
+
+    pub fn ledger_queries(&self) -> Result<PostgresLedgerQueries, RouteRepositoryRuntimeError> {
+        let runtime = self.open_postgres_repository_runtime("bills")?;
+        Ok(PostgresLedgerQueries::new(runtime.pool()))
     }
 
     pub fn invalidate_postgres_repository_runtime(&self) {

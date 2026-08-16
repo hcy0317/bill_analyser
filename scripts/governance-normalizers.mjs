@@ -42,6 +42,20 @@ function pathCandidates(filePath) {
     return candidates;
 }
 
+function mergeLcovRecord(files, record) {
+    const existing = files.get(record.path);
+    if (!existing) {
+        files.set(record.path, record);
+        return;
+    }
+    for (const [lineNumber, hits] of record.executable) {
+        existing.executable.set(
+            lineNumber,
+            (existing.executable.get(lineNumber) ?? 0) + hits,
+        );
+    }
+}
+
 function parseLcov(lcovText) {
     const files = new Map();
     let current = null;
@@ -57,7 +71,7 @@ function parseLcov(lcovText) {
         }
         if (line === 'end_of_record') {
             if (current) {
-                files.set(current.path, current);
+                mergeLcovRecord(files, current);
                 current = null;
             }
             continue;
@@ -74,7 +88,7 @@ function parseLcov(lcovText) {
     }
 
     if (current) {
-        files.set(current.path, current);
+        mergeLcovRecord(files, current);
     }
     return files;
 }

@@ -14,29 +14,18 @@ async fn list_bills_handler(
         Ok(value) => value,
         Err(response) => return *response,
     };
-        let runtime = match open_postgres_runtime(&state, "bills") {
-            Ok(value) => value,
-            Err(response) => return *response,
-        };
-        let filters = match postgres_filters_from_query(runtime.pool(), user_id, &query).await {
-            Ok(value) => value,
-            Err(response) => return *response,
-        };
-        let page = query.page();
-        let page_size = query.page_size();
-        let bill_page =
-            match query_postgres_bills(runtime.pool(), user_id.get() as i64, page, page_size, &filters)
-                .await
-            {
-                Ok(value) => value,
-                Err(_) => return db_error_response(),
-            };
-        return match page_to_frontend_postgres(runtime.pool(), user_id, page, page_size, bill_page)
-            .await
-        {
-            Ok(value) => json_response(StatusCode::OK, value),
-            Err(_) => db_error_response(),
-        };
+    let queries = match open_ledger_queries(&state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let page = match queries.list(user_id, query.into_ledger_list_query()).await {
+        Ok(value) => value,
+        Err(_) => return db_error_response(),
+    };
+    match ledger_page_to_frontend(page) {
+        Ok(value) => json_response(StatusCode::OK, value),
+        Err(_) => db_error_response(),
+    }
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -270,5 +259,34 @@ mod crud_handler_tests {
                 .await;
 
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[test]
+    fn list_handler_depends_on_ledger_boundary_instead_of_postgres_rows() {
+        let source = include_str!("crud_handlers.rs");
+        let start = source
+            .find("async fn list_bills_handler")
+            .expect("list handler source");
+        let end = source[start..]
+            .find("async fn bills_by_month_handler")
+            .map(|offset| start + offset)
+            .expect("next handler source");
+        let handler = &source[start..end];
+
+        assert!(handler.contains("open_ledger_queries"));
+        assert!(handler.contains(".list(user_id, query.into_ledger_list_query())"));
+        assert!(handler.contains("ledger_page_to_frontend"));
+        for forbidden in [
+            "open_postgres_runtime",
+            ".pool()",
+            "query_postgres_bills",
+            "BillRecord",
+            "page_to_frontend_postgres",
+        ] {
+            assert!(
+                !handler.contains(forbidden),
+                "list handler leaked forbidden dependency: {forbidden}"
+            );
+        }
     }
 }

@@ -20,6 +20,7 @@ pub mod import_learning;
 pub mod import_learning_lifecycle;
 pub mod import_pipeline;
 pub mod import_pipeline_learning;
+pub mod ledger;
 pub mod matching;
 pub mod ops;
 pub mod primitives;
@@ -134,6 +135,7 @@ pub use import_pipeline::{
     IMPORT_V2_PIPELINE_STEPS,
 };
 pub use import_pipeline_learning::LearningMatchingPayload;
+pub use ledger::{LedgerEntry, LedgerEntryPage, LedgerListQuery, LedgerTag};
 pub use matching::{
     bill_pair_feedback_payload_is_related, build_bill_pair_feedback_payload,
     build_duplicate_bill_candidate, build_duplicate_bill_candidates,

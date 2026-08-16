@@ -491,7 +491,7 @@ Import pilot 完成后，按风险和 cross-layer debt 选择下一域，不允�
 
 ### 10.1 架构
 
-- [ ] Ledger list canary 证明 handler 不打开数据库、不解析 DB row，外部 REST 行为不变。
+- [x] Ledger list canary 证明 handler 不打开数据库、不解析 DB row，外部 REST 行为不变。
 - [ ] `PreviewStateKernel` 是 signal/issue/effective row 的唯一 Rust 权威。
 - [ ] 三个 Stage 2 调用方只通过 `ImportStage2::evaluate`，HTTP 中相关 SQL 为 0。
 - [ ] DB 不再构造 Import HTTP response，core 不再拥有 Import route response。

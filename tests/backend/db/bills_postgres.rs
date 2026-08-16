@@ -1,15 +1,113 @@
 use std::error::Error;
 
+use bill_analyser_core::{LedgerListQuery, Money, TransactionType, UserId};
 use bill_analyser_db::{
     batch_create_postgres_bills, batch_update_postgres_bills, create_postgres_bill,
     delete_postgres_bill, get_postgres_bill_by_id, get_postgres_bill_tags, query_postgres_bills,
     update_postgres_bill, BillCategoryFilter, BillCreateDraft, BillFilters, BillUpdateDraft,
-    PostgresPool,
+    PostgresLedgerQueries, PostgresPool,
 };
 use serde_json::{json, Value};
 use sqlx::Row;
 
 mod postgres_test_support;
+
+async fn required_isolated_postgres_database(
+    prefix: &str,
+) -> Result<postgres_test_support::IsolatedPostgres, Box<dyn Error>> {
+    postgres_test_support::isolated_postgres_database(prefix)
+        .await?
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "BILL_ANALYSER_TEST_POSTGRES_URL is required for Ledger list boundary tests",
+            )
+            .into()
+        })
+}
+
+#[tokio::test]
+async fn ledger_queries_list_returns_typed_page_with_cents_tags_and_user_scope(
+) -> Result<(), Box<dyn Error>> {
+    let test_db = required_isolated_postgres_database("ledger_list_boundary").await?;
+    let fixture = seed_bills_fixture(&test_db.pool).await?;
+    let principal = UserId::new(u64::try_from(fixture.user_id)?)?;
+
+    let queries = PostgresLedgerQueries::new(&test_db.pool);
+    let page = queries
+        .list(
+            principal,
+            LedgerListQuery {
+                page: 1,
+                page_size: 10,
+                account_ids: vec![fixture.wallet_account_id],
+                category_ids: vec![fixture.coffee_category_id],
+                tag_ids: vec![fixture.coffee_tag_id],
+                amount_filter_cents: Some("between:12000:13000".to_string()),
+                keyword: Some("Cafe".to_string()),
+                ..LedgerListQuery::default()
+            },
+        )
+        .await?;
+
+    assert_eq!(page.total, 1);
+    assert_eq!(page.page, 1);
+    assert_eq!(page.page_size, 10);
+    let entry = page.items.first().expect("typed ledger entry");
+    assert_eq!(entry.id, fixture.coffee_bill_id);
+    assert_eq!(entry.transaction_type, TransactionType::Expense);
+    assert_eq!(entry.amount, Money::from_cents(12_345));
+    assert_eq!(entry.destination_amount, Money::ZERO);
+    assert_eq!(entry.category_id, Some(fixture.coffee_category_id));
+    assert_eq!(entry.main_category, "餐饮");
+    assert_eq!(entry.sub_category, "咖啡");
+    assert_eq!(entry.source_account_id, Some(fixture.wallet_account_id));
+    assert_eq!(entry.destination_account_id, None);
+    assert_eq!(
+        entry.tags,
+        vec![bill_analyser_core::LedgerTag {
+            id: fixture.coffee_tag_id,
+            name: "咖啡标签".to_string(),
+        }]
+    );
+
+    let full_page = queries
+        .list(
+            principal,
+            LedgerListQuery {
+                page_size: 10,
+                ..LedgerListQuery::default()
+            },
+        )
+        .await?;
+    assert_eq!(full_page.total, 3);
+    assert!(
+        full_page
+            .items
+            .iter()
+            .all(|entry| entry.id != fixture.other_user_bill_id),
+        "typed Ledger query must enforce principal scope"
+    );
+
+    let empty_page = queries
+        .list(
+            principal,
+            LedgerListQuery {
+                page: 0,
+                page_size: 999,
+                keyword: Some("does-not-exist".to_string()),
+                ..LedgerListQuery::default()
+            },
+        )
+        .await?;
+    assert_eq!(empty_page.total, 0);
+    assert!(empty_page.items.is_empty());
+    assert_eq!(empty_page.page, 1);
+    assert_eq!(empty_page.page_size, 500);
+
+    test_db.cleanup().await?;
+    Ok(())
+}
 
 #[tokio::test]
 async fn bills_postgres_queries_preserve_cents_filters_paging_and_user_scope(

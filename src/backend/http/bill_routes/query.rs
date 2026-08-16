@@ -75,6 +75,32 @@ impl BillsListQuery {
                 .or(self.amount_filter_cents_camel.as_ref()),
         )
     }
+
+    fn into_ledger_list_query(self) -> LedgerListQuery {
+        LedgerListQuery {
+            page: self.page(),
+            page_size: self.page_size(),
+            date_from: self
+                .start_date
+                .clone()
+                .or_else(|| self.min_time.and_then(date_from_timestamp)),
+            date_to: self
+                .end_date
+                .clone()
+                .or_else(|| self.max_time.and_then(date_from_timestamp)),
+            transaction_type: transaction_list_type_filter(self.transaction_type.as_deref()),
+            main_category: non_empty_string(self.main_category.as_ref()),
+            sub_category: non_empty_string(self.sub_category.as_ref()),
+            batch_id: non_empty_string(self.batch_id.as_ref()),
+            counterparty: non_empty_string(self.counterparty.as_ref()),
+            description: non_empty_string(self.description.as_ref()),
+            keyword: non_empty_string(self.keyword.as_ref()),
+            account_ids: self.account_ids(),
+            category_ids: self.category_ids(),
+            tag_ids: self.tag_ids(),
+            amount_filter_cents: self.amount_filter_cents(),
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -191,5 +217,16 @@ mod bill_query_tests {
         assert_eq!(clamped.page(), 4);
         assert_eq!(clamped.page_size(), 500);
         assert_eq!(clamped.amount_filter_cents().as_deref(), Some("gte:20000"));
+
+        let ledger_query = clamped.into_ledger_list_query();
+        assert_eq!(ledger_query.page, 4);
+        assert_eq!(ledger_query.page_size, 500);
+        assert_eq!(ledger_query.account_ids, Vec::<i64>::new());
+        assert_eq!(ledger_query.category_ids, Vec::<i64>::new());
+        assert_eq!(ledger_query.tag_ids, Vec::<i64>::new());
+        assert_eq!(
+            ledger_query.amount_filter_cents.as_deref(),
+            Some("gte:20000")
+        );
     }
 }
