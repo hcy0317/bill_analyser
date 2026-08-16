@@ -1192,6 +1192,7 @@ async fn import_preview_runtime_facets_identity_validation_and_confirm_are_db_ba
     )?;
     let invalid_single =
         get_preview_bill_by_id(pool, invalid_single_id, scoped_user_id)?.expect("inserted preview");
+    assert_eq!(invalid_single.version, 1);
     assert_eq!(invalid_single.preview_source_account_id, None);
     assert!(!invalid_single.preview_selected);
     assert_eq!(
@@ -1219,6 +1220,7 @@ async fn import_preview_runtime_facets_identity_validation_and_confirm_are_db_ba
     assert_eq!(patched, 1);
     let patched_row =
         get_preview_bill_by_id(pool, invalid_single_id, scoped_user_id)?.expect("patched preview");
+    assert_eq!(patched_row.version, 2);
     assert_eq!(patched_row.preview_source_account_id, Some(wallet_id));
     assert_eq!(patched_row.category_id, None);
     assert!(patched_row

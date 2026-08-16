@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "date": "2026-08-16",
+  "cyanflow_slice": "C4 additive preview row version",
+  "status": "local_full_audit_passed",
+  "production_behavior_changed": true,
+  "breaking_change": false,
+  "cas_claimed": false,
+  "contracts": {
+    "postgres_version_column_reused": true,
+    "schema_changed": false,
+    "repository_row_maps_version": true,
+    "json_field": "row_version",
+    "frontend_field_optional_for_legacy_response": true,
+    "draft_token": "_rowVersion",
+    "expected_row_version_accepted": false,
+    "row_update_cas_enforced": false
+  },
+  "focused_verification": {
+    "rust_presenter": {
+      "passed": 1,
+      "failed": 0
+    },
+    "rust_contract": {
+      "passed": 10,
+      "failed": 0,
+      "ignored": 0
+    },
+    "real_postgres": {
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0,
+      "inserted_version": 1,
+      "patched_version": 2
+    },
+    "frontend_row_adapter": {
+      "passed": 12,
+      "failed": 0
+    },
+    "frontend_service": {
+      "passed": 11,
+      "failed": 0
+    },
+    "vue_typecheck": "passed"
+  },
+  "full_audit": {
+    "status": "passed",
+    "real_postgres_fail_closed": true,
+    "cargo_test_workspace": "passed",
+    "cargo_clippy_workspace_all_targets": "passed",
+    "rust_full_runtime_coverage_percent": 65.07,
+    "rust_changed_executable_lines": 11,
+    "rust_changed_covered_lines": 11,
+    "rust_changed_executable_line_coverage_percent": 100.0,
+    "frontend_test_suites_passed": 308,
+    "frontend_tests_passed": 41468,
+    "frontend_total_line_coverage_percent": 94.22,
+    "frontend_changed_executable_lines": 5,
+    "frontend_changed_covered_lines": 5,
+    "frontend_changed_executable_line_coverage_percent": 100.0,
+    "rust_only_source_tree_tracked_paths": 1971,
+    "frontend_structure_scanned_files": 616
+  },
+  "audit_recovery": {
+    "missing_postgres_url_failed_closed": true,
+    "projector_fixture_queries_updated": 3,
+    "mapper_missing_version_column_defaults": false
+  },
+  "delivery": {
+    "authority": "Gitea pull request and exact-head Actions run",
+    "dynamic_ids_embedded_in_repository": false
+  }
+}

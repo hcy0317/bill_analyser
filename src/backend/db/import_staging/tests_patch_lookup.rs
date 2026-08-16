@@ -320,6 +320,7 @@ async fn preview_pg_row_projection_reads_explicit_cents_payload_when_database_av
         r#"
         SELECT
             7::BIGINT AS id,
+            3::BIGINT AS version,
             'session-1'::TEXT AS session_key,
             2::BIGINT AS user_id,
             now() AS occurred_at,
@@ -350,6 +351,7 @@ async fn preview_pg_row_projection_reads_explicit_cents_payload_when_database_av
 
     let projected = preview_from_pg_row(&row).expect("preview row");
 
+    assert_eq!(projected.version, 3);
     assert_eq!(projected.preview_amount_cents, 12345);
     assert_eq!(projected.preview_destination_amount_cents, 54321);
     assert_eq!(projected.preview_main_category, "餐饮");
@@ -369,7 +371,8 @@ async fn preview_pg_row_projection_treats_typed_identity_columns_as_authoritativ
         .await?;
     let row = sqlx::query(
         r#"
-        SELECT 7::BIGINT AS id, 'session-1'::TEXT AS session_key, 2::BIGINT AS user_id,
+        SELECT 7::BIGINT AS id, 4::BIGINT AS version,
+            'session-1'::TEXT AS session_key, 2::BIGINT AS user_id,
             now() AS occurred_at, 'expense'::TEXT AS transaction_type, 111::BIGINT AS amount_cents,
             42::BIGINT AS category_id, 11::BIGINT AS account_id,
             12::BIGINT AS transfer_target_account_id, '商户'::TEXT AS merchant,
@@ -384,6 +387,7 @@ async fn preview_pg_row_projection_treats_typed_identity_columns_as_authoritativ
     .await?;
 
     let projected = preview_from_pg_row(&row)?;
+    assert_eq!(projected.version, 4);
     assert_eq!(projected.category_id, Some(42));
     assert_eq!(projected.preview_source_account_id, Some(11));
     assert_eq!(projected.preview_destination_account_id, Some(12));
@@ -402,7 +406,8 @@ async fn preview_pg_row_projection_does_not_revive_payload_identity_when_typed_c
         .await?;
     let row = sqlx::query(
         r#"
-        SELECT 8::BIGINT AS id, 'session-1'::TEXT AS session_key, 2::BIGINT AS user_id,
+        SELECT 8::BIGINT AS id, 5::BIGINT AS version,
+            'session-1'::TEXT AS session_key, 2::BIGINT AS user_id,
             now() AS occurred_at, 'expense'::TEXT AS transaction_type, 111::BIGINT AS amount_cents,
             NULL::BIGINT AS category_id, NULL::BIGINT AS account_id,
             NULL::BIGINT AS transfer_target_account_id, NULL::TEXT AS merchant,
@@ -417,6 +422,7 @@ async fn preview_pg_row_projection_does_not_revive_payload_identity_when_typed_c
     .await?;
 
     let projected = preview_from_pg_row(&row)?;
+    assert_eq!(projected.version, 5);
     assert_eq!(projected.category_id, None);
     assert_eq!(projected.preview_source_account_id, None);
     assert_eq!(projected.preview_destination_account_id, None);

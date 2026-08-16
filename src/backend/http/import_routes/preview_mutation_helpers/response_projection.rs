@@ -29,8 +29,17 @@ mod preview_state_response_projection_tests {
 
     #[test]
     fn canonical_preview_response_includes_the_typed_state_snapshot() {
+        let contract: Value = serde_json::from_str(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../tests/fixtures/import_preview_row_version_contract.json"
+        )))
+        .expect("row version contract fixture");
+        let contract_row = &contract["current_server_row"];
         let value = preview_row_to_value(ImportPreviewRow {
-            id: 1,
+            id: contract_row["id"].as_i64().expect("fixture preview id"),
+            version: contract_row["row_version"]
+                .as_i64()
+                .expect("fixture row version"),
             session_id: "session-1".to_string(),
             user_id: 2,
             preview_date: "2026-08-16T00:00:00Z".to_string(),
@@ -61,6 +70,8 @@ mod preview_state_response_projection_tests {
         });
 
         assert_eq!(value["matching"]["parser"]["id"], json!("wechat"));
+        assert_eq!(value["row_version"], contract_row["row_version"]);
+        assert!(contract["legacy_server_row"].get("row_version").is_none());
         assert_eq!(value["preview_state"]["projection_version"], json!(1));
         assert_eq!(value["preview_state"]["signals"], json!(["parser"]));
     }

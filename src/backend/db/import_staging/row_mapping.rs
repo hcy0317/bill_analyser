@@ -126,6 +126,7 @@ fn preview_from_pg_row(row: &PgRow) -> DbResult<ImportPreviewRow> {
         .unwrap_or_else(|| row.try_get::<i64, _>("amount_cents").unwrap_or_default());
     Ok(ImportPreviewRow {
         id: row.try_get("id")?,
+        version: row.try_get("version")?,
         session_id,
         user_id: row.try_get("user_id")?,
         preview_date: payload_text(&payload, "preview_date").unwrap_or_else(|| {

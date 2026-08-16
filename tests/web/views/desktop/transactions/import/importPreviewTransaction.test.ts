@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
 import { describe, expect, test } from '@jest/globals';
 
 import { CategoryType } from '@/core/category.ts';
@@ -13,6 +16,19 @@ import type {
     ImportPreviewCategoryMap,
     ImportPreviewRecord
 } from '@/views/desktop/transactions/import/importPreview.ts';
+
+interface ImportPreviewRowVersionContract {
+    current_server_row: { id: number; row_version: number };
+    legacy_server_row: { id: number };
+}
+
+function loadRowVersionContract(): ImportPreviewRowVersionContract {
+    const fixturePath = resolve(
+        process.cwd(),
+        '../../tests/fixtures/import_preview_row_version_contract.json'
+    );
+    return JSON.parse(readFileSync(fixturePath, 'utf8')) as ImportPreviewRowVersionContract;
+}
 
 const categoriesById: ImportPreviewCategoryMap = {
     expenseParent: {
@@ -83,8 +99,10 @@ describe('import preview transaction helper', () => {
     });
 
     test('builds a transfer ImportTransaction from preview data with default category and parser context', () => {
+        const contract = loadRowVersionContract();
         const transaction = buildImportTransactionFromPreviewRecord({
-            id: 42,
+            id: contract.current_server_row.id,
+            row_version: contract.current_server_row.row_version,
             preview_type: '转账',
             suggested_preview_type: '投资',
             preview_date: '2026-06-01T00:00:00Z',
@@ -138,7 +156,9 @@ describe('import preview transaction helper', () => {
         expect(transaction.isManuallyAnnotated).toBe(true);
         expect(transaction.selected).toBe(true);
         expect(transaction._previewId).toBe(42);
+        expect(transaction._rowVersion).toBe(contract.current_server_row.row_version);
         expect(transaction.index).toBe(42);
+        expect(contract.legacy_server_row).not.toHaveProperty('row_version');
     });
 
     test('keeps structured transfer matching feedback visible as a signal', () => {

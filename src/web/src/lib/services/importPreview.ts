@@ -4,6 +4,7 @@ import type { ApiResponse } from '@/core/api.ts';
 import { TransactionType } from '@/core/transaction.ts';
 import { DEFAULT_UPLOAD_API_TIMEOUT } from '@/consts/api.ts';
 import type { ImportTransactionResponsePageWrapper } from '@/models/imported_transaction.ts';
+import type { ImportPreviewPageData, ImportPreviewRecord } from '@/models/import_preview.ts';
 import type {
     ImportLearningPromoteResponse,
     ImportLearningSuggestionsResponse
@@ -36,8 +37,8 @@ interface MatchingCandidateActionResponse {
     reviewStatus?: string;
     effect?: string;
     suppressed?: boolean;
-    previewItem?: Record<string, unknown>;
-    preview?: Array<Record<string, unknown>>;
+    previewItem?: ImportPreviewRecord;
+    preview?: ImportPreviewRecord[];
     pair?: Record<string, unknown>;
     bill?: Record<string, unknown>;
 }
@@ -70,7 +71,18 @@ interface UpdateImportPreviewItemPayload {
 
 interface UpdateImportPreviewItemResponse {
     updated: boolean;
-    previewItem?: Record<string, unknown>;
+    previewItem?: ImportPreviewRecord;
+}
+
+interface ImportPreviewDecisionResponse {
+    previewId?: number;
+    preview_id?: number;
+    sessionId?: string;
+    session_id?: string;
+    decision?: string;
+    effect?: string;
+    previewItem?: ImportPreviewRecord;
+    preview?: ImportPreviewRecord[];
 }
 
 /**
@@ -192,7 +204,7 @@ const importPreviewServices = {
         sessionId: string,
         payload: UpdateImportPreviewItemPayload
     }): ApiResponsePromise<UpdateImportPreviewItemResponse> => {
-        return axios.put<{ success?: boolean, data?: { updated?: boolean, previewItem?: Record<string, unknown> } }>(`bills/import/v2/preview/${encodeURIComponent(sessionId)}/update`, payload).then(response => {
+        return axios.put<{ success?: boolean, data?: { updated?: boolean, previewItem?: ImportPreviewRecord } }>(`bills/import/v2/preview/${encodeURIComponent(sessionId)}/update`, payload).then(response => {
             return buildApiResponse(response, {
                 updated: !!(response.data?.data?.updated ?? response.data?.success),
                 previewItem: response.data?.data?.previewItem
@@ -214,7 +226,7 @@ const importPreviewServices = {
         selectedOnly?: boolean,
         previewIds?: number[],
         signal?: string
-    }): ApiResponsePromise<Record<string, unknown>> => {
+    }): ApiResponsePromise<ImportPreviewPageData> => {
         const params: Record<string, string | number | boolean> = {};
         if (typeof page === 'number') {
             params['page'] = page;
@@ -232,7 +244,7 @@ const importPreviewServices = {
             params['signal'] = signal;
         }
 
-        return axios.get<ApiDataResponse<Record<string, unknown>>>(`bills/import/v2/preview/${encodeURIComponent(sessionId)}`, {
+        return axios.get<ApiDataResponse<ImportPreviewPageData>>(`bills/import/v2/preview/${encodeURIComponent(sessionId)}`, {
             params
         }).then(response => {
             return buildApiResponse(response, response.data?.data);
@@ -274,8 +286,8 @@ const importPreviewServices = {
         previewId: number,
         decision: 'accept' | 'reject' | 'clear',
         payload?: Record<string, unknown>
-    }): ApiResponsePromise<Record<string, unknown>> => {
-        return axios.post<ApiDataResponse<Record<string, unknown>>>(`bills/import/v2/preview-item/${encodeURIComponent(String(previewId))}/transfer-decision`, {
+    }): ApiResponsePromise<ImportPreviewDecisionResponse> => {
+        return axios.post<ApiDataResponse<ImportPreviewDecisionResponse>>(`bills/import/v2/preview-item/${encodeURIComponent(String(previewId))}/transfer-decision`, {
             decision,
             ...(payload || {})
         }).then(response => {

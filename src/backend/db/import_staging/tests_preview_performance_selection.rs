@@ -1,6 +1,7 @@
 fn performance_selection_preview_row(id: i64, selected: bool) -> ImportPreviewRow {
     ImportPreviewRow {
         id,
+        version: 1,
         session_id: "selection-hash-session".to_string(),
         user_id: 1,
         preview_date: "2026-07-13 09:00:00".to_string(),

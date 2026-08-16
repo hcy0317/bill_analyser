@@ -3,6 +3,7 @@ use sqlx::Execute;
 fn preview_row(id: i64) -> ImportPreviewRow {
     ImportPreviewRow {
         id,
+        version: 1,
         session_id: "session".to_string(),
         user_id: 1,
         preview_date: "2026-01-01 09:00:00".to_string(),

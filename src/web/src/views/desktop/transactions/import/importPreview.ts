@@ -1,26 +1,11 @@
-import type { ImportMatchingPayload, ImportMatchingRawFlag } from '@/models/import_matching.ts';
-import type { ImportPreviewStateSnapshot } from '@/models/import_preview_state.ts';
+import type { ImportPreviewRecord } from '@/models/import_preview.ts';
 import { CategoryType } from '@/core/category.ts';
 
-export interface ImportPreviewLLMMatchingPayload {
-    suggested_type?: string;
-    suggested_category_id?: number | string;
-    suggested_main_category?: string;
-    suggested_sub_category?: string;
-    suggested_source_account?: string;
-    suggested_destination_account?: string;
-    confidence?: number | string;
-    reason?: string;
-    review_status?: string;
-    status?: string;
-    lifecycle_status?: string;
-    signal_state?: string;
-    suppressed?: ImportMatchingRawFlag;
-}
-
-export type ImportPreviewMatchingPayload = ImportMatchingPayload & {
-    llm?: ImportPreviewLLMMatchingPayload;
-};
+export type {
+    ImportPreviewLLMMatchingPayload,
+    ImportPreviewMatchingPayload,
+    ImportPreviewRecord
+} from '@/models/import_preview.ts';
 
 export interface ImportPreviewCategoryLike {
     id?: string;
@@ -39,52 +24,6 @@ export interface ImportPreviewResolvedCategoryPath {
     subCategory: string;
     displayCategory: string;
     type: number | null;
-}
-
-export interface ImportPreviewRecord {
-    id: number;
-    category_id?: number | string | null;
-    categoryId?: number | string | null;
-    preview_type?: string;
-    suggested_preview_type?: string;
-    preview_date?: string;
-    preview_amount_cents?: number;
-    preview_destination_amount_cents?: number;
-    preview_main_category?: string;
-    preview_sub_category?: string;
-    preview_source_account_id?: number | string | null;
-    preview_destination_account_id?: number | string | null;
-    preview_description?: string;
-    preview_counterparty?: string;
-    preview_payment_method?: string;
-    transfer_suggestion_score?: number;
-    transfer_suggestion_level?: string;
-    transfer_suggestion_reason?: string;
-    investment_signal_score?: number;
-    investment_signal_level?: string;
-    investment_signal_reason?: string;
-    learning_recommendation_score?: number;
-    learning_recommendation_level?: string;
-    learning_recommendation_reason?: string;
-    learning_recommendation_type?: string;
-    learning_recommendation_summary?: string;
-    investment_platform?: string;
-    investment_product?: string;
-    preview_recurring_id?: number;
-    preview_recurring_name?: string;
-    preview_recurring_candidate_count?: number;
-    preview_recurring_match_score?: number;
-    preview_recurring_match_reasons?: string;
-    preview_recurring_matched_date?: string;
-    dedup_type?: string;
-    dedup_source_ids?: Array<number | string> | string;
-    preview_parser_id?: string;
-    preview_parser_tags?: string[];
-    matching?: ImportPreviewMatchingPayload;
-    preview_state?: ImportPreviewStateSnapshot;
-    preview_is_manually_annotated?: boolean;
-    preview_selected?: boolean;
-    selected?: boolean;
 }
 
 function normalizePreviewCategoryId(rawCategoryId: number | string | null | undefined): string {

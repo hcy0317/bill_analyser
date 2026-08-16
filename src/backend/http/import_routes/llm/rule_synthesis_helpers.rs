@@ -643,8 +643,7 @@ async fn postgres_account_rule_candidate_duplicate(
 }
 
 fn category_path(main_category: &str, sub_category: &str) -> String {
-    let main_category = main_category.trim();
-    let sub_category = sub_category.trim();
+    let (main_category, sub_category) = (main_category.trim(), sub_category.trim());
     if sub_category.is_empty() {
         main_category.to_string()
     } else if main_category.is_empty() {
@@ -661,6 +660,7 @@ mod two_layer_rule_induction_tests {
     fn preview_row() -> ImportPreviewRow {
         ImportPreviewRow {
             id: 9,
+            version: 1,
             session_id: "session".to_string(),
             user_id: 1,
             preview_date: "2026-07-19".to_string(),

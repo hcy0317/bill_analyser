@@ -235,7 +235,7 @@ async function reload(done?: () => void): Promise<void> {
             page: 1,
             pageSize: 500
         });
-        rows.value = normalizeRows(((response.data.result as Record<string, unknown>)['preview'] || []) as ImportPreviewRecord[]);
+        rows.value = normalizeRows(response.data.result?.preview || []);
     } catch (error) {
         loadingError.value = error;
         showToast(error instanceof Error && error.message ? error.message : 'Failed to load import preview');

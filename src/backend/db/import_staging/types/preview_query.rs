@@ -1,6 +1,8 @@
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ImportPreviewRow {
     pub id: i64,
+    #[serde(rename = "row_version")]
+    pub version: i64,
     pub session_id: String,
     pub user_id: i64,
     pub preview_date: String,

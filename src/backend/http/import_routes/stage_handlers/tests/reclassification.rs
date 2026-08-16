@@ -3,6 +3,7 @@
         let categories = vec![category(4, 4, "资金往来", "取款存款")];
         let row = ImportPreviewRow {
             id: 7,
+            version: 1,
             session_id: "session".to_string(),
             user_id: 1,
             preview_date: "2026-01-01 09:00:00".to_string(),
@@ -206,6 +207,7 @@
 
         let row = ImportPreviewRow {
             id: 7,
+            version: 1,
             session_id: "session".to_string(),
             user_id: 1,
             preview_date: "2026-01-01 09:00:00".to_string(),

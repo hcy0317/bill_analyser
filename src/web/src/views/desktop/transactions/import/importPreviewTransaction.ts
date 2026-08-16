@@ -14,6 +14,7 @@ import { normalizeStrictAbsoluteCents } from './strictCents.ts';
 
 export type ImportPreviewTransactionDraft = ImportTransaction & {
     _previewId?: number;
+    _rowVersion?: number;
     _shouldClearTransferDecision?: boolean;
     _shouldClearLearningDecision?: boolean;
     _shouldClearLlmDecision?: boolean;
@@ -205,6 +206,7 @@ export function buildImportTransactionFromPreviewRecord(
     const previewIndex = typeof item.id === 'number' ? item.id : index;
     const transaction = ImportTransaction.of(responseItem, previewIndex) as ImportPreviewTransactionDraft;
     transaction._previewId = item.id;
+    transaction._rowVersion = item.row_version;
 
     return transaction;
 }

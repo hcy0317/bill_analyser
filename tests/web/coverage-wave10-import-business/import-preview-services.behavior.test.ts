@@ -117,7 +117,7 @@ describe('import preview upload and learning service behavior', () => {
 describe('import preview lifecycle service behavior', () => {
     test('normalizes update success from either the data field or the legacy success flag', async () => {
         axiosPut
-            .mockResolvedValueOnce({ data: { success: true, data: { updated: false, previewItem: { id: 7 } } } })
+            .mockResolvedValueOnce({ data: { success: true, data: { updated: false, previewItem: { id: 7, row_version: 9 } } } })
             .mockResolvedValueOnce({ data: { success: true } });
 
         const explicit = await services.updateImportPreviewItem({
@@ -133,7 +133,7 @@ describe('import preview lifecycle service behavior', () => {
             id: 7,
             amountCents: 1234
         });
-        expect(explicit.data.result).toEqual({ updated: false, previewItem: { id: 7 } });
+        expect(explicit.data.result).toEqual({ updated: false, previewItem: { id: 7, row_version: 9 } });
         expect(fallback.data.result).toEqual({ updated: true, previewItem: undefined });
     });
 
