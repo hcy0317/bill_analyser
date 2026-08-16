@@ -379,9 +379,27 @@ async function reviewTransfer(row: MobileImportPreviewRow, decision: ImportPrevi
         await services.reviewImportTransferDecision({
             previewId: row.id,
             decision,
-            payload: { sessionId }
+            payload: {
+                expectedState: withImportPreviewRowVersion(
+                    { sessionId },
+                    row.record.row_version
+                ),
+                responseMode: 'preview-item'
+            }
         });
         await reload();
+    } catch (error) {
+        showToast(error instanceof Error && error.message ? error.message : 'Transfer decision failed');
+        const conflict = services.getImportPreviewRowVersionConflict(error);
+        if (conflict && Number(conflict.previewItem.id) === row.id) {
+            row.record = conflict.previewItem;
+            row.selected = !!(conflict.previewItem.preview_selected ?? conflict.previewItem.selected);
+            row.signal = buildImportPreviewSignalViewModelFromRecord(conflict.previewItem, {
+                formatAmountWithCurrency: formatAmountToLocalizedNumeralsWithCurrency
+            });
+        } else {
+            await reload();
+        }
     } finally {
         row.busy = false;
     }

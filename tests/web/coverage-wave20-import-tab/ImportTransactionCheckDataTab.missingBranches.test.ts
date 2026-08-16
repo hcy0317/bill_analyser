@@ -9,6 +9,7 @@ const mockLlmPreviewRecommendAccept = jest.fn<(...args: Array<any>) => Promise<a
 const mockLlmPreviewRecommendReject = jest.fn<(...args: Array<any>) => Promise<any>>();
 const mockGetMatchingSessionCandidates = jest.fn<(...args: Array<any>) => Promise<any>>();
 const mockUpdateImportPreviewItem = jest.fn<(...args: Array<any>) => Promise<any>>();
+const mockReviewImportTransferDecision = jest.fn<(...args: Array<any>) => Promise<any>>();
 const mockGetImportPreviewRowVersionConflict = jest.fn<(...args: Array<any>) => any>();
 const mockLlmPreviewRecommend = jest.fn<(...args: Array<any>) => Promise<any>>();
 const mockAnalyzeLLMTransactions = jest.fn<(...args: Array<any>) => Promise<any>>();
@@ -146,6 +147,7 @@ jest.mock('@/lib/services.ts', () => ({
         llmPreviewRecommendReject: mockLlmPreviewRecommendReject,
         getMatchingSessionCandidates: mockGetMatchingSessionCandidates,
         updateImportPreviewItem: mockUpdateImportPreviewItem,
+        reviewImportTransferDecision: mockReviewImportTransferDecision,
         getImportPreviewRowVersionConflict: mockGetImportPreviewRowVersionConflict,
         llmPreviewRecommend: mockLlmPreviewRecommend,
         analyzeLLMTransactions: mockAnalyzeLLMTransactions,
@@ -346,6 +348,7 @@ beforeEach(() => {
     mockAnalyzeLLMTransactions.mockResolvedValue({ data: { result: { candidates_created: 0 } } });
     mockGetImportLearningSuggestions.mockResolvedValue({ data: { result: { suggestions: [] } } });
     mockPromoteImportLearning.mockResolvedValue({ data: { result: { rules_total: 0 } } });
+    mockGetImportPreviewRowVersionConflict.mockReturnValue(null);
     Object.defineProperty(globalThis, 'fetch', { configurable: true, writable: true, value: mockFetch });
 });
 
@@ -481,18 +484,23 @@ describe('ImportTransactionCheckDataTab uncovered decision and refresh branches'
     test('transfer review uses the atomic replacement path without a token', async () => {
         const transaction = createTransaction(12);
         const { bindings, emit } = createBindings([transaction]);
-        mockFetch.mockResolvedValueOnce(response({
-            json: {
-                success: true,
-                data: {
+        mockReviewImportTransferDecision.mockResolvedValueOnce({
+            data: {
+                result: {
                     removedPreviewIds: [12],
                     upsertedPreviewItems: [previewFor(transaction)]
                 }
             }
-        }));
+        });
 
         await bindings.reviewTransferSuggestion(transaction, 'accept');
-        expect(mockFetch.mock.calls[0]?.[1]?.headers).not.toHaveProperty('Authorization');
+        expect(mockReviewImportTransferDecision).toHaveBeenCalledWith(expect.objectContaining({
+            previewId: 12,
+            decision: 'accept',
+            payload: expect.objectContaining({ responseMode: 'preview-item' })
+        }));
+        const request = mockReviewImportTransferDecision.mock.calls[0]?.[0];
+        expect(request.payload.expectedState).not.toHaveProperty('rowVersion');
         expect(emit).toHaveBeenCalledWith('reclassified', expect.any(Array), [12]);
     });
 

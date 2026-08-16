@@ -2224,15 +2224,18 @@ function isLLMDecisionBusy(item: ImportTransaction): boolean {
 }
 
 function getTransferDecisionExpectedState(item: ImportTransaction): Record<string, string | number | null> {
-    return buildImportCheckDecisionExpectedState({
-        sessionId: props.sessionId || '',
-        reviewStatus: item.getTransferSuggestionReviewStatus(),
-        type: item.type,
-        categoryId: item.categoryId,
-        recurringTemplateId: item.recurringTemplateId,
-        sourceAccountId: item.sourceAccountId,
-        destinationAccountId: item.destinationAccountId
-    });
+    return withImportPreviewRowVersion(
+        buildImportCheckDecisionExpectedState({
+            sessionId: props.sessionId || '',
+            reviewStatus: item.getTransferSuggestionReviewStatus(),
+            type: item.type,
+            categoryId: item.categoryId,
+            recurringTemplateId: item.recurringTemplateId,
+            sourceAccountId: item.sourceAccountId,
+            destinationAccountId: item.destinationAccountId
+        }),
+        getPreviewRowVersionFromImportTransaction(item)
+    );
 }
 
 function getLearningDecisionExpectedState(item: ImportTransaction): Record<string, string | number | null> {
@@ -2347,27 +2350,6 @@ function resolvePreviewDecisionItem(
         ? payload.preview as ImportPreviewRecord[]
         : [];
     return previewData.find(preview => Number(preview.id) === previewId) || null;
-}
-
-function parseImportDecisionErrorMessage(errorText: string, fallbackMessage: string): string {
-    const normalizedErrorText = errorText.trim();
-    if (!normalizedErrorText) {
-        return fallbackMessage;
-    }
-
-    try {
-        const payload = JSON.parse(normalizedErrorText) as Record<string, unknown>;
-        for (const key of ['error', 'message']) {
-            const message = payload[key];
-            if (typeof message === 'string' && message.trim()) {
-                return message.trim();
-            }
-        }
-    } catch {
-        // The server may return a plain-text domain error.
-    }
-
-    return normalizedErrorText;
 }
 
 function getImportDecisionErrorMessage(error: unknown, fallbackMessage: string): string {
@@ -2509,38 +2491,17 @@ async function reviewTransferSuggestion(
     logger.info(`[转账建议决策] 开始: preview_id=${previewId}, decision=${decision}`);
 
     try {
-        const token = getCurrentToken();
-        const headers: Record<string, string> = {
-            'Content-Type': 'application/json'
-        };
-        if (token) {
-            headers['Authorization'] = `Bearer ${token}`;
-        }
-
-        const response = await fetch(`/api/bills/import/v2/preview-item/${previewId}/transfer-decision`, {
-            method: 'POST',
-            headers: headers,
-            body: JSON.stringify({
-                decision,
+        const response = await services.reviewImportTransferDecision({
+            previewId,
+            decision,
+            payload: {
                 expectedState: getTransferDecisionExpectedState(item),
                 responseMode: 'preview-item'
-            })
+            }
         });
+        const result = response.data.result;
 
-        if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(parseImportDecisionErrorMessage(
-                errorText,
-                `Transfer decision failed (${response.status})`
-            ));
-        }
-
-        const result = await response.json();
-        if (!result.success) {
-            throw new Error(result.error || 'Unknown error');
-        }
-
-        const replacement = resolveDecisionPreviewReplacement(result.data);
+        const replacement = resolveDecisionPreviewReplacement(result);
         if (replacement) {
             commitEditingTransactionDraft();
             emit('reclassified', replacement.upsertedPreviewItems, replacement.removedPreviewIds);
@@ -2549,13 +2510,13 @@ async function reviewTransferSuggestion(
             return;
         }
 
-        if ((result.data?.sessionId || '') !== props.sessionId) {
+        if ((result?.sessionId || result?.session_id || '') !== props.sessionId) {
             throw new Error('Transfer decision response is out of date');
         }
 
         commitEditingTransactionDraft();
 
-        const refreshedPreview = resolvePreviewDecisionItem(result.data, previewId);
+        const refreshedPreview = resolvePreviewDecisionItem(result, previewId);
         if (!refreshedPreview) {
             throw new Error('Transfer decision response missing preview item');
         }
@@ -2565,6 +2526,12 @@ async function reviewTransferSuggestion(
 
         snackbar.value?.showMessage(tt(getTransferDecisionMessageKey(decision)));
     } catch (error) {
+        const conflict = services.getImportPreviewRowVersionConflict(error);
+        if (conflict && Number(conflict.previewItem.id) === previewId) {
+            commitEditingTransactionDraft();
+            syncTransactionFromPreviewDecision(item, conflict.previewItem);
+            rebaseImportPreviewTextSyncConflict(item, conflict.previewItem);
+        }
         logger.error(`[转账建议决策] 失败: ${error}`);
         snackbar.value?.showMessage(getImportDecisionErrorMessage(error, 'Transfer decision failed'));
     } finally {

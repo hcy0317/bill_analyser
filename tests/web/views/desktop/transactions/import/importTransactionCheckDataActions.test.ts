@@ -10,6 +10,8 @@ const mockLlmPreviewRecommend = jest.fn<(...args: Array<any>) => Promise<any>>()
 const mockAnalyzeLLMTransactions = jest.fn<(...args: Array<any>) => Promise<any>>();
 const mockGetImportLearningSuggestions = jest.fn<(...args: Array<any>) => Promise<any>>();
 const mockPromoteImportLearning = jest.fn<(...args: Array<any>) => Promise<any>>();
+const mockReviewImportTransferDecision = jest.fn<(...args: Array<any>) => Promise<any>>();
+const mockGetImportPreviewRowVersionConflict = jest.fn<(...args: Array<any>) => any>();
 
 const mockExpenseChild = {
     id: '8',
@@ -127,7 +129,9 @@ jest.mock('@/lib/services.ts', () => ({
         llmPreviewRecommend: mockLlmPreviewRecommend,
         analyzeLLMTransactions: mockAnalyzeLLMTransactions,
         getImportLearningSuggestions: mockGetImportLearningSuggestions,
-        promoteImportLearning: mockPromoteImportLearning
+        promoteImportLearning: mockPromoteImportLearning,
+        reviewImportTransferDecision: mockReviewImportTransferDecision,
+        getImportPreviewRowVersionConflict: mockGetImportPreviewRowVersionConflict
     }
 }));
 jest.mock('@/lib/server_settings.ts', () => ({ isTransactionFromAIImageRecognitionEnabled: () => false }));
@@ -281,6 +285,7 @@ beforeEach(() => {
     mockAnalyzeLLMTransactions.mockResolvedValue({ data: { result: { candidates_created: 0 } } });
     mockGetImportLearningSuggestions.mockResolvedValue({ data: { result: { suggestions: [] } } });
     mockPromoteImportLearning.mockResolvedValue({ data: { result: { rules_total: 0 } } });
+    mockGetImportPreviewRowVersionConflict.mockReturnValue(null);
     Object.defineProperty(globalThis, 'fetch', { configurable: true, writable: true, value: mockFetch });
 });
 
@@ -359,14 +364,9 @@ describe('desktop import category, account, and decision baselines', () => {
             const transaction = createTransaction(150);
             const bindings = createBindings([transaction]);
             bindings.syncTransferDecisionBaseline(transaction);
-            mockFetch.mockResolvedValueOnce({
-                ok: false,
-                status: 500,
-                text: async () => JSON.stringify({
-                    error: 'Rust import route runtime DB error',
-                    success: false
-                })
-            });
+            mockReviewImportTransferDecision.mockRejectedValueOnce(
+                new Error('Rust import route runtime DB error')
+            );
 
             await bindings.reviewTransferSuggestion(transaction, 'accept');
 
@@ -378,14 +378,9 @@ describe('desktop import category, account, and decision baselines', () => {
         }
     });
 
-    test('normalizes empty, plain-text, JSON, Error, and string decision failures', () => {
+    test('normalizes Error, string, and unknown decision failures', () => {
         const bindings = createBindings([createTransaction(154)]);
 
-        expect(bindings.parseImportDecisionErrorMessage('', 'fallback')).toBe('fallback');
-        expect(bindings.parseImportDecisionErrorMessage('plain domain failure', 'fallback'))
-            .toBe('plain domain failure');
-        expect(bindings.parseImportDecisionErrorMessage('{"message":" structured failure "}', 'fallback'))
-            .toBe('structured failure');
         expect(bindings.getImportDecisionErrorMessage(new Error(' runtime failure '), 'fallback'))
             .toBe('runtime failure');
         expect(bindings.getImportDecisionErrorMessage(' string failure ', 'fallback'))

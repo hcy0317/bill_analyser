@@ -344,6 +344,7 @@ pub async fn preview_transfer_decision_runtime_handler(
         Ok(expected_state) => expected_state,
         Err(response) => return route_response(response),
     };
+    let expected_row_version = expected_state.expected_row_version;
     let mut runtime = match open_runtime(&state) {
         Ok(runtime) => runtime,
         Err(response) => return route_response(response),
@@ -383,7 +384,10 @@ pub async fn preview_transfer_decision_runtime_handler(
         group_id: group.id,
         decision: decision_name(decision).to_string(),
         expected_group_version: group.version,
-        expected_preview_versions: decision_group_preview_versions(group),
+        expected_preview_versions: decision_group_preview_versions(
+            group,
+            expected_row_version.map(|version| (preview_id, version)),
+        ),
     };
     match apply_import_decision_group_command(runtime.connection(), user_id, &command) {
         Ok(ImportDecisionGroupCommandResult::Applied(mut result)) => {
@@ -426,7 +430,22 @@ pub async fn preview_transfer_decision_runtime_handler(
                 "upsertedPreviewItems": result.upserted_preview_items,
             })))
         },
-        Ok(ImportDecisionGroupCommandResult::Conflict | ImportDecisionGroupCommandResult::MaterializationPending) =>
+        Ok(ImportDecisionGroupCommandResult::Conflict) => {
+            if let Some(expected) = expected_row_version {
+                match get_preview_bill_by_id(runtime.connection(), preview_id, user_id) {
+                    Ok(Some(latest_row)) if latest_row.version != expected => {
+                        return route_response(preview_row_version_conflict_response(
+                            expected,
+                            latest_row,
+                        ));
+                    }
+                    Ok(_) => {}
+                    Err(error) => return route_response(db_error_response(error)),
+                }
+            }
+            route_response(import_v2_error_response(409, "Decision group state conflict"))
+        }
+        Ok(ImportDecisionGroupCommandResult::MaterializationPending) =>
             route_response(import_v2_error_response(409, "Decision group state conflict")),
         Ok(ImportDecisionGroupCommandResult::MaterializationFailed) =>
             route_response(import_v2_error_response(500, "Decision group materialization failed")),
@@ -438,8 +457,9 @@ pub async fn preview_transfer_decision_runtime_handler(
 
 fn decision_group_preview_versions(
     group: &bill_analyser_db::ImportDecisionGroupRow,
+    expected_anchor: Option<(i64, i64)>,
 ) -> Vec<ImportDecisionPreviewVersion> {
-    group
+    let mut versions = group
         .members
         .iter()
         .filter_map(|member| Some((member.preview_row_id?, member.version)))
@@ -449,7 +469,16 @@ fn decision_group_preview_versions(
             preview_row_id,
             version,
         })
-        .collect()
+        .collect::<Vec<_>>();
+    if let Some((preview_row_id, version)) = expected_anchor {
+        if let Some(anchor) = versions
+            .iter_mut()
+            .find(|item| item.preview_row_id == preview_row_id)
+        {
+            anchor.version = version;
+        }
+    }
+    versions
 }
 
 async fn decision_group_response_items(

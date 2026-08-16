@@ -215,13 +215,19 @@ describe('import preview lifecycle service behavior', () => {
         await services.reviewImportTransferDecision({
             previewId: 12,
             decision: 'accept',
-            payload: { destination_account_id: 9 }
+            payload: {
+                destination_account_id: 9,
+                expectedState: { sessionId: 'session-12', rowVersion: 4 },
+                responseMode: 'preview-item'
+            }
         });
         await services.reviewImportTransferDecision({ previewId: 13, decision: 'clear' });
 
         expect(axiosPost).toHaveBeenNthCalledWith(1, 'bills/import/v2/preview-item/12/transfer-decision', {
             decision: 'accept',
-            destination_account_id: 9
+            destination_account_id: 9,
+            expectedState: { sessionId: 'session-12', rowVersion: 4 },
+            responseMode: 'preview-item'
         });
         expect(axiosPost).toHaveBeenNthCalledWith(2, 'bills/import/v2/preview-item/13/transfer-decision', {
             decision: 'clear'

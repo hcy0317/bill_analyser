@@ -98,6 +98,96 @@
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    async fn stale_transfer_row_version_returns_typed_conflict_without_advancing_group() {
+        let Some((state, user_id, session_id)) = import_postgres_test_state().await else {
+            return;
+        };
+        let preview_id =
+            insert_legacy_same_batch_transfer_fixture(&state, user_id, &session_id).await;
+        let runtime = state
+            .open_postgres_repository_runtime("stale-transfer-row-version")
+            .expect("postgres runtime");
+        let pool = runtime.pool();
+        let canonical_user = UserId::new(user_id as u64).expect("positive user id");
+        let stale_preview = get_preview_bill_by_id(pool, preview_id, canonical_user)
+            .expect("stale preview lookup")
+            .expect("stale preview row");
+
+        let concurrent_patch = ImportPreviewPatch::new(preview_id).with_change(
+            ImportPreviewPatchField::Description,
+            ImportPreviewPatchValue::Text("newer concurrent transfer description".to_string()),
+        );
+        assert!(
+            update_preview_bill(pool, &session_id, canonical_user, &concurrent_patch)
+                .expect("concurrent preview update")
+        );
+        let latest_preview = get_preview_bill_by_id(pool, preview_id, canonical_user)
+            .expect("latest preview lookup")
+            .expect("latest preview row");
+        assert_eq!(latest_preview.version, stale_preview.version + 1);
+        let groups_before = get_import_decision_groups_by_session(
+            pool,
+            &session_id,
+            canonical_user,
+        )
+        .expect("decision groups before stale request");
+        let command_versions = decision_group_preview_versions(
+            groups_before.first().expect("transfer decision group"),
+            Some((preview_id, stale_preview.version)),
+        );
+        assert_eq!(
+            command_versions
+                .iter()
+                .find(|item| item.preview_row_id == preview_id)
+                .map(|item| item.version),
+            Some(stale_preview.version),
+            "the client anchor token must reach the repository CAS command"
+        );
+
+        let (status, body) = import_test_response(
+            preview_transfer_decision_runtime_handler(
+                State(state),
+                Path(preview_id),
+                import_test_headers(user_id),
+                Json(json!({
+                    "decision": "reject",
+                    "expectedState": {
+                        "sessionId": session_id,
+                        "rowVersion": stale_preview.version,
+                        "type": "转账",
+                        "mainCategory": "",
+                        "subCategory": ""
+                    }
+                })),
+            )
+            .await,
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::CONFLICT, "body: {body}");
+        assert_eq!(body["code"], "PREVIEW_ROW_VERSION_CONFLICT");
+        assert_eq!(body["data"]["expected_row_version"], stale_preview.version);
+        assert_eq!(body["data"]["actual_row_version"], latest_preview.version);
+        assert_eq!(body["data"]["previewItem"]["id"], preview_id);
+        assert_eq!(
+            body["data"]["previewItem"]["preview_description"],
+            "newer concurrent transfer description"
+        );
+
+        let preview_after = get_preview_bill_by_id(pool, preview_id, canonical_user)
+            .expect("preview lookup after stale request")
+            .expect("preview row after stale request");
+        assert_eq!(preview_after, latest_preview);
+        let groups_after = get_import_decision_groups_by_session(
+            pool,
+            &session_id,
+            canonical_user,
+        )
+        .expect("decision groups after stale request");
+        assert_eq!(groups_after, groups_before);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
     async fn same_batch_transfer_reject_reclassification_preserves_manual_identity_fields() {
         let Some((state, user_id, session_id)) = import_postgres_test_state().await else {
             return;

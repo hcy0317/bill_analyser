@@ -701,6 +701,120 @@ describe('P3 import lifecycle production SFC coverage', () => {
         }
     });
 
+    test('desktop transfer row-version conflict rebases through the shared service contract', async () => {
+        const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+        const transaction = createDesktopDecisionTransaction();
+        transaction._rowVersion = 5;
+        const latest = {
+            id: 77,
+            row_version: 6,
+            preview_type: 'expense',
+            preview_description: 'authoritative transfer memo',
+            preview_counterparty: 'authoritative transfer merchant',
+            preview_payment_method: 'card',
+            matching: {
+                ...transaction.matching,
+                transfer: { ...transaction.matching.transfer, review_status: 'accepted' }
+            }
+        };
+        const conflictError = new Error('preview row changed');
+        mockReviewImportTransferDecision.mockRejectedValueOnce(conflictError);
+        mockGetImportPreviewRowVersionConflict.mockReturnValueOnce({
+            expected_row_version: 5,
+            actual_row_version: 6,
+            previewItem: latest
+        });
+        try {
+            const bindings = (ImportTransactionCheckDataTab as any).setup(
+                {
+                    importTransactions: [transaction],
+                    sessionId: 'session-desktop',
+                    serverPaged: false
+                },
+                { emit: jest.fn(), expose: jest.fn() }
+            );
+            bindings.syncTransferDecisionBaseline(transaction);
+
+            await bindings.reviewTransferSuggestion(transaction, 'reject');
+
+            expect(mockReviewImportTransferDecision).toHaveBeenCalledWith({
+                previewId: 77,
+                decision: 'reject',
+                payload: {
+                    expectedState: expect.objectContaining({
+                        sessionId: 'session-desktop',
+                        rowVersion: 5
+                    }),
+                    responseMode: 'preview-item'
+                }
+            });
+            expect(transaction._rowVersion).toBe(6);
+            expect(transaction.comment).toBe('authoritative transfer memo');
+        } finally {
+            warnSpy.mockRestore();
+        }
+    });
+
+    test('mobile transfer row-version conflict rebases from the 409 snapshot without reloading', async () => {
+        const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+        const conflictError = new Error('preview row changed');
+        const latest = {
+            id: 46,
+            row_version: 6,
+            preview_selected: false,
+            preview_counterparty: 'Authoritative transfer merchant',
+            preview_state: previewStateSnapshot(['transfer'], { transfer: 'accepted' }),
+            matching: { transfer: { review_status: 'accepted' } }
+        };
+        mockReviewImportTransferDecision.mockRejectedValueOnce(conflictError);
+        mockGetImportPreviewRowVersionConflict.mockReturnValueOnce({
+            expected_row_version: 5,
+            actual_row_version: 6,
+            previewItem: latest
+        });
+        mockGetImportPreviewPage.mockClear();
+        try {
+            const bindings = (ImportPreviewPage as any).setup(
+                {
+                    f7route: { query: { sessionId: 'session-mobile' } },
+                    f7router: { back: jest.fn() }
+                },
+                { expose: jest.fn() }
+            );
+            const row = {
+                id: 46,
+                record: {
+                    id: 46,
+                    row_version: 5,
+                    preview_selected: true,
+                    preview_state: previewStateSnapshot(['transfer']),
+                    matching: { transfer: { review_status: 'pending' } }
+                },
+                selected: true,
+                signal: {},
+                busy: false
+            };
+            bindings.rows.value = [row];
+
+            await bindings.reviewTransfer(row, 'accept');
+
+            expect(mockReviewImportTransferDecision).toHaveBeenCalledWith({
+                previewId: 46,
+                decision: 'accept',
+                payload: {
+                    expectedState: { sessionId: 'session-mobile', rowVersion: 5 },
+                    responseMode: 'preview-item'
+                }
+            });
+            expect(row.record).toBe(latest);
+            expect(row.selected).toBe(false);
+            expect(mockGetImportPreviewPage).not.toHaveBeenCalled();
+            expect(row.busy).toBe(false);
+        } finally {
+            warnSpy.mockRestore();
+        }
+    });
+
     test('desktop learning row-version conflict rebases from the 409 snapshot without candidate reload', async () => {
         const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
         const transaction = createDesktopDecisionTransaction();
@@ -1628,6 +1742,7 @@ describe('P3 import lifecycle production SFC coverage', () => {
     test('desktop decision actions cover guards, authoritative success payloads, and stale responses', async () => {
         const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
         const transaction = createRenderableDesktopTransaction(3, 30);
+        transaction._rowVersion = 5;
         const bindings = (ImportTransactionCheckDataTab as any).setup(
             {
                 importTransactions: [transaction],
@@ -1656,7 +1771,6 @@ describe('P3 import lifecycle production SFC coverage', () => {
             matching: item.matching,
             ...overrides
         });
-        const fetchSpy = jest.spyOn(global, 'fetch');
         try {
             bindings.syncTransferDecisionBaseline(transaction);
             bindings.syncLearningDecisionBaseline(transaction);
@@ -1683,50 +1797,48 @@ describe('P3 import lifecycle production SFC coverage', () => {
             await bindings.reviewTransferSuggestion(transaction, 'accept');
             bindings.getPreviewState(transaction)._shouldClearTransferDecision = false;
 
-            mockCurrentToken = 'coverage-token';
-            fetchSpy
+            const firstTransferCall = mockReviewImportTransferDecision.mock.calls.length;
+            mockReviewImportTransferDecision
                 .mockResolvedValueOnce({
-                    ok: true,
-                    json: async () => ({
-                        success: true,
-                        data: {
+                    data: {
+                        result: {
                             sessionId: 'session-desktop-decisions',
+                            previewItem: previewFor(transaction, { row_version: 6 })
+                        }
+                    }
+                })
+                .mockRejectedValueOnce(new Error('business reject'))
+                .mockRejectedValueOnce(new Error('Unknown error'))
+                .mockResolvedValueOnce({
+                    data: {
+                        result: {
+                            sessionId: 'stale-session',
                             previewItem: previewFor(transaction)
                         }
-                    })
-                } as Response)
+                    }
+                })
                 .mockResolvedValueOnce({
-                    ok: true,
-                    json: async () => ({ success: false, error: 'business reject' })
-                } as Response)
-                .mockResolvedValueOnce({
-                    ok: true,
-                    json: async () => ({ success: false })
-                } as Response)
-                .mockResolvedValueOnce({
-                    ok: true,
-                    json: async () => ({
-                        success: true,
-                        data: { sessionId: 'stale-session', previewItem: previewFor(transaction) }
-                    })
-                } as Response)
-                .mockResolvedValueOnce({
-                    ok: true,
-                    json: async () => ({
-                        success: true,
-                        data: { sessionId: 'session-desktop-decisions' }
-                    })
-                } as Response)
-                .mockResolvedValueOnce({
-                    ok: true,
-                    json: async () => ({ success: true })
-                } as Response);
+                    data: { result: { sessionId: 'session-desktop-decisions' } }
+                })
+                .mockResolvedValueOnce({ data: { result: undefined } });
             await bindings.reviewTransferSuggestion(transaction, 'accept');
             await bindings.reviewTransferSuggestion(transaction, 'reject');
             await bindings.reviewTransferSuggestion(transaction, 'clear');
             await bindings.reviewTransferSuggestion(transaction, 'accept');
             await bindings.reviewTransferSuggestion(transaction, 'reject');
             await bindings.reviewTransferSuggestion(transaction, 'clear');
+            expect(mockReviewImportTransferDecision.mock.calls[firstTransferCall]).toEqual([{
+                previewId: transaction._previewId,
+                decision: 'accept',
+                payload: {
+                    expectedState: expect.objectContaining({
+                        sessionId: 'session-desktop-decisions',
+                        rowVersion: 5
+                    }),
+                    responseMode: 'preview-item'
+                }
+            }]);
+            expect(transaction._rowVersion).toBe(6);
 
             const blockedLearning = createRenderableDesktopTransaction(3, 38);
             bindings.syncLearningDecisionBaseline(blockedLearning);
@@ -1930,8 +2042,6 @@ describe('P3 import lifecycle production SFC coverage', () => {
             mockUpdateImportPreviewItem.mockRejectedValueOnce(new Error('sync unavailable'));
             expect(await bindings.syncLearningDecisionDraftToPreview(syncTransaction, 'candidate-error')).toBe(false);
         } finally {
-            mockCurrentToken = '';
-            fetchSpy.mockRestore();
             warnSpy.mockRestore();
         }
     });
@@ -1957,6 +2067,7 @@ describe('P3 import lifecycle production SFC coverage', () => {
             );
             const record: any = {
                 id: 91,
+                row_version: 5,
                 preview_selected: true,
                 preview_counterparty: 'Coffee Shop',
                 preview_payment_method: 'Card',
@@ -2038,7 +2149,14 @@ describe('P3 import lifecycle production SFC coverage', () => {
                 sessionId: 'session-mobile',
                 preserveUnpatchedSelection: true
             }));
-            expect(mockReviewImportTransferDecision).toHaveBeenCalled();
+            expect(mockReviewImportTransferDecision).toHaveBeenLastCalledWith({
+                previewId: 91,
+                decision: 'accept',
+                payload: {
+                    expectedState: { sessionId: 'session-mobile', rowVersion: 5 },
+                    responseMode: 'preview-item'
+                }
+            });
             expect(mockAcceptMatchingCandidate).toHaveBeenCalled();
             expect(mockRejectMatchingCandidate).toHaveBeenCalled();
             expect(mockClearMatchingCandidate).toHaveBeenCalled();
@@ -2209,7 +2327,8 @@ describe('P3 import lifecycle production SFC coverage', () => {
             expect(bindings.confirming.value).toBe(false);
 
             mockReviewImportTransferDecision.mockRejectedValueOnce(new Error('transfer failed'));
-            await expect(bindings.reviewTransfer(historyRow, 'reject')).rejects.toThrow('transfer failed');
+            await bindings.reviewTransfer(historyRow, 'reject');
+            expect(mockShowToast).toHaveBeenCalledWith('transfer failed');
             expect(historyRow.busy).toBe(false);
 
             mockAcceptMatchingCandidate.mockRejectedValueOnce(new Error('learning failed'));
