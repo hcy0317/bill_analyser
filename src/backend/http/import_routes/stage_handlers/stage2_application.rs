@@ -14,7 +14,33 @@ impl ImportStage2 {
         let load_started_at = Instant::now();
         let rows = load_import_stage2_context(connection, user_id).await?;
         let context = ImportStage2ContextSnapshot::from_rows(rows);
-        let mut stats = evaluate_import_intelligence_snapshot(connection, drafts, &context)?;
+        let (mut stats, prepared_learning, category_before_projection) =
+            prepare_import_intelligence_snapshot(drafts, &context)?;
+        let lifecycle_keys = prepared_learning
+            .iter()
+            .map(|prepared| prepared.recommendation_key.clone())
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+        let lifecycle_started_at = Instant::now();
+        let lifecycle_by_key = load_import_stage2_learning_lifecycle_views(
+            connection,
+            user_id,
+            &lifecycle_keys,
+        )
+        .await?
+        .into_iter()
+        .map(|lifecycle| (lifecycle.recommendation_key.clone(), lifecycle))
+        .collect::<BTreeMap<_, _>>();
+        stats.elapsed_learning_rule_ns += lifecycle_started_at.elapsed().as_nanos();
+        finish_import_intelligence_snapshot(
+            drafts,
+            &context,
+            prepared_learning,
+            category_before_projection,
+            &lifecycle_by_key,
+            &mut stats,
+        );
         stats._elapsed_load_ms = import_stage_elapsed_ms(load_started_at);
         Ok(stats)
     }

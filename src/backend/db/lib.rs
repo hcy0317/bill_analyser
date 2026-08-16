@@ -109,9 +109,10 @@ pub use import_config::{
 pub use import_stage2::{
     load_import_stage2_account_records, load_import_stage2_account_rule_candidates,
     load_import_stage2_category_records, load_import_stage2_category_rule_records,
-    load_import_stage2_context, load_import_stage2_recurring_template_records,
-    ImportStage2AccountRecord, ImportStage2CategoryRecord, ImportStage2CategoryRuleRecord,
-    ImportStage2ContextRows, ImportStage2LearningRuleRecord, ImportStage2RecurringTemplateRecord,
+    load_import_stage2_context, load_import_stage2_learning_lifecycle_views,
+    load_import_stage2_recurring_template_records, ImportStage2AccountRecord,
+    ImportStage2CategoryRecord, ImportStage2CategoryRuleRecord, ImportStage2ContextRows,
+    ImportStage2LearningRuleRecord, ImportStage2RecurringTemplateRecord,
 };
 pub use import_staging::{
     apply_import_decision_group_command, apply_preview_learning_decision,

@@ -1,31 +1,31 @@
-/// 按固定顺序执行分类/周期/learning/account_rules 投影；账户规则必须在语义投影后最后运行。
+/// 先执行分类/周期并准备 learning key；账户规则在 lifecycle 批量读取后最后运行。
 #[tracing::instrument(level = "debug", skip_all)]
-fn evaluate_import_intelligence_snapshot(
-    connection: &Connection,
+fn prepare_import_intelligence_snapshot(
     drafts: &mut [ImportPreviewDraft],
     context: &ImportStage2ContextSnapshot,
-) -> Result<ImportIntelligenceStats, bill_analyser_db::DbError> {
+) -> Result<
+    (
+        ImportIntelligenceStats,
+        Vec<PreparedImportLearningRuleMatch>,
+        Vec<ImportCategoryProjectionSnapshot>,
+    ),
+    bill_analyser_db::DbError,
+> {
     let user_id_i64 = context.user_id;
     let categories = &context.categories;
     let categories_by_id = &context.categories_by_id;
-    let category_values = &context.category_values;
     let category_rules = &context.category_rules;
-    let accounts = &context.accounts;
-    let account_values = &context.account_values;
-    let account_rules = &context.account_rules;
     let learning_rules = &context.learning_rules;
     let recurring_templates = &context.recurring_templates;
     let transfer_category = context.transfer_category.as_ref();
     let mut stats = ImportIntelligenceStats::default();
-    for draft in &mut *drafts {
+    let mut prepared_learning = Vec::new();
+    let mut category_before_projection = Vec::with_capacity(drafts.len());
+    for (draft_index, draft) in drafts.iter_mut().enumerate() {
         ensure_base_matching_feedback(draft);
         canonicalize_manual_category_identity(draft, categories_by_id);
         let manual_category = manual_category_identity(draft);
-        let before_category = (
-            draft.preview_type.clone(),
-            draft.preview_main_category.clone(),
-            draft.preview_sub_category.clone(),
-        );
+        category_before_projection.push(ImportCategoryProjectionSnapshot::from_draft(draft));
         let category_started_at = Instant::now();
         let preview_rule_text = import_preview_rule_text(draft);
         demote_unauthorized_transfer_preview(draft, categories);
@@ -55,24 +55,52 @@ fn evaluate_import_intelligence_snapshot(
         }
         stats.elapsed_recurring_rule_ns += recurring_started_at.elapsed().as_nanos();
         let learning_started_at = Instant::now();
-        if let Some(result) = apply_learning_rule_match(
-            connection,
+        if let Some(prepared) = prepare_learning_rule_match(
+            draft_index,
             user_id_i64,
             draft,
             learning_rules,
             categories_by_id,
-            category_values,
-            account_values,
         )? {
-            if result.auto_applied {
-                stats.learning_applied += 1;
-            }
-            if let Some(rule_id) = result.rule_id {
-                increment_applied_learning_rules(connection, user_id_i64, &[rule_id])?;
-            }
+            prepared_learning.push(prepared);
         }
         stats.elapsed_learning_rule_ns += learning_started_at.elapsed().as_nanos();
+    }
 
+    Ok((stats, prepared_learning, category_before_projection))
+}
+
+fn finish_import_intelligence_snapshot(
+    drafts: &mut [ImportPreviewDraft],
+    context: &ImportStage2ContextSnapshot,
+    prepared_learning: Vec<PreparedImportLearningRuleMatch>,
+    category_before_projection: Vec<ImportCategoryProjectionSnapshot>,
+    lifecycle_by_key: &BTreeMap<String, ImportLearningLifecycleView>,
+    stats: &mut ImportIntelligenceStats,
+) {
+    for prepared in prepared_learning {
+        let Some(lifecycle) = lifecycle_by_key.get(&prepared.recommendation_key) else {
+            continue;
+        };
+        let Some(draft) = drafts.get_mut(prepared.draft_index) else {
+            continue;
+        };
+        let learning_started_at = Instant::now();
+        if apply_prepared_learning_rule_match(
+            draft,
+            prepared,
+            lifecycle,
+            &context.category_values,
+            &context.account_values,
+        )
+        .is_some_and(|result| result.auto_applied)
+        {
+            stats.learning_applied += 1;
+        }
+        stats.elapsed_learning_rule_ns += learning_started_at.elapsed().as_nanos();
+    }
+
+    for (draft, before_category) in drafts.iter_mut().zip(category_before_projection) {
         let before_account_rule = (
             draft.preview_source_account_id,
             draft.preview_destination_account_id,
@@ -81,19 +109,17 @@ fn evaluate_import_intelligence_snapshot(
         // recurring, and learning projections may still change the account
         // role, transaction type, or explicit accounts that rules must consume.
         let account_started_at = Instant::now();
-        apply_account_rule_match_after_semantic_projection(draft, account_rules, accounts);
+        apply_account_rule_match_after_semantic_projection(
+            draft,
+            &context.account_rules,
+            &context.accounts,
+        );
         stats.elapsed_account_rule_ns += account_started_at.elapsed().as_nanos();
         let baseline_started_at = Instant::now();
         persist_stage2_actionable_baseline(draft);
         stats.elapsed_stage2_baseline_ns += baseline_started_at.elapsed().as_nanos();
 
-        if before_category
-            != (
-                draft.preview_type.clone(),
-                draft.preview_main_category.clone(),
-                draft.preview_sub_category.clone(),
-            )
-        {
+        if before_category != ImportCategoryProjectionSnapshot::from_draft(draft) {
             stats.category_matched += 1;
         }
         if before_account_rule
@@ -105,8 +131,6 @@ fn evaluate_import_intelligence_snapshot(
             stats.account_matched += 1;
         }
     }
-
-    Ok(stats)
 }
 
 fn apply_account_rule_match_after_semantic_projection(

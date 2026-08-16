@@ -1,0 +1,103 @@
+{
+  "schema_version": "cyanflow-c3-stage2-learning-batch-read.v1",
+  "generated_at": "2026-08-16T14:40:00+08:00",
+  "workflow": {
+    "driver": "cyanflow",
+    "activity": "execute",
+    "discipline": "tdd",
+    "verification": "affected_surface"
+  },
+  "source": {
+    "base_sha": "244c30f952f82426b76936375151c739aa10f5cf",
+    "branch": "codex/c3-stage2-learning-batch-read"
+  },
+  "scope": {
+    "entrypoint": "ImportStage2::evaluate",
+    "repository": "load_import_stage2_learning_lifecycle_views",
+    "lifecycle_reads_per_nonempty_evaluation": 1,
+    "empty_key_sql_reads": 0,
+    "rest_api_changed": false,
+    "database_schema_changed": false,
+    "frontend_changed": false,
+    "confirm_protocol_changed": false
+  },
+  "behavior": {
+    "user_scoped": true,
+    "keys_deduplicated": true,
+    "deterministic_key_order": true,
+    "covered_states": [
+      "accepted",
+      "pending",
+      "suppressed",
+      "missing"
+    ],
+    "stage_order_preserved": [
+      "category",
+      "recurring",
+      "learning_prepare",
+      "learning_lifecycle_batch_read",
+      "learning_apply",
+      "account_rule",
+      "baseline"
+    ]
+  },
+  "tests": {
+    "stage2_architecture": {
+      "executed": 3,
+      "passed": 3,
+      "failed": 0,
+      "skipped": 0
+    },
+    "stage2_postgres_repository": {
+      "executed": 2,
+      "passed": 2,
+      "failed": 0,
+      "skipped": 0
+    },
+    "http_library": {
+      "executed": 205,
+      "passed": 205,
+      "failed": 0,
+      "skipped": 0
+    },
+    "workspace": "pass",
+    "clippy": "pass",
+    "format": "pass",
+    "rust_backend_structure": "pass"
+  },
+  "coverage": {
+    "workspace_lines_percent": 64.78,
+    "workspace_minimum_percent": 35,
+    "changed_executable_lines": 138,
+    "changed_covered_lines": 136,
+    "changed_lines_percent": 98.55,
+    "changed_lines_threshold_strictly_greater_than_percent": 90,
+    "status": "pass"
+  },
+  "real64": {
+    "run_id": "c3-stage2-learning-batch-worktree-20260816-r2",
+    "corpus_manifest_sha256": "0a3b595c268413d7f404d823c6a0d0456d0e81b655e47c3c3f92e412b2c4c838",
+    "file_count": 64,
+    "parsed_rows": 15041,
+    "preview_rows": 13082,
+    "unmatched_files": 0,
+    "stage1_total_ms": 4313,
+    "stage2_total_ms": 8165,
+    "preview_operable_ms": 13025,
+    "canonical_parser_filter_requests": 1,
+    "legacy_filter_index_requests": 0,
+    "business_cleanup": "success",
+    "weaviate_cleanup": "success",
+    "database_cleanup": "success"
+  },
+  "gate": {
+    "slice": "pass",
+    "recognition_parity": "pass",
+    "performance_budget": "pass",
+    "c3_exit": "pending_vector_recall_batch_read"
+  },
+  "residual": {
+    "point_read_path": "src/backend/http/import_routes/stage_vector_recall/results.rs",
+    "next_slice": "batch vector recall lifecycle reads without changing public contracts"
+  }
+}

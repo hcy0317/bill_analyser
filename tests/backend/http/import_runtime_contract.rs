@@ -151,34 +151,46 @@ async fn assembled_import_router_exposes_import_preview_config_and_learning_upda
 #[test]
 fn stage2_account_rules_run_after_semantic_projection_and_before_baseline() {
     let handlers = source("src/backend/http/import_routes/stage_handlers.rs");
-    let stage2_loop = section_between(
+    let preparation = section_between(
         &handlers,
-        "fn evaluate_import_intelligence_snapshot",
+        "fn prepare_import_intelligence_snapshot",
+        "fn finish_import_intelligence_snapshot",
+    );
+    let finish = section_between(
+        &handlers,
+        "fn finish_import_intelligence_snapshot",
         "fn apply_account_rule_match_after_semantic_projection",
     );
+    let application = source("src/backend/http/import_routes/stage_handlers/stage2_application.rs");
 
-    let transfer_demotion = position(stage2_loop, "demote_unauthorized_transfer_preview");
-    let category_projection = position(stage2_loop, "apply_transfer_category_rule_match");
-    let recurring_projection = position(stage2_loop, "best_recurring_candidate_for_draft");
-    let learning_projection = position(stage2_loop, "apply_learning_rule_match");
-    let account_pre_snapshot = position(stage2_loop, "let before_account_rule =");
+    let transfer_demotion = position(preparation, "demote_unauthorized_transfer_preview");
+    let category_projection = position(preparation, "apply_transfer_category_rule_match");
+    let recurring_projection = position(preparation, "best_recurring_candidate_for_draft");
+    let learning_preparation = position(preparation, "prepare_learning_rule_match");
+    let prepare_call = position(&application, "prepare_import_intelligence_snapshot");
+    let lifecycle_batch = position(&application, "load_import_stage2_learning_lifecycle_views");
+    let finish_call = position(&application, "finish_import_intelligence_snapshot");
+    let learning_projection = position(finish, "apply_prepared_learning_rule_match");
+    let account_pre_snapshot = position(finish, "let before_account_rule =");
     let account_rule_pass = position(
-        stage2_loop,
-        "apply_account_rule_match_after_semantic_projection(draft, account_rules, accounts);",
+        finish,
+        "apply_account_rule_match_after_semantic_projection(",
     );
-    let baseline_persist = position(stage2_loop, "persist_stage2_actionable_baseline(draft);");
-    let stats_update = position(stage2_loop, "stats.account_matched += 1;");
+    let baseline_persist = position(finish, "persist_stage2_actionable_baseline(draft);");
+    let stats_update = position(finish, "stats.account_matched += 1;");
 
     assert!(transfer_demotion < category_projection);
-    assert!(stage2_loop.contains("if is_transfer_protected_preview(draft)"));
+    assert!(preparation.contains("if is_transfer_protected_preview(draft)"));
     assert!(category_projection < recurring_projection);
-    assert!(recurring_projection < learning_projection);
+    assert!(recurring_projection < learning_preparation);
+    assert!(prepare_call < lifecycle_batch);
+    assert!(lifecycle_batch < finish_call);
     assert!(learning_projection < account_pre_snapshot);
     assert!(account_pre_snapshot < account_rule_pass);
     assert!(account_rule_pass < baseline_persist);
     assert!(baseline_persist < stats_update);
     assert!(
-        stage2_loop.contains("Account recognition is intentionally last in stage2"),
+        finish.contains("Account recognition is intentionally last in stage2"),
         "stage2 account-rule ordering comment should survive refactors"
     );
 }
@@ -209,6 +221,13 @@ fn stage2_production_paths_share_one_application_boundary_and_http_owns_no_sql()
         1,
         "one context snapshot is loaded for each stage2 batch"
     );
+    assert_eq!(
+        stage2_application
+            .matches("load_import_stage2_learning_lifecycle_views(")
+            .count(),
+        1,
+        "all matched drafts must share one lifecycle batch read"
+    );
     assert!(
         stage2_application.contains("ImportStage2ContextSnapshot"),
         "the loaded context must become an immutable batch snapshot"
@@ -222,6 +241,16 @@ fn stage2_production_paths_share_one_application_boundary_and_http_owns_no_sql()
     assert!(
         !stage2_chain.contains("SELECT "),
         "stage2 evaluation must remain transport and SQL agnostic"
+    );
+    assert!(
+        !stage2_chain.contains("get_import_learning_lifecycle_view"),
+        "the per-draft stage2 loop must not perform lifecycle point reads"
+    );
+    let stage2_learning_rules =
+        source("src/backend/http/import_routes/stage_handlers/stage2_learning_rules.rs");
+    assert!(
+        !stage2_learning_rules.contains("get_import_learning_lifecycle_view"),
+        "learning projection must consume the batch snapshot"
     );
     let repository = source("src/backend/db/import_stage2.rs");
     assert!(repository.contains("pub async fn load_import_stage2_context"));

@@ -152,14 +152,6 @@ fn apply_recurring_candidate(draft: &mut ImportPreviewDraft, candidate: ImportRe
     );
 }
 
-fn increment_applied_learning_rules(
-    _connection: &Connection,
-    _user_id: i64,
-    _rule_ids: &[i64],
-) -> Result<(), bill_analyser_db::DbError> {
-    Ok(())
-}
-
 fn import_preview_rule_text(draft: &ImportPreviewDraft) -> String {
     let mut parts = vec![
         draft.preview_counterparty.clone(),

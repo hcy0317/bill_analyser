@@ -1,13 +1,11 @@
 /// 尝试应用 deterministic learning 规则，必须尊重转账授权和 category/account 身份边界。
-fn apply_learning_rule_match(
-    connection: &Connection,
+fn prepare_learning_rule_match(
+    draft_index: usize,
     user_id: i64,
     draft: &mut ImportPreviewDraft,
     rules: &[ImportIntelligenceLearningRule],
     categories_by_id: &BTreeMap<i64, ImportIntelligenceCategory>,
-    category_values: &[Value],
-    account_values: &[Value],
-) -> Result<Option<ImportLearningRuleMatchResult>, bill_analyser_db::DbError> {
+) -> Result<Option<PreparedImportLearningRuleMatch>, bill_analyser_db::DbError> {
     let transfer_protected = is_transfer_protected_preview(draft);
     let Some(features) = build_composite_match_features(
         &draft.preview_parser_id,
@@ -154,7 +152,7 @@ fn apply_learning_rule_match(
             transfer_protected,
             ..ImportLearningRecommendationKeyInput::default()
         });
-    let lifecycle_user_id = u64::try_from(user_id)
+    u64::try_from(user_id)
         .map_err(|_| {
             bill_analyser_db::DbError::InvalidOperation(
                 "learning lifecycle received an invalid user id".to_string(),
@@ -167,14 +165,44 @@ fn apply_learning_rule_match(
                 )
             })
         })?;
-    let Some(lifecycle) =
-        get_import_learning_lifecycle_view(connection, lifecycle_user_id, &recommendation_key)?
-    else {
-        return Ok(None);
-    };
+    Ok(Some(PreparedImportLearningRuleMatch {
+        draft_index,
+        rule: rule.clone(),
+        learned_type,
+        learned_category: learned_category.cloned(),
+        recommended_category_id,
+        recommended_draft,
+        recommendation_key,
+        transfer_protected,
+        score,
+        mode,
+        reason,
+    }))
+}
+
+fn apply_prepared_learning_rule_match(
+    draft: &mut ImportPreviewDraft,
+    prepared: PreparedImportLearningRuleMatch,
+    lifecycle: &ImportLearningLifecycleView,
+    category_values: &[Value],
+    account_values: &[Value],
+) -> Option<ImportLearningRuleMatchResult> {
     if lifecycle.suppressed {
-        return Ok(None);
+        return None;
     }
+    let PreparedImportLearningRuleMatch {
+        rule,
+        learned_type,
+        learned_category,
+        recommended_category_id,
+        recommended_draft,
+        recommendation_key,
+        transfer_protected,
+        score,
+        mode,
+        reason,
+        ..
+    } = prepared;
     let mut rule_payload = Map::new();
     rule_payload.insert("learned_type".to_string(), json!(learned_type));
     rule_payload.insert(
@@ -198,8 +226,8 @@ fn apply_learning_rule_match(
         apply_learning_rule_projection(
             draft,
             learned_type.as_deref(),
-            learned_category,
-            rule,
+            learned_category.as_ref(),
+            &rule,
             transfer_protected,
         );
     }
@@ -229,10 +257,9 @@ fn apply_learning_rule_match(
             "applied_preview": applied_preview,
         }),
     );
-    Ok(Some(ImportLearningRuleMatchResult {
-        rule_id: Some(rule.id),
+    Some(ImportLearningRuleMatchResult {
         auto_applied,
-    }))
+    })
 }
 
 /// 把 learning 命中投影到 preview draft，并写入可审核 feedback 与 expected-state 证据。

@@ -136,8 +136,39 @@ struct ImportRecurringCandidateMatch {
 
 #[derive(Debug, Clone)]
 struct ImportLearningRuleMatchResult {
-    rule_id: Option<i64>,
     auto_applied: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ImportCategoryProjectionSnapshot {
+    preview_type: String,
+    main_category: String,
+    sub_category: String,
+}
+
+impl ImportCategoryProjectionSnapshot {
+    fn from_draft(draft: &ImportPreviewDraft) -> Self {
+        Self {
+            preview_type: draft.preview_type.clone(),
+            main_category: draft.preview_main_category.clone(),
+            sub_category: draft.preview_sub_category.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct PreparedImportLearningRuleMatch {
+    draft_index: usize,
+    rule: ImportIntelligenceLearningRule,
+    learned_type: Option<String>,
+    learned_category: Option<ImportIntelligenceCategory>,
+    recommended_category_id: Option<i64>,
+    recommended_draft: ImportPreviewDraft,
+    recommendation_key: String,
+    transfer_protected: bool,
+    score: f64,
+    mode: String,
+    reason: String,
 }
 
 #[derive(Debug, Clone, Copy)]

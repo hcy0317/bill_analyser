@@ -2,11 +2,13 @@
 // 维护重点：本模块只负责 user-scoped SQL 与 typed row mapping，不执行分类或学习投影。
 // 不变式：每次调用读取当前权威数据；返回值仅供一次 Stage 2 批次构建不可变快照。
 
-use bill_analyser_core::{account_rules::AccountRuleCandidate, UserId};
+use bill_analyser_core::{
+    account_rules::AccountRuleCandidate, learning_lifecycle_signal_state, UserId,
+};
 use serde_json::Value;
 use sqlx::Row;
 
-use crate::{DbError, DbResult, PostgresPool};
+use crate::{import_staging::ImportLearningLifecycleView, DbError, DbResult, PostgresPool};
 
 #[derive(Debug, Clone)]
 pub struct ImportStage2CategoryRecord {
@@ -85,6 +87,48 @@ pub async fn load_import_stage2_context(
         recurring_templates,
         cash_transfer_category_id,
     })
+}
+
+pub async fn load_import_stage2_learning_lifecycle_views(
+    pool: &PostgresPool,
+    user_id: UserId,
+    recommendation_keys: &[String],
+) -> DbResult<Vec<ImportLearningLifecycleView>> {
+    if recommendation_keys.is_empty() {
+        return Ok(Vec::new());
+    }
+    let user_id = i64::try_from(user_id.get())
+        .map_err(|_| DbError::InvalidOperation("invalid user id".to_string()))?;
+    let rows = sqlx::query(
+        r#"
+        SELECT recommendation_key, recommendation_type, status, accepted_count,
+               rejected_count, auto_applied_count, auto_apply_enabled,
+               suppressed_until IS NOT NULL AS suppressed
+        FROM import_learning_lifecycle
+        WHERE user_id = $1 AND recommendation_key = ANY($2)
+        ORDER BY recommendation_key ASC
+        "#,
+    )
+    .bind(user_id)
+    .bind(recommendation_keys)
+    .fetch_all(pool)
+    .await?;
+    rows.into_iter()
+        .map(|row| {
+            let status: String = row.try_get("status")?;
+            Ok(ImportLearningLifecycleView {
+                recommendation_key: row.try_get("recommendation_key")?,
+                recommendation_type: row.try_get("recommendation_type")?,
+                signal_state: learning_lifecycle_signal_state(&status).to_string(),
+                status,
+                accepted_count: i64::from(row.try_get::<i32, _>("accepted_count")?),
+                rejected_count: i64::from(row.try_get::<i32, _>("rejected_count")?),
+                auto_applied_count: i64::from(row.try_get::<i32, _>("auto_applied_count")?),
+                auto_apply_enabled: row.try_get("auto_apply_enabled")?,
+                suppressed: row.try_get("suppressed")?,
+            })
+        })
+        .collect()
 }
 
 pub async fn load_import_stage2_category_records(

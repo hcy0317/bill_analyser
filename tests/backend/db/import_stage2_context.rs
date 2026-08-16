@@ -1,7 +1,7 @@
 use std::{env, error::Error};
 
 use bill_analyser_core::UserId;
-use bill_analyser_db::load_import_stage2_context;
+use bill_analyser_db::{load_import_stage2_context, load_import_stage2_learning_lifecycle_views};
 use serde_json::json;
 use sqlx::Row;
 
@@ -147,6 +147,84 @@ async fn real_postgres_stage2_context_is_user_scoped_ordered_and_fresh_per_batch
         .iter()
         .all(|row| !row.name.contains("他人") && !row.name.contains("停用")));
 
+    database.cleanup().await
+}
+
+#[tokio::test]
+async fn real_postgres_stage2_learning_lifecycles_are_loaded_in_one_user_scoped_batch(
+) -> Result<(), Box<dyn Error>> {
+    let database = strict_isolated_postgres_database("import_stage2_learning_batch").await?;
+    let first_user = insert_user(&database.pool, "stage2-learning-first").await?;
+    let second_user = insert_user(&database.pool, "stage2-learning-second").await?;
+
+    for (key, status, accepted, rejected, auto_applied, auto_apply, suppressed) in [
+        ("accepted-key", "accepted", 3, 0, 0, false, false),
+        ("pending-key", "pending", 0, 0, 0, false, false),
+        ("suppressed-key", "auto_applied", 4, 1, 2, true, true),
+    ] {
+        sqlx::query(
+            r#"
+            INSERT INTO import_learning_lifecycle (
+                user_id, recommendation_key, recommendation_type, status,
+                accepted_count, rejected_count, auto_applied_count,
+                auto_apply_enabled, suppressed_until
+            ) VALUES ($1,$2,'expense',$3,$4,$5,$6,$7,
+                      CASE WHEN $8 THEN now() + interval '1 day' ELSE NULL END)
+            "#,
+        )
+        .bind(first_user)
+        .bind(key)
+        .bind(status)
+        .bind(accepted)
+        .bind(rejected)
+        .bind(auto_applied)
+        .bind(auto_apply)
+        .bind(suppressed)
+        .execute(&database.pool)
+        .await?;
+    }
+    sqlx::query(
+        "INSERT INTO import_learning_lifecycle (user_id,recommendation_key,recommendation_type,status) VALUES ($1,'accepted-key','income','accepted')",
+    )
+    .bind(second_user)
+    .execute(&database.pool)
+    .await?;
+
+    let user_id = UserId::new(first_user as u64).expect("positive fixture user");
+    let keys = vec![
+        "suppressed-key".to_string(),
+        "missing-key".to_string(),
+        "accepted-key".to_string(),
+        "pending-key".to_string(),
+        "accepted-key".to_string(),
+    ];
+    let views = load_import_stage2_learning_lifecycle_views(&database.pool, user_id, &keys).await?;
+    assert_eq!(
+        views
+            .iter()
+            .map(|view| view.recommendation_key.as_str())
+            .collect::<Vec<_>>(),
+        vec!["accepted-key", "pending-key", "suppressed-key"]
+    );
+    assert_eq!(views[0].status, "accepted");
+    assert_eq!(views[0].signal_state, "yellow");
+    assert_eq!(views[0].accepted_count, 3);
+    assert!(!views[0].auto_apply_enabled);
+    assert_eq!(views[1].status, "pending");
+    assert_eq!(views[1].signal_state, "yellow");
+    assert_eq!(views[2].status, "auto_applied");
+    assert_eq!(views[2].signal_state, "green");
+    assert_eq!(views[2].accepted_count, 4);
+    assert_eq!(views[2].rejected_count, 1);
+    assert_eq!(views[2].auto_applied_count, 2);
+    assert!(views[2].auto_apply_enabled);
+    assert!(views[2].suppressed);
+
+    assert!(
+        load_import_stage2_learning_lifecycle_views(&database.pool, user_id, &[])
+            .await?
+            .is_empty()
+    );
     database.cleanup().await
 }
 

@@ -104,22 +104,17 @@
         assert!(!learning_similarity_has_semantic_anchor(&json!({})));
     }
 
-    #[tokio::test(flavor = "multi_thread")]
-    async fn learning_match_returns_explicit_errors_and_skips_invalid_recommendations() {
-        let Some((state, user_id, _)) = import_postgres_test_state().await else {
-            return;
-        };
-        let runtime = open_runtime(&state).expect("import runtime");
+    #[test]
+    fn learning_match_preparation_returns_errors_and_skips_invalid_recommendations() {
+        let user_id = 1;
         let categories = BTreeMap::new();
         let mut blank = ImportPreviewDraft::default();
-        assert!(apply_learning_rule_match(
-            runtime.connection(),
+        assert!(prepare_learning_rule_match(
+            0,
             user_id,
             &mut blank,
             &[],
             &categories,
-            &[],
-            &[],
         )
         .expect("blank features are not an error")
         .is_none());
@@ -141,28 +136,26 @@
         )
         .expect("learning features");
         let similar_rule = learning_rule(41, String::new(), features.clone());
-        assert!(apply_learning_rule_match(
-            runtime.connection(),
+        let prepared = prepare_learning_rule_match(
+            0,
             user_id,
             &mut draft,
             &[similar_rule],
             &categories,
-            &[],
-            &[],
         )
-        .expect("missing lifecycle skips recommendation")
-        .is_none());
+        .expect("matching is prepared before lifecycle lookup")
+        .expect("matching learning rule");
+        assert_eq!(prepared.draft_index, 0);
+        assert!(!prepared.recommendation_key.is_empty());
 
         let exact_rule = learning_rule(42, composite_hash_from_features(&features), features);
         for invalid_user_id in [-1, 0] {
-            let error = apply_learning_rule_match(
-                runtime.connection(),
+            let error = prepare_learning_rule_match(
+                0,
                 invalid_user_id,
                 &mut draft.clone(),
                 std::slice::from_ref(&exact_rule),
                 &categories,
-                &[],
-                &[],
             )
             .expect_err("invalid user id must propagate as a DB error");
             assert!(error.to_string().contains("invalid user id"));
@@ -171,14 +164,12 @@
         let mut missing_category_rule = exact_rule.clone();
         missing_category_rule.learned_category_id = Some(999_999);
         let mut missing_category = draft.clone();
-        assert!(apply_learning_rule_match(
-            runtime.connection(),
+        assert!(prepare_learning_rule_match(
+            0,
             user_id,
             &mut missing_category,
             &[missing_category_rule],
             &categories,
-            &[],
-            &[],
         )
         .expect("missing category is a skipped recommendation")
         .is_none());
@@ -195,14 +186,12 @@
         let mut incompatible_rule = exact_rule;
         incompatible_rule.learned_category_id = Some(99);
         let mut incompatible = draft;
-        assert!(apply_learning_rule_match(
-            runtime.connection(),
+        assert!(prepare_learning_rule_match(
+            0,
             user_id,
             &mut incompatible,
             &[incompatible_rule],
             &categories,
-            &[],
-            &[],
         )
         .expect("incompatible category is a skipped recommendation")
         .is_none());
@@ -212,4 +201,181 @@
                 .pointer("/learning/review_status"),
             Some(&json!("skipped"))
         );
+    }
+
+    #[test]
+    fn prepared_learning_match_respects_suppressed_pending_and_auto_apply_lifecycle() {
+        let base = ImportPreviewDraft {
+            preview_type: "支出".to_string(),
+            preview_parser_id: "learning-test".to_string(),
+            preview_counterparty: "批量商户".to_string(),
+            preview_payment_method: "批量渠道".to_string(),
+            preview_description: "批量描述".to_string(),
+            preview_amount_cents: 2_400,
+            ..ImportPreviewDraft::default()
+        };
+        let features = build_composite_match_features(
+            &base.preview_parser_id,
+            &base.preview_counterparty,
+            &base.preview_description,
+            &base.preview_payment_method,
+        )
+        .expect("learning features");
+        let rule = learning_rule(51, composite_hash_from_features(&features), features);
+        let prepare = |draft: &mut ImportPreviewDraft| {
+            prepare_learning_rule_match(0, 1, draft, std::slice::from_ref(&rule), &BTreeMap::new())
+                .expect("prepare learning match")
+                .expect("matching rule")
+        };
+
+        let mut suppressed = base.clone();
+        let suppressed_match = prepare(&mut suppressed);
+        let suppressed_lifecycle = ImportLearningLifecycleView {
+            recommendation_key: suppressed_match.recommendation_key.clone(),
+            recommendation_type: "expense".to_string(),
+            status: "auto_applied".to_string(),
+            signal_state: "green".to_string(),
+            accepted_count: 2,
+            rejected_count: 1,
+            auto_applied_count: 1,
+            auto_apply_enabled: true,
+            suppressed: true,
+        };
+        assert!(apply_prepared_learning_rule_match(
+            &mut suppressed,
+            suppressed_match,
+            &suppressed_lifecycle,
+            &[],
+            &[],
+        )
+        .is_none());
+        assert!(suppressed
+            .preview_matching_feedback
+            .get("learning")
+            .is_none());
+
+        let mut pending = base.clone();
+        let pending_match = prepare(&mut pending);
+        let pending_lifecycle = ImportLearningLifecycleView {
+            recommendation_key: pending_match.recommendation_key.clone(),
+            recommendation_type: "expense".to_string(),
+            status: "pending".to_string(),
+            signal_state: "yellow".to_string(),
+            accepted_count: 0,
+            rejected_count: 0,
+            auto_applied_count: 0,
+            auto_apply_enabled: false,
+            suppressed: false,
+        };
+        let pending_result = apply_prepared_learning_rule_match(
+            &mut pending,
+            pending_match,
+            &pending_lifecycle,
+            &[],
+            &[],
+        )
+        .expect("pending recommendation remains visible");
+        assert!(!pending_result.auto_applied);
+        assert_eq!(pending.preview_source_account_id, None);
+        assert_eq!(
+            pending
+                .preview_matching_feedback
+                .pointer("/learning/review_status"),
+            Some(&json!("pending"))
+        );
+
+        let mut automatic = base;
+        let automatic_match = prepare(&mut automatic);
+        let automatic_lifecycle = ImportLearningLifecycleView {
+            recommendation_key: automatic_match.recommendation_key.clone(),
+            recommendation_type: "expense".to_string(),
+            status: "green".to_string(),
+            signal_state: "green".to_string(),
+            accepted_count: 4,
+            rejected_count: 0,
+            auto_applied_count: 3,
+            auto_apply_enabled: true,
+            suppressed: false,
+        };
+        let automatic_result = apply_prepared_learning_rule_match(
+            &mut automatic,
+            automatic_match,
+            &automatic_lifecycle,
+            &[],
+            &[],
+        )
+        .expect("green recommendation is applied");
+        assert!(automatic_result.auto_applied);
+        assert_eq!(automatic.preview_source_account_id, Some(81));
+        assert_eq!(automatic.preview_destination_account_id, Some(82));
+        assert_eq!(
+            automatic
+                .preview_matching_feedback
+                .pointer("/learning/review_status"),
+            Some(&json!("auto_applied"))
+        );
+    }
+
+    #[test]
+    fn stage2_category_matched_counts_auto_applied_learning_projection() {
+        let mut draft = ImportPreviewDraft {
+            preview_type: "收入".to_string(),
+            preview_parser_id: "learning-test".to_string(),
+            preview_counterparty: "统计商户".to_string(),
+            preview_payment_method: "统计渠道".to_string(),
+            preview_description: "统计描述".to_string(),
+            preview_amount_cents: 3_600,
+            ..ImportPreviewDraft::default()
+        };
+        let features = build_composite_match_features(
+            &draft.preview_parser_id,
+            &draft.preview_counterparty,
+            &draft.preview_description,
+            &draft.preview_payment_method,
+        )
+        .expect("learning features");
+        let rule = learning_rule(61, composite_hash_from_features(&features), features);
+        let context = ImportStage2ContextSnapshot {
+            user_id: 1,
+            categories: Vec::new(),
+            categories_by_id: BTreeMap::new(),
+            category_values: Vec::new(),
+            category_rules: ImportIntelligenceRuleSet::default(),
+            accounts: Vec::new(),
+            account_values: Vec::new(),
+            account_rules: Vec::new(),
+            learning_rules: vec![rule],
+            recurring_templates: Vec::new(),
+            transfer_category: None,
+        };
+        let (mut stats, prepared, category_before_projection) =
+            prepare_import_intelligence_snapshot(std::slice::from_mut(&mut draft), &context)
+                .expect("prepare stage2");
+        let key = prepared[0].recommendation_key.clone();
+        let lifecycle_by_key = BTreeMap::from([(
+            key.clone(),
+            ImportLearningLifecycleView {
+                recommendation_key: key,
+                recommendation_type: "expense".to_string(),
+                status: "green".to_string(),
+                signal_state: "green".to_string(),
+                accepted_count: 4,
+                rejected_count: 0,
+                auto_applied_count: 3,
+                auto_apply_enabled: true,
+                suppressed: false,
+            },
+        )]);
+
+        finish_import_intelligence_snapshot(
+            std::slice::from_mut(&mut draft),
+            &context,
+            prepared,
+            category_before_projection,
+            &lifecycle_by_key,
+            &mut stats,
+        );
+
+        assert_eq!(draft.preview_type, "支出");
+        assert_eq!(stats.category_matched, 1);
     }
