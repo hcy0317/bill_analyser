@@ -21,6 +21,7 @@ const mockServices = {
     matchImportConfig: jest.fn<(...args: any[]) => Promise<any>>(),
     suggestImportConfig: jest.fn<(...args: any[]) => Promise<any>>(),
     getImportSession: jest.fn<(...args: any[]) => Promise<any>>(),
+    getImportSessionVersionConflict: jest.fn<(...args: any[]) => any>(),
     confirmImportPreview: jest.fn<(...args: any[]) => Promise<any>>()
 };
 
@@ -387,6 +388,7 @@ beforeEach(() => {
     mockServices.getImportSession.mockResolvedValue({
         data: { result: { session_id: 'default-session', session_version: 1 } }
     });
+    mockServices.getImportSessionVersionConflict.mockReturnValue(null);
     mockServices.confirmImportPreview.mockResolvedValue({
         data: { result: { imported_count: 0 } }
     });
@@ -1400,6 +1402,41 @@ describe('ImportDialog production-loaded behavior coverage', () => {
 
         expect(mockServices.confirmImportPreview).not.toHaveBeenCalled();
         expect(snackbar.showError).toHaveBeenCalledWith(expect.stringContaining('导入会话版本无效'));
+        expect(bindings.submitting.value).toBe(false);
+    });
+
+    test('keeps the desktop preview open when confirmation detects a session version conflict', async () => {
+        const bindings = createBindings();
+        const snackbar = createSnackbar();
+        const confirmDialog = { open: jest.fn<(...args: any[]) => Promise<boolean>>(async () => true) };
+        const conflictError = { response: { status: 409 } };
+        setTemplateRef('snackbar', snackbar);
+        setTemplateRef('confirmDialog', confirmDialog);
+        setTemplateRef('importTransactionCheckDataTab', {
+            isEditing: false,
+            getSelectedVisibleHistoryRewriteOperationCount: () => 0
+        });
+        bindings.importTransactions.value = [mockBuildTransaction({ id: 74, selected: true, type: 3 }, 0)];
+        bindings.serverSessionId.value = 'session-conflict';
+        bindings.serverPagedPreviewMode.value = false;
+        mockServices.getImportSession.mockResolvedValueOnce({
+            data: { result: { session_id: 'session-conflict', session_version: 18 } }
+        });
+        mockServices.confirmImportPreview.mockRejectedValueOnce(conflictError);
+        mockServices.getImportSessionVersionConflict.mockReturnValueOnce({
+            expected_session_version: 18,
+            actual_session_version: 19,
+            session: { session_id: 'session-conflict', session_version: 19 }
+        });
+
+        await bindings.submit();
+        await flushAsync();
+
+        expect(mockServices.getImportSessionVersionConflict).toHaveBeenCalledWith(conflictError);
+        expect(mockServices.confirmImportPreview).toHaveBeenCalledTimes(1);
+        expect(snackbar.showError).toHaveBeenCalledWith('导入会话已变化，请刷新预览后重试');
+        expect(bindings.currentStep.value).not.toBe('finalResult');
+        expect(bindings.serverSessionId.value).toBe('session-conflict');
         expect(bindings.submitting.value).toBe(false);
     });
 

@@ -13,6 +13,7 @@ const mockLlmPreviewRecommendAccept = jest.fn<(...args: Array<unknown>) => Promi
 const mockLlmPreviewRecommendReject = jest.fn<(...args: Array<unknown>) => Promise<any>>();
 const mockReviewImportTransferDecision = jest.fn<(...args: Array<unknown>) => Promise<any>>();
 const mockConfirmImportPreview = jest.fn<(...args: Array<unknown>) => Promise<any>>();
+const mockGetImportSessionVersionConflict = jest.fn<(...args: Array<unknown>) => any>();
 const mockUpdateImportPreviewItem = jest.fn<(...args: Array<unknown>) => Promise<any>>();
 const mockGetImportPreviewRowVersionConflict = jest.fn<(...args: Array<unknown>) => any>();
 const mockLlmPreviewRecommend = jest.fn<(...args: Array<unknown>) => Promise<any>>();
@@ -110,6 +111,7 @@ jest.mock('@/lib/services.ts', () => ({
         llmPreviewRecommendReject: mockLlmPreviewRecommendReject,
         reviewImportTransferDecision: mockReviewImportTransferDecision,
         confirmImportPreview: mockConfirmImportPreview,
+        getImportSessionVersionConflict: mockGetImportSessionVersionConflict,
         updateImportPreviewItem: mockUpdateImportPreviewItem,
         getImportPreviewRowVersionConflict: mockGetImportPreviewRowVersionConflict,
         llmPreviewRecommend: mockLlmPreviewRecommend,
@@ -2180,6 +2182,38 @@ describe('P3 import lifecycle production SFC coverage', () => {
         } finally {
             warnSpy.mockRestore();
         }
+    });
+
+    test('keeps the mobile preview open when confirmation detects a session version conflict', async () => {
+        const conflictError = { response: { status: 409 } };
+        const back = jest.fn();
+        mockConfirmImportPreview.mockClear();
+        mockGetImportSessionVersionConflict.mockClear();
+        mockGetImportSession.mockResolvedValueOnce({
+            data: { result: { session_id: 'session-mobile-conflict', session_version: 21 } }
+        });
+        mockConfirmImportPreview.mockRejectedValueOnce(conflictError);
+        mockGetImportSessionVersionConflict.mockReturnValueOnce({
+            expected_session_version: 21,
+            actual_session_version: 22,
+            session: { session_id: 'session-mobile-conflict', session_version: 22 }
+        });
+        mockShowToast.mockClear();
+
+        const bindings = (ImportPreviewPage as any).setup(
+            {
+                f7route: { query: { sessionId: 'session-mobile-conflict' } },
+                f7router: { back }
+            },
+            { expose: jest.fn() }
+        );
+        await bindings.confirmSelectedNow();
+
+        expect(mockGetImportSessionVersionConflict).toHaveBeenCalledWith(conflictError);
+        expect(mockConfirmImportPreview).toHaveBeenCalledTimes(1);
+        expect(mockShowToast).toHaveBeenLastCalledWith('Import session changed, please refresh');
+        expect(back).not.toHaveBeenCalled();
+        expect(bindings.confirming.value).toBe(false);
     });
 
     test('mobile likely transfer belongs to transfer and read-only learning filters', () => {

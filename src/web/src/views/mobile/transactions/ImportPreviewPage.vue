@@ -372,7 +372,7 @@ async function confirmSelectedNow(): Promise<void> {
         showToast('Import completed');
         props.f7router.back();
     } catch (error) {
-        showToast(error instanceof Error && error.message ? error.message : 'Failed to confirm import preview');
+        showToast(services.getImportSessionVersionConflict(error) ? 'Import session changed, please refresh' : error instanceof Error && error.message ? error.message : 'Failed to confirm import preview');
     } finally {
         confirming.value = false;
     }

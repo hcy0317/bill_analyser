@@ -1715,7 +1715,10 @@ async function submit(): Promise<void> {
 
         } catch (error) {
             logger.error('[三阶段导入-阶段3] 失败:', error);
-            snackbar.value?.showError(`导入失败: ${error}`);
+            const sessionVersionConflict = services.getImportSessionVersionConflict(error);
+            snackbar.value?.showError(sessionVersionConflict
+                ? '导入会话已变化，请刷新预览后重试'
+                : `导入失败: ${error}`);
         } finally {
             submitting.value = false;
         }
