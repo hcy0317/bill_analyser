@@ -52,6 +52,32 @@ mod vector_recall_tests {
         }
     }
 
+    fn lifecycle(
+        recommendation_key: &str,
+        suppressed: bool,
+        auto_apply_enabled: bool,
+    ) -> ImportLearningLifecycleView {
+        ImportLearningLifecycleView {
+            recommendation_key: recommendation_key.to_string(),
+            recommendation_type: "learning_rule".to_string(),
+            status: if auto_apply_enabled {
+                "accepted".to_string()
+            } else {
+                "pending".to_string()
+            },
+            signal_state: if auto_apply_enabled {
+                "green".to_string()
+            } else {
+                "yellow".to_string()
+            },
+            accepted_count: i64::from(auto_apply_enabled),
+            rejected_count: 0,
+            auto_applied_count: 0,
+            auto_apply_enabled,
+            suppressed,
+        }
+    }
+
     #[tokio::test]
     async fn vector_recall_skips_network_without_sources() -> VectorRecallTestResult {
         let Ok(postgres_url) = std::env::var("BILL_ANALYSER_TEST_POSTGRES_URL") else {
@@ -88,6 +114,112 @@ mod vector_recall_tests {
         pool: &sqlx::PgPool,
     ) -> VectorRecallTestResult {
         bill_analyser_db::run_postgres_migrations(pool).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn vector_recall_batch_lifecycle_reads_real_postgres_fail_closed(
+    ) -> VectorRecallTestResult {
+        let postgres_url = std::env::var("BILL_ANALYSER_TEST_POSTGRES_URL")
+            .expect("BILL_ANALYSER_TEST_POSTGRES_URL is required for vector lifecycle batch test");
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .max_connections(2)
+            .connect(&postgres_url)
+            .await?;
+        ensure_import_learning_vector_source_tables(&pool).await?;
+        let unique = Utc::now().timestamp_nanos_opt().unwrap_or_default();
+        let user_id: i64 =
+            sqlx::query_scalar("INSERT INTO users (username, email) VALUES ($1,$2) RETURNING id")
+                .bind(format!("vector-batch-{unique}"))
+                .bind(format!("vector-batch-{unique}@example.test"))
+                .fetch_one(&pool)
+                .await?;
+        let foreign_user_id: i64 =
+            sqlx::query_scalar("INSERT INTO users (username, email) VALUES ($1,$2) RETURNING id")
+                .bind(format!("vector-batch-foreign-{unique}"))
+                .bind(format!("vector-batch-foreign-{unique}@example.test"))
+                .fetch_one(&pool)
+                .await?;
+        let mut drafts = vec![ImportPreviewDraft {
+            preview_parser_id: "alipay".to_string(),
+            preview_type: "支出".to_string(),
+            preview_counterparty: "咖啡店".to_string(),
+            preview_description: "拿铁".to_string(),
+            preview_payment_method: "支付宝".to_string(),
+            ..Default::default()
+        }];
+        let hit = vector_hit("postgres-batch", 0.93, Some(0.07));
+        let prepared = prepare_import_learning_vector_recall_hit(
+            user_id,
+            &drafts[0],
+            &hit,
+            &BTreeMap::new(),
+        )
+        .expect("vector candidate prepares");
+        let recommendation_key = prepared.recommendation_key.clone();
+        drop(prepared);
+        for (fixture_user_id, status) in [(user_id, "pending"), (foreign_user_id, "accepted")] {
+            sqlx::query(
+                r#"
+                INSERT INTO import_learning_lifecycle (
+                    user_id, recommendation_key, recommendation_type, status,
+                    accepted_count, auto_apply_enabled, suppressed_until
+                ) VALUES ($1,$2,'expense',$3,$4,$5,NULL)
+                ON CONFLICT (user_id, recommendation_key) DO UPDATE SET
+                    status = excluded.status,
+                    accepted_count = excluded.accepted_count,
+                    auto_apply_enabled = excluded.auto_apply_enabled,
+                    suppressed_until = NULL,
+                    updated_at = now()
+                "#,
+            )
+            .bind(fixture_user_id)
+            .bind(&recommendation_key)
+            .bind(status)
+            .bind(i32::from(status == "accepted"))
+            .bind(status == "accepted")
+            .execute(&pool)
+            .await?;
+        }
+        let results = vec![ImportLearningVectorRecallResult {
+            draft_index: 0,
+            scope_order: 0,
+            hits: vec![hit],
+        }];
+
+        let recalled =
+            apply_import_learning_vector_recall_results(&pool, user_id, &mut drafts, &results)
+                .await?;
+
+        assert_eq!(recalled, 1);
+        assert_eq!(
+            drafts[0].preview_matching_feedback["learning"]["recommendation_key"],
+            recommendation_key
+        );
+        assert_eq!(
+            drafts[0].preview_matching_feedback["learning"]["lifecycle_status"],
+            "pending"
+        );
+        assert_eq!(
+            drafts[0].preview_matching_feedback["learning"]["signal_state"],
+            "yellow"
+        );
+        assert_eq!(
+            drafts[0].preview_matching_feedback["learning"]["postgres_source_id"],
+            "postgres-batch"
+        );
+
+        sqlx::query(
+            "DELETE FROM import_learning_lifecycle WHERE user_id = ANY($1) AND recommendation_key = $2",
+        )
+        .bind(vec![user_id, foreign_user_id])
+        .bind(&recommendation_key)
+        .execute(&pool)
+        .await?;
+        sqlx::query("DELETE FROM users WHERE id = ANY($1)")
+            .bind(vec![user_id, foreign_user_id])
+            .execute(&pool)
+            .await?;
         Ok(())
     }
 
@@ -154,6 +286,119 @@ mod vector_recall_tests {
         assert_eq!(candidates[0].1.postgres_source_id, "investment-high");
         assert_eq!(candidates[1].1.postgres_source_id, "expense-medium");
         assert_eq!(candidates[2].1.postgres_source_id, "income-low");
+    }
+
+    #[test]
+    fn vector_recall_falls_back_after_missing_or_suppressed_lifecycle() {
+        let draft = ImportPreviewDraft {
+            preview_parser_id: "alipay".to_string(),
+            preview_type: "支出".to_string(),
+            preview_counterparty: "咖啡店".to_string(),
+            preview_description: "拿铁".to_string(),
+            preview_payment_method: "支付宝".to_string(),
+            ..Default::default()
+        };
+        let mut high = vector_hit("high", 0.95, Some(0.05));
+        high.transaction_type = Some("income".to_string());
+        let low = vector_hit("low", 0.85, Some(0.15));
+        let high_prepared = prepare_import_learning_vector_recall_hit(
+            1,
+            &draft,
+            &high,
+            &BTreeMap::new(),
+        )
+        .expect("high candidate prepares");
+        let low_prepared = prepare_import_learning_vector_recall_hit(
+            1,
+            &draft,
+            &low,
+            &BTreeMap::new(),
+        )
+        .expect("low candidate prepares");
+        let candidates = vec![high_prepared, low_prepared];
+
+        let mut after_missing = draft.clone();
+        let missing_high = BTreeMap::from([(
+            candidates[1].recommendation_key.clone(),
+            lifecycle(&candidates[1].recommendation_key, false, false),
+        )]);
+        assert!(apply_first_available_import_learning_vector_recall_candidate(
+            &mut after_missing,
+            &candidates,
+            &missing_high,
+            &[],
+            &[],
+        ));
+        assert_eq!(
+            after_missing.preview_matching_feedback["learning"]["postgres_source_id"],
+            "low"
+        );
+
+        let mut after_suppressed = draft;
+        let suppressed_high = BTreeMap::from([
+            (
+                candidates[0].recommendation_key.clone(),
+                lifecycle(&candidates[0].recommendation_key, true, false),
+            ),
+            (
+                candidates[1].recommendation_key.clone(),
+                lifecycle(&candidates[1].recommendation_key, false, false),
+            ),
+        ]);
+        assert!(apply_first_available_import_learning_vector_recall_candidate(
+            &mut after_suppressed,
+            &candidates,
+            &suppressed_high,
+            &[],
+            &[],
+        ));
+        assert_eq!(
+            after_suppressed.preview_matching_feedback["learning"]["postgres_source_id"],
+            "low"
+        );
+    }
+
+    #[test]
+    fn vector_recall_never_auto_applies_derived_metadata() {
+        let mut draft = ImportPreviewDraft {
+            preview_parser_id: "alipay".to_string(),
+            preview_type: "支出".to_string(),
+            preview_counterparty: "咖啡店".to_string(),
+            preview_description: "拿铁".to_string(),
+            preview_payment_method: "支付宝".to_string(),
+            ..Default::default()
+        };
+        let hit = vector_hit("accepted-vector", 0.91, Some(0.09));
+        let prepared = prepare_import_learning_vector_recall_hit(
+            1,
+            &draft,
+            &hit,
+            &BTreeMap::new(),
+        )
+        .expect("candidate prepares");
+        let lifecycle = lifecycle(&prepared.recommendation_key, false, true);
+
+        assert!(apply_prepared_import_learning_vector_recall_hit(
+            &mut draft,
+            &prepared,
+            &lifecycle,
+            &[],
+            &[],
+        )
+        .is_some());
+        assert_eq!(
+            draft.preview_matching_feedback["learning"]["signal_state"],
+            "yellow"
+        );
+        assert_eq!(
+            draft.preview_matching_feedback["learning"]["auto_apply"],
+            false
+        );
+        assert_eq!(
+            draft.preview_matching_feedback["learning"]["auto_apply_blocked_reason"],
+            "weaviate_metadata_is_derived"
+        );
+        assert_eq!(draft.preview_type, "支出");
     }
 
     #[test]

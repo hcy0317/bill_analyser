@@ -1,3 +1,12 @@
+#[derive(Debug)]
+struct PreparedImportLearningVectorRecallCandidate<'a> {
+    hit: &'a WeaviateImportLearningRecallHit,
+    recommendation_key: String,
+    learned_type: Option<String>,
+    recommended_category_id: Option<i64>,
+    applied_preview: Value,
+}
+
 /// 把向量召回结果按 draft 顺序应用回 preview，并写入可审核 learning feedback。
 async fn apply_import_learning_vector_recall_results(
     connection: &Connection,
@@ -44,33 +53,105 @@ async fn apply_import_learning_vector_recall_results(
         }
     }
 
-    let mut applied = 0;
+    let mut prepared_by_draft =
+        BTreeMap::<usize, Vec<PreparedImportLearningVectorRecallCandidate<'_>>>::new();
+    let mut recommendation_keys = BTreeSet::new();
     for (draft_index, mut candidates) in hits_by_draft {
-        let Some(draft) = drafts.get_mut(draft_index) else {
+        let Some(draft) = drafts.get(draft_index) else {
             continue;
         };
         if draft.preview_matching_feedback.get("learning").is_some() {
             continue;
         }
         sort_import_learning_vector_recall_candidates(&mut candidates);
-        for (_, hit) in candidates {
-            if apply_import_learning_vector_recall_hit(
-                connection,
-                user_id,
-                draft,
-                hit,
-                &categories_by_id,
-                &category_values,
-                &account_values,
-            )
-            .is_some()
-            {
-                applied += 1;
-                break;
-            }
+        let prepared = candidates
+            .into_iter()
+            .filter_map(|(_, hit)| {
+                prepare_import_learning_vector_recall_hit(
+                    user_id,
+                    draft,
+                    hit,
+                    &categories_by_id,
+                )
+            })
+            .inspect(|candidate| {
+                recommendation_keys.insert(candidate.recommendation_key.clone());
+            })
+            .collect::<Vec<_>>();
+        if !prepared.is_empty() {
+            prepared_by_draft.insert(draft_index, prepared);
+        }
+    }
+
+    let Some(lifecycle_user_id) = u64::try_from(user_id)
+        .ok()
+        .and_then(|value| UserId::new(value).ok())
+    else {
+        return Ok(0);
+    };
+    let recommendation_keys = recommendation_keys.into_iter().collect::<Vec<_>>();
+    let lifecycle_views = match load_import_stage2_learning_lifecycle_views(
+        connection,
+        lifecycle_user_id,
+        &recommendation_keys,
+    )
+    .await
+    {
+        Ok(views) => views,
+        Err(error) => {
+            tracing::warn!(
+                domain = "import_parser",
+                operation = "import_learning_vector_lifecycle_batch_read",
+                error = %error,
+                "vector recall lifecycle batch read failed; no derived suggestions applied"
+            );
+            return Ok(0);
+        }
+    };
+    let lifecycle_by_key = lifecycle_views
+        .into_iter()
+        .map(|view| (view.recommendation_key.clone(), view))
+        .collect::<BTreeMap<_, _>>();
+
+    let mut applied = 0;
+    for (draft_index, candidates) in prepared_by_draft {
+        let Some(draft) = drafts.get_mut(draft_index) else {
+            continue;
+        };
+        if apply_first_available_import_learning_vector_recall_candidate(
+            draft,
+            &candidates,
+            &lifecycle_by_key,
+            &category_values,
+            &account_values,
+        ) {
+            applied += 1;
         }
     }
     Ok(applied)
+}
+
+fn apply_first_available_import_learning_vector_recall_candidate(
+    draft: &mut ImportPreviewDraft,
+    candidates: &[PreparedImportLearningVectorRecallCandidate<'_>],
+    lifecycle_by_key: &BTreeMap<String, ImportLearningLifecycleView>,
+    category_values: &[Value],
+    account_values: &[Value],
+) -> bool {
+    candidates.iter().any(|candidate| {
+        lifecycle_by_key
+            .get(&candidate.recommendation_key)
+            .and_then(|lifecycle| {
+                apply_prepared_import_learning_vector_recall_hit(
+                    draft,
+                    candidate,
+                    lifecycle,
+                    category_values,
+                    account_values,
+                )
+            })
+            .is_some()
+    })
 }
 
 fn sort_import_learning_vector_recall_candidates(
@@ -95,16 +176,13 @@ fn sort_import_learning_vector_recall_candidates(
     });
 }
 
-/// 应用单条 recall hit，必须校验 category/account id 并避免覆盖已有人工或规则结果。
-fn apply_import_learning_vector_recall_hit(
-    connection: &Connection,
+/// 准备单条 recall hit 的 recommendation key 和投影快照，不访问数据库。
+fn prepare_import_learning_vector_recall_hit<'a>(
     user_id: i64,
-    draft: &mut ImportPreviewDraft,
-    hit: &WeaviateImportLearningRecallHit,
+    draft: &ImportPreviewDraft,
+    hit: &'a WeaviateImportLearningRecallHit,
     categories_by_id: &BTreeMap<i64, ImportIntelligenceCategory>,
-    category_values: &[Value],
-    account_values: &[Value],
-) -> Option<()> {
+) -> Option<PreparedImportLearningVectorRecallCandidate<'a>> {
     if hit
         .rule_state
         .as_deref()
@@ -163,9 +241,10 @@ fn apply_import_learning_vector_recall_hit(
         &vector_rule,
         transfer_protected,
     );
+    let applied_preview = import_preview_stage2_snapshot(&recommended_draft);
     if learned_type.is_none()
         && recommended_category_id.is_none()
-        && import_preview_stage2_snapshot(&recommended_draft) == import_preview_stage2_snapshot(draft)
+        && applied_preview == import_preview_stage2_snapshot(draft)
     {
         return None;
     }
@@ -190,17 +269,30 @@ fn apply_import_learning_vector_recall_hit(
             ..ImportLearningRecommendationKeyInput::default()
         },
     );
-    let lifecycle_user_id = u64::try_from(user_id).ok().and_then(|value| UserId::new(value).ok())?;
-    let lifecycle = get_import_learning_lifecycle_view(
-        connection,
-        lifecycle_user_id,
-        &recommendation_key,
-    )
-    .ok()
-    .flatten()?;
-    if lifecycle.suppressed {
+    Some(PreparedImportLearningVectorRecallCandidate {
+        hit,
+        recommendation_key,
+        learned_type,
+        recommended_category_id,
+        applied_preview,
+    })
+}
+
+/// 应用已准备的 recall hit，只消费同批 lifecycle snapshot，不执行数据库读取。
+fn apply_prepared_import_learning_vector_recall_hit(
+    draft: &mut ImportPreviewDraft,
+    candidate: &PreparedImportLearningVectorRecallCandidate<'_>,
+    lifecycle: &ImportLearningLifecycleView,
+    category_values: &[Value],
+    account_values: &[Value],
+) -> Option<()> {
+    if lifecycle.recommendation_key != candidate.recommendation_key || lifecycle.suppressed {
         return None;
     }
+    let hit = candidate.hit;
+    let learned_type = &candidate.learned_type;
+    let recommended_category_id = candidate.recommended_category_id;
+    let recommendation_key = &candidate.recommendation_key;
     let mut rule_payload = Map::new();
     rule_payload.insert("learned_type".to_string(), json!(learned_type));
     rule_payload.insert(
@@ -216,8 +308,8 @@ fn apply_import_learning_vector_recall_hit(
         json!(hit.destination_account_id),
     );
     let previous_preview = import_preview_stage2_snapshot(draft);
-    let applied_preview = import_preview_stage2_snapshot(&recommended_draft);
-    let recommended_type_value = applied_preview
+    let recommended_type_value = candidate
+        .applied_preview
         .get("preview_type")
         .cloned()
         .unwrap_or_else(|| json!(draft.preview_type.clone()));
@@ -258,7 +350,7 @@ fn apply_import_learning_vector_recall_hit(
             "rejected_count": lifecycle.rejected_count,
             "auto_applied_count": lifecycle.auto_applied_count,
             "previous_preview": previous_preview,
-            "applied_preview": applied_preview,
+            "applied_preview": candidate.applied_preview.clone(),
         }),
     );
     Some(())

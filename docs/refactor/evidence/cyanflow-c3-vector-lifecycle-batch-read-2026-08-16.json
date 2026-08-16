@@ -1,0 +1,126 @@
+{
+  "schema_version": "cyanflow-c3-vector-lifecycle-batch-read.v1",
+  "generated_at": "2026-08-16T16:07:49+08:00",
+  "workflow": {
+    "driver": "cyanflow",
+    "activity": "execute",
+    "discipline": "tdd",
+    "verification": "affected_surface"
+  },
+  "source": {
+    "base_sha": "f7524daa44990ea07a2e69ccb9d31b3a7d717a62",
+    "branch": "codex/c3-vector-lifecycle-batch-read",
+    "worktree_binary_sha256": "87242a1b39fad3115a462d9ea14efc42224b090c77cba71b86e7adfee3781366",
+    "runner_head_sha_note": "The runner records the base Git HEAD because the verified worktree was not committed yet."
+  },
+  "scope": {
+    "entrypoint": "apply_import_learning_vector_recall_results",
+    "repository": "load_import_stage2_learning_lifecycle_views",
+    "batch_repository_call_sites": 1,
+    "point_read_call_sites": 0,
+    "sql_reads_with_nonempty_keys": 1,
+    "sql_reads_with_empty_keys": 0,
+    "rest_api_changed": false,
+    "database_schema_changed": false,
+    "frontend_changed": false,
+    "confirm_protocol_changed": false
+  },
+  "behavior": {
+    "user_scoped": true,
+    "keys_deduplicated": true,
+    "candidate_order": [
+      "score_desc",
+      "scope_order_asc",
+      "distance_asc",
+      "postgres_source_id_asc"
+    ],
+    "missing_lifecycle_falls_through": true,
+    "suppressed_lifecycle_falls_through": true,
+    "batch_error_degrades_without_partial_projection": true,
+    "weaviate_metadata_auto_applies": false,
+    "transfer_protection_preserved": true
+  },
+  "tests": {
+    "red_architecture": {
+      "executed": 1,
+      "passed": 0,
+      "failed": 1,
+      "failure": "expected one batch repository call site, found zero"
+    },
+    "import_runtime_contract": {
+      "executed": 7,
+      "passed": 7,
+      "failed": 0,
+      "skipped": 0
+    },
+    "stage2_postgres_repository": {
+      "executed": 2,
+      "passed": 2,
+      "failed": 0,
+      "skipped": 0
+    },
+    "vector_recall_focused": {
+      "executed": 10,
+      "passed": 10,
+      "failed": 0,
+      "skipped": 0,
+      "postgres_required_fail_closed": true
+    },
+    "http_library": {
+      "executed": 208,
+      "passed": 208,
+      "failed": 0,
+      "skipped": 0
+    },
+    "workspace": "pass",
+    "clippy": "pass",
+    "format": "pass",
+    "rust_backend_structure": "pass",
+    "diff_check": "pass"
+  },
+  "coverage": {
+    "workspace_lines_percent": 65.06,
+    "workspace_minimum_percent": 35,
+    "changed_executable_lines": 101,
+    "changed_covered_lines": 94,
+    "changed_lines_percent": 93.07,
+    "changed_lines_threshold_strictly_greater_than_percent": 90,
+    "status": "pass"
+  },
+  "real64": {
+    "run_id": "c3-vector-lifecycle-batch-worktree-20260816-r1",
+    "corpus_manifest_sha256": "0a3b595c268413d7f404d823c6a0d0456d0e81b655e47c3c3f92e412b2c4c838",
+    "file_count": 64,
+    "parsed_rows": 15041,
+    "preview_rows": 13082,
+    "unmatched_files": 0,
+    "stage1_total_ms": 8084,
+    "stage2_total_ms": 14909,
+    "preview_operable_ms": 23862,
+    "canonical_parser_filter_requests": 1,
+    "legacy_filter_index_requests": 0,
+    "business_cleanup": "success",
+    "weaviate_cleanup": "success",
+    "database_cleanup": "success"
+  },
+  "budgets_ms": {
+    "stage1": 12000,
+    "stage2": 20000,
+    "end_to_end": 60000,
+    "stage1_status": "pass",
+    "stage2_status": "pass",
+    "end_to_end_status": "pass"
+  },
+  "gate": {
+    "slice": "pass",
+    "recognition_parity": "pass",
+    "performance_budget": "pass",
+    "deterministic_learning_point_reads": 0,
+    "vector_recall_point_reads": 0,
+    "c3_exit": "pass"
+  },
+  "next": {
+    "stage": "C4",
+    "slice": "typed import API weak-type and row-version characterization"
+  }
+}

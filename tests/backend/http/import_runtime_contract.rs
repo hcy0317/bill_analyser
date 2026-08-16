@@ -258,6 +258,31 @@ fn stage2_production_paths_share_one_application_boundary_and_http_owns_no_sql()
 }
 
 #[test]
+fn vector_recall_projects_lifecycle_from_one_batch_repository_read() {
+    let results = source("src/backend/http/import_routes/stage_vector_recall/results.rs");
+
+    assert_eq!(
+        results
+            .matches("load_import_stage2_learning_lifecycle_views(")
+            .count(),
+        1,
+        "all vector recall candidates must share one user-scoped lifecycle batch read"
+    );
+    assert!(
+        !results.contains("get_import_learning_lifecycle_view"),
+        "vector recall projection must not retain a per-candidate lifecycle point read"
+    );
+    assert!(
+        results.contains("prepare_import_learning_vector_recall_hit"),
+        "recommendation keys must be prepared before the lifecycle batch read"
+    );
+    assert!(
+        results.contains("apply_prepared_import_learning_vector_recall_hit"),
+        "prepared candidates must consume the immutable lifecycle snapshot"
+    );
+}
+
+#[test]
 fn stage2_materialization_dispatches_decision_groups_after_preview() {
     let handlers = source("src/backend/http/import_routes/stage_handlers.rs");
     let handler = section_between(
