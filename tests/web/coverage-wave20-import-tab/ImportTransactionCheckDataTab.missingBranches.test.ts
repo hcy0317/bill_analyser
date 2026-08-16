@@ -10,6 +10,7 @@ const mockLlmPreviewRecommendReject = jest.fn<(...args: Array<any>) => Promise<a
 const mockGetMatchingSessionCandidates = jest.fn<(...args: Array<any>) => Promise<any>>();
 const mockUpdateImportPreviewItem = jest.fn<(...args: Array<any>) => Promise<any>>();
 const mockReviewImportTransferDecision = jest.fn<(...args: Array<any>) => Promise<any>>();
+const mockReclassifyImportPreview = jest.fn<(...args: Array<any>) => Promise<any>>();
 const mockGetImportPreviewRowVersionConflict = jest.fn<(...args: Array<any>) => any>();
 const mockLlmPreviewRecommend = jest.fn<(...args: Array<any>) => Promise<any>>();
 const mockAnalyzeLLMTransactions = jest.fn<(...args: Array<any>) => Promise<any>>();
@@ -148,6 +149,7 @@ jest.mock('@/lib/services.ts', () => ({
         getMatchingSessionCandidates: mockGetMatchingSessionCandidates,
         updateImportPreviewItem: mockUpdateImportPreviewItem,
         reviewImportTransferDecision: mockReviewImportTransferDecision,
+        reclassifyImportPreview: mockReclassifyImportPreview,
         getImportPreviewRowVersionConflict: mockGetImportPreviewRowVersionConflict,
         llmPreviewRecommend: mockLlmPreviewRecommend,
         analyzeLLMTransactions: mockAnalyzeLLMTransactions,
@@ -534,18 +536,18 @@ describe('ImportTransactionCheckDataTab uncovered decision and refresh branches'
 });
 
 describe('ImportTransactionCheckDataTab uncovered server, LLM, and management branches', () => {
-    test('reclassify commits an active edit and reports both empty protocol errors', async () => {
+    test('reclassify commits an active edit and reports domain and unknown service errors', async () => {
         const transaction = createTransaction(20);
         const { bindings } = createBindings([transaction]);
         bindings.editingTransaction.value = transaction;
         bindings.editingTags.value = [];
-        mockFetch.mockResolvedValueOnce(response({ json: { success: false, error: 'reclassify rejected' } }));
+        mockReclassifyImportPreview.mockRejectedValueOnce(new Error('reclassify rejected'));
         await bindings.reclassifySelected();
         expect(mockShowMessage).toHaveBeenLastCalledWith(expect.stringContaining('reclassify rejected'));
 
-        mockFetch.mockResolvedValueOnce(response({ json: { success: false, error: '' } }));
+        mockReclassifyImportPreview.mockRejectedValueOnce({});
         await bindings.reclassifySelected();
-        expect(mockShowMessage).toHaveBeenLastCalledWith(expect.stringContaining('Unknown error'));
+        expect(mockShowMessage).toHaveBeenLastCalledWith('Reclassify failed');
     });
 
     test('tracked lookup, selection flush, and LLM recommendation cover absent identities and payloads', async () => {

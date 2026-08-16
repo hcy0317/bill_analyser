@@ -1,0 +1,101 @@
+{
+  "schema_version": 1,
+  "date": "2026-08-16",
+  "cyanflow_slice": "C4 reclassify row CAS",
+  "status": "local_full_audit_passed",
+  "production_behavior_changed": true,
+  "breaking_change": false,
+  "contracts": {
+    "route": "POST /api/bills/import/v2/reclassify/:session_id",
+    "preview_update_expected_row_version_optional": true,
+    "expected_row_version_must_be_positive_integer": true,
+    "input_patch_batch_is_atomic": true,
+    "stale_token_rolls_back_entire_input_patch_batch": true,
+    "stage2_evaluation_is_inside_input_patch_transaction": false,
+    "conflict_http_status": 409,
+    "conflict_code": "PREVIEW_ROW_VERSION_CONFLICT",
+    "conflict_returns_user_session_scoped_latest_row": true,
+    "legacy_without_token_preserved": true,
+    "schema_changed": false,
+    "money_contract_changed": false
+  },
+  "scope": {
+    "reclassify_input_patch_batch": "cas_enabled",
+    "reclassify_stage2_followup": "existing_non_atomic_boundary_preserved",
+    "single_preview_update": "existing_cas_preserved",
+    "transfer_decision": "unchanged",
+    "learning_decision": "unchanged",
+    "llm_decision": "unchanged",
+    "selection": "unchanged",
+    "direct_decision_group": "unchanged",
+    "confirm": "unchanged"
+  },
+  "frontend": {
+    "service_facade": "reclassifyImportPreview",
+    "wire_field": "preview_updates[].expected_row_version",
+    "row_version_is_reclassify_only": true,
+    "conflict_rebase": [
+      "row version",
+      "editable text",
+      "signal state"
+    ],
+    "conflict_extra_reload": false,
+    "weak_record_count_in_import_preview_service": 20
+  },
+  "focused_verification": {
+    "real_postgres_reclassify_cas": {
+      "passed": 2,
+      "failed": 0,
+      "ignored": 0
+    },
+    "real_postgres_legacy_reclassify": {
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0
+    },
+    "frontend_suites": 4,
+    "frontend_tests_passed": 63,
+    "weak_adapter_governance_contract_passed": 1
+  },
+  "full_audit": {
+    "status": "passed",
+    "real_postgres_fail_closed": true,
+    "cargo_fmt_all_check": "passed",
+    "cargo_clippy_workspace_all_targets": "passed",
+    "rust_full_runtime_coverage_percent": 65.24,
+    "rust_changed_coverage_method": "exact PR diff via governance-normalizers changed-coverage",
+    "rust_changed_executable_lines": 8,
+    "rust_changed_covered_lines": 8,
+    "rust_changed_executable_line_coverage_percent": 100,
+    "rust_changed_coverage_require_matched_files": true,
+    "rust_changed_coverage_require_executable_lines": true,
+    "frontend_test_suites_passed": 308,
+    "frontend_tests_passed": 41480,
+    "frontend_total_line_coverage_percent": 94.23,
+    "frontend_changed_executable_lines": 22,
+    "frontend_changed_covered_lines": 22,
+    "frontend_changed_executable_line_coverage_percent": 100,
+    "frontend_lint_errors": 0,
+    "frontend_existing_warnings": 141,
+    "frontend_build": "passed",
+    "rust_only_source_tree_tracked_paths": 1982,
+    "rust_backend_structure_scanned_files": 594,
+    "rust_backend_structure_baseline_entries": 3,
+    "frontend_structure_scanned_files": 616,
+    "frontend_large_file_allowlist_entries": 39,
+    "git_diff_check": "passed"
+  },
+  "audit_recovery": {
+    "initial_full_coverage_failure": "weak_import_api_adapters_are_discoverable_and_cannot_grow",
+    "cause": "reclassify service added a generic Record<string, unknown> payload",
+    "repair": "moved typed partial patch contract to the neutral import preview model",
+    "full_coverage_rerun": "passed",
+    "initial_changed_line_gate_failure": "async state-machine mapping exposed no executable changed lines",
+    "changed_line_gate_repair": "shared optional row-version attachment through a synchronously tested helper",
+    "changed_line_gate_rerun": "passed"
+  },
+  "delivery": {
+    "authority": "Gitea pull request and exact-head Actions run",
+    "dynamic_ids_embedded_in_repository": false
+  }
+}

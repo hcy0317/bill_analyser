@@ -233,6 +233,29 @@ describe('import preview lifecycle service behavior', () => {
             decision: 'clear'
         });
     });
+
+    test('reclassifies versioned preview updates through the shared import service', async () => {
+        axiosPost.mockResolvedValueOnce(dataEnvelope({
+            session_id: 'session/reclassify',
+            updated: 1,
+            preview: [{ id: 21, row_version: 6 }]
+        }));
+
+        const response = await services.reclassifyImportPreview({
+            sessionId: 'session/reclassify',
+            previewUpdates: [{ id: 21, expected_row_version: 5 }]
+        });
+
+        expect(axiosPost).toHaveBeenCalledWith(
+            'bills/import/v2/reclassify/session%2Freclassify',
+            { preview_updates: [{ id: 21, expected_row_version: 5 }] }
+        );
+        expect(response.data.result).toEqual({
+            session_id: 'session/reclassify',
+            updated: 1,
+            preview: [{ id: 21, row_version: 6 }]
+        });
+    });
 });
 
 describe('matching and import configuration service behavior', () => {

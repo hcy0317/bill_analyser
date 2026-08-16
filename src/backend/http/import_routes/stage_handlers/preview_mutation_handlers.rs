@@ -1,3 +1,13 @@
+fn attach_optional_expected_row_version(
+    patch: ImportPreviewPatch,
+    expected_row_version: Option<i64>,
+) -> ImportPreviewPatch {
+    match expected_row_version {
+        Some(version) => patch.with_expected_row_version(version),
+        None => patch,
+    }
+}
+
 /// 处理单行 preview 更新，构建 patch、落库身份校验，并按 responseMode 返回单行或汇总。
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn import_preview_update_runtime_handler(
@@ -43,7 +53,7 @@ pub async fn import_preview_update_runtime_handler(
         }
         Err(error) => return route_response(db_error_response(error)),
     };
-    let mut patch = match build_preview_patch_from_payload_with_category_lookup(
+    let patch = match build_preview_patch_from_payload_with_category_lookup(
         runtime.connection(),
         user_id,
         preview.id,
@@ -52,9 +62,7 @@ pub async fn import_preview_update_runtime_handler(
         Ok(patch) => patch,
         Err(response) => return route_response(response),
     };
-    if let Some(expected_row_version) = expected_row_version {
-        patch = patch.with_expected_row_version(expected_row_version);
-    }
+    let patch = attach_optional_expected_row_version(patch, expected_row_version);
     let updated = match update_preview_bill(runtime.connection(), &session_id, user_id, &patch) {
         Ok(updated) => updated,
         Err(bill_analyser_db::DbError::PreviewVersionConflict {
@@ -132,6 +140,10 @@ pub async fn import_reclassify_runtime_handler(
             Ok(preview_id) => preview_id,
             Err(response) => return route_response(response),
         };
+        let expected_row_version = match expected_row_version_from_payload(item) {
+            Ok(expected_row_version) => expected_row_version,
+            Err(response) => return route_response(response),
+        };
         match get_preview_bill_by_id(runtime.connection(), preview_id, user_id) {
             Ok(Some(preview)) if preview.session_id == session_id => {}
             Ok(Some(_)) | Ok(None) => {
@@ -139,7 +151,7 @@ pub async fn import_reclassify_runtime_handler(
             }
             Err(error) => return route_response(db_error_response(error)),
         }
-        patches.push(match build_preview_patch_from_payload_with_category_lookup(
+        let patch = match build_preview_patch_from_payload_with_category_lookup(
             runtime.connection(),
             user_id,
             preview_id,
@@ -147,7 +159,11 @@ pub async fn import_reclassify_runtime_handler(
         ) {
             Ok(patch) => patch,
             Err(response) => return route_response(response),
-        });
+        };
+        patches.push(attach_optional_expected_row_version(
+            patch,
+            expected_row_version,
+        ));
         target_ids.push(preview_id);
     }
     target_ids.sort_unstable();
@@ -159,6 +175,24 @@ pub async fn import_reclassify_runtime_handler(
         patches.as_slice(),
     ) {
         Ok(updated) => updated,
+        Err(bill_analyser_db::DbError::PreviewVersionConflict {
+            preview_id,
+            expected,
+            ..
+        }) => {
+            let latest_row = match get_preview_bill_by_id(
+                runtime.connection(),
+                preview_id,
+                user_id,
+            ) {
+                Ok(Some(row)) if row.session_id == session_id => row,
+                Ok(Some(_)) | Ok(None) => {
+                    return route_response(import_v2_error_response(404, "Preview bill not found"));
+                }
+                Err(error) => return route_response(db_error_response(error)),
+            };
+            return route_response(preview_row_version_conflict_response(expected, latest_row));
+        }
         Err(error) => return route_response(db_error_response(error)),
     };
     let preview = if target_ids.is_empty() {

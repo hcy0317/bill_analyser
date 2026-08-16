@@ -177,6 +177,23 @@ describe('import preview update helper', () => {
         expect(transaction._rowVersion).toBe(12);
     });
 
+    test('adds a valid row version to preview update payloads without inventing legacy tokens', () => {
+        const versioned = makeTransaction();
+        versioned._rowVersion = 9;
+        expect(buildImportPreviewUpdateFromTransaction(versioned, {
+            categoryPath,
+            includeExpectedRowVersion: true
+        }))
+            .toMatchObject({ id: 42, expected_row_version: 9 });
+
+        const legacy = makeTransaction();
+        expect(buildImportPreviewUpdateFromTransaction(legacy, { categoryPath }))
+            .not.toHaveProperty('expected_row_version');
+        legacy._rowVersion = 0;
+        expect(buildImportPreviewUpdateFromTransaction(legacy, { categoryPath }))
+            .not.toHaveProperty('expected_row_version');
+    });
+
     test('rebases learning text sync fields from the authoritative conflict row', () => {
         const transaction = makeTransaction({
             counterparty: 'stale counterparty',

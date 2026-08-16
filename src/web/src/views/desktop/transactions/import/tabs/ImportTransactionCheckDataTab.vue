@@ -839,7 +839,8 @@ import {
     getPreviewRowVersionFromImportTransaction,
     getPreviewUpdateId,
     rebaseImportPreviewTextSyncConflict,
-    syncPreviewRowVersionToImportTransaction
+    syncPreviewRowVersionToImportTransaction,
+    type ImportPreviewUpdatePayload
 } from '../importPreviewUpdates.ts';
 import {
     clearResolvedImportPreviewReviewState
@@ -2864,51 +2865,27 @@ async function reclassifySelected(): Promise<void> {
     logger.info(`[重新分类] 开始重新分类，session_id=${props.sessionId}`);
 
     try {
-        // 获取认证token
-        const token = getCurrentToken();
-        const headers: Record<string, string> = {
-            'Content-Type': 'application/json'
-        };
-        if (token) {
-            headers['Authorization'] = `Bearer ${token}`;
-        }
-
-        const previewUpdates = buildSelectedPreviewUpdates();
-
-        // 调用 v6.55 新增的 reclassify API
-        const response = await fetch(`/api/bills/import/v2/reclassify/${props.sessionId}`, {
-            method: 'POST',
-            headers: headers,
-            body: JSON.stringify({
-                preview_updates: previewUpdates
-            })
+        const previewUpdates = buildSelectedPreviewUpdates(true);
+        const response = await services.reclassifyImportPreview({
+            sessionId: props.sessionId,
+            previewUpdates
         });
+        const result = response.data.result;
 
-        if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(`Reclassify failed: ${response.status} ${errorText}`);
-        }
-
-        const result = await response.json();
-
-        if (!result.success) {
-            throw new Error(result.error || 'Unknown error');
-        }
-
-        logger.info(`[重新分类] 后端返回成功，preview数量: ${result.data?.preview?.length || 0}, ` +
-            `session_samples_saved=${result.data?.session_samples_saved || 0}, annotation_applied=${result.data?.annotation_applied || 0}`);
+        logger.info(`[重新分类] 后端返回成功，preview数量: ${result.preview?.length || 0}, ` +
+            `session_samples_saved=${result.session_samples_saved || 0}, annotation_applied=${result.annotation_applied || 0}`);
 
         // 通知父组件使用新数据
         // 父组件 ImportDialog.vue 监听 @reclassified 事件并更新 importTransactions
-        if (result.data?.preview && result.data.preview.length > 0) {
+        if (result.preview && result.preview.length > 0) {
             const reclassifiedPreviewIds = Array.from(new Set(
                 previewUpdates
                     .map(getPreviewUpdateId)
                     .filter((previewId): previewId is number => previewId !== null)
             ));
-            emit('reclassified', result.data.preview, reclassifiedPreviewIds);
+            emit('reclassified', result.preview, reclassifiedPreviewIds);
             snackbar.value?.showMessage('format.misc.youHaveUpdatedTransactions', {
-                count: getDisplayCount(result.data.preview.length)
+                count: getDisplayCount(result.preview.length)
             });
         } else {
             snackbar.value?.showMessage('No transactions updated');
@@ -2917,14 +2894,24 @@ async function reclassifySelected(): Promise<void> {
         logger.info('[重新分类] 完成');
 
     } catch (error) {
+        const conflict = services.getImportPreviewRowVersionConflict(error);
+        if (conflict) {
+            const transaction = getTrackedTransactionByPreviewId(Number(conflict.previewItem.id));
+            if (transaction) {
+                commitEditingTransactionDraft();
+                syncTransactionFromPreviewDecision(transaction, conflict.previewItem);
+                rebaseImportPreviewTextSyncConflict(transaction, conflict.previewItem);
+            }
+        }
         logger.error(`[重新分类] 失败: ${error}`);
-        snackbar.value?.showMessage(`Reclassify failed: ${error}`);
+        snackbar.value?.showMessage(getImportDecisionErrorMessage(error, 'Reclassify failed'));
     }
 }
 
 function buildPreviewUpdatesForTransactions(
-    transactions: ImportTransaction[]
-): Record<string, unknown>[] {
+    transactions: ImportTransaction[],
+    includeExpectedRowVersion = false
+): ImportPreviewUpdatePayload[] {
     const validAccountIds = new Set(allVisibleAccounts.value.map(account => String(account.id)));
 
     return transactions.map(transaction => {
@@ -2939,7 +2926,8 @@ function buildPreviewUpdatesForTransactions(
             clearTransferDecision,
             clearLearningDecision,
             clearLlmDecision,
-            includeSuggestionDecisionClears: true
+            includeSuggestionDecisionClears: true,
+            includeExpectedRowVersion
         });
     }).filter(item => !!item.id);
 }
@@ -2950,19 +2938,25 @@ function captureImportPreviewEditableDraftState(
     return captureImportPreviewEditableDraftStateValue(transaction);
 }
 
-function buildPreviewUpdates(options: { selectedOnly: boolean }): Record<string, unknown>[] {
+function buildPreviewUpdates(options: {
+    selectedOnly: boolean;
+    includeExpectedRowVersion?: boolean;
+}): ImportPreviewUpdatePayload[] {
     cacheCurrentPageDrafts();
     const transactions = getTrackedTransactionsForSelection().filter(transaction => (
         !options.selectedOnly || transaction.selected
     ));
-    return buildPreviewUpdatesForTransactions(transactions);
+    return buildPreviewUpdatesForTransactions(
+        transactions,
+        options.includeExpectedRowVersion === true
+    );
 }
 
-function buildSelectedPreviewUpdates(): Record<string, unknown>[] {
-    return buildPreviewUpdates({ selectedOnly: true });
+function buildSelectedPreviewUpdates(includeExpectedRowVersion = false): ImportPreviewUpdatePayload[] {
+    return buildPreviewUpdates({ selectedOnly: true, includeExpectedRowVersion });
 }
 
-function buildTrackedPreviewUpdates(): Record<string, unknown>[] {
+function buildTrackedPreviewUpdates(): ImportPreviewUpdatePayload[] {
     return buildPreviewUpdates({ selectedOnly: false });
 }
 
@@ -2976,7 +2970,7 @@ function hasServerPagedValidityDraftChanges(transaction: ImportTransaction): boo
 
 function buildConditionalSelectionPreviewUpdates(
     action: ServerPagedSelectionAction
-): Record<string, unknown>[] {
+): ImportPreviewUpdatePayload[] {
     if (!shouldPersistValidityDraftsForSelection(action)) {
         return [];
     }
@@ -2986,7 +2980,7 @@ function buildConditionalSelectionPreviewUpdates(
 }
 
 function reconcileServerPagedDraftsAfterSelection(
-    persistedPreviewUpdates: Record<string, unknown>[]
+    persistedPreviewUpdates: ImportPreviewUpdatePayload[]
 ): void {
     const state = reconcileServerPagedDraftStateAfterSelection({
         persistedPreviewUpdates,
@@ -4961,7 +4955,7 @@ function setCountPerPage(count: number): void {
     updatePreviewTablePageSize(count);
 }
 
-function getSelectedPreviewUpdates(): Record<string, unknown>[] {
+function getSelectedPreviewUpdates(): ImportPreviewUpdatePayload[] {
     return serverPagedMode.value ? buildTrackedPreviewUpdates() : buildSelectedPreviewUpdates();
 }
 

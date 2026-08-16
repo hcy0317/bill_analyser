@@ -7,6 +7,8 @@ const mockLlmPreviewRecommend = jest.fn<(...args: Array<unknown>) => Promise<any
 const mockAnalyzeLLMTransactions = jest.fn<(...args: Array<unknown>) => Promise<any>>();
 const mockGetImportLearningSuggestions = jest.fn<(...args: Array<unknown>) => Promise<any>>();
 const mockPromoteImportLearning = jest.fn<(...args: Array<unknown>) => Promise<any>>();
+const mockReclassifyImportPreview = jest.fn<(...args: Array<any>) => Promise<any>>();
+const mockGetImportPreviewRowVersionConflict = jest.fn<(...args: Array<any>) => any>();
 const mockLoggerError = jest.fn();
 
 const mockExpenseChild = {
@@ -98,7 +100,9 @@ jest.mock('@/lib/services.ts', () => ({
         llmPreviewRecommend: mockLlmPreviewRecommend,
         analyzeLLMTransactions: mockAnalyzeLLMTransactions,
         getImportLearningSuggestions: mockGetImportLearningSuggestions,
-        promoteImportLearning: mockPromoteImportLearning
+        promoteImportLearning: mockPromoteImportLearning,
+        reclassifyImportPreview: mockReclassifyImportPreview,
+        getImportPreviewRowVersionConflict: mockGetImportPreviewRowVersionConflict
     }
 }));
 jest.mock('@/lib/server_settings.ts', () => ({ isTransactionFromAIImageRecognitionEnabled: () => false }));
@@ -257,6 +261,7 @@ function createBindings(
 beforeEach(() => {
     jest.clearAllMocks();
     mockGetLLMMemoryEvents.mockResolvedValue({ data: { result: { events: [] } } });
+    mockGetImportPreviewRowVersionConflict.mockReturnValue(null);
     Object.defineProperty(globalThis, 'fetch', { configurable: true, writable: true, value: mockFetch });
 });
 
@@ -602,42 +607,56 @@ describe('desktop import signal, history, and annotation matrix', () => {
 describe('desktop import async action branch matrix', () => {
     test('reclassify handles missing session, updated rows, zero rows, and failures', async () => {
         const selected = createTransaction(61);
+        (selected as ImportTransaction & { _rowVersion?: number })._rowVersion = 5;
         const missing = createBindings([selected], '');
         await missing.bindings.reclassifySelected();
-        expect(mockFetch).not.toHaveBeenCalled();
+        expect(mockReclassifyImportPreview).not.toHaveBeenCalled();
         expect(mockShowMessage).toHaveBeenCalledWith('No session ID available');
 
-        mockFetch.mockResolvedValueOnce({
-            ok: true,
-            json: async () => ({ success: true, data: { preview: [{ id: 61 }], session_samples_saved: 1 } })
+        mockReclassifyImportPreview.mockResolvedValueOnce({
+            data: { result: { preview: [{ id: 61, row_version: 6 }], session_samples_saved: 1 } }
         });
         const success = createBindings([selected]);
         await success.bindings.reclassifySelected();
-        expect(mockFetch).toHaveBeenCalledWith('/api/bills/import/v2/reclassify/signal-session', expect.objectContaining({
-            method: 'POST',
-            headers: expect.objectContaining({ Authorization: 'Bearer signal-matrix-token' })
-        }));
-        const reclassifyRequest = mockFetch.mock.calls[0]?.[1];
-        expect(reclassifyRequest).toBeDefined();
-        expect(JSON.parse(reclassifyRequest.body)).toEqual({
-            preview_updates: [expect.objectContaining({ id: 61 })]
+        expect(mockReclassifyImportPreview).toHaveBeenCalledWith({
+            sessionId: 'signal-session',
+            previewUpdates: [expect.objectContaining({
+                id: 61,
+                expected_row_version: 5
+            })]
         });
-        expect(success.emit).toHaveBeenCalledWith('reclassified', [{ id: 61 }], [61]);
+        expect(success.emit).toHaveBeenCalledWith('reclassified', [{ id: 61, row_version: 6 }], [61]);
         expect(mockShowMessage).toHaveBeenCalledWith(
             'format.misc.youHaveUpdatedTransactions',
             { count: '1' }
         );
 
-        mockFetch.mockResolvedValueOnce({
-            ok: true,
-            json: async () => ({ success: true, data: { preview: [] } })
+        mockReclassifyImportPreview.mockResolvedValueOnce({
+            data: { result: { preview: [] } }
         });
         await createBindings([selected]).bindings.reclassifySelected();
         expect(mockShowMessage).toHaveBeenCalledWith('No transactions updated');
 
-        mockFetch.mockResolvedValueOnce({ ok: false, status: 409, text: async () => 'stale preview' });
+        const conflictError = new Error('stale preview');
+        mockReclassifyImportPreview.mockRejectedValueOnce(conflictError);
+        mockGetImportPreviewRowVersionConflict.mockReturnValueOnce({
+            expected_row_version: 5,
+            actual_row_version: 7,
+            previewItem: {
+                id: 61,
+                row_version: 7,
+                preview_type: 'expense',
+                preview_description: 'server reclassify description',
+                preview_counterparty: 'server counterparty',
+                preview_payment_method: 'server payment',
+                preview_selected: true,
+                matching: {}
+            }
+        });
         await createBindings([selected]).bindings.reclassifySelected();
-        expect(mockShowMessage).toHaveBeenCalledWith(expect.stringContaining('Reclassify failed: Error: Reclassify failed: 409'));
+        expect((selected as ImportTransaction & { _rowVersion?: number })._rowVersion).toBe(7);
+        expect(selected.comment).toBe('server reclassify description');
+        expect(mockShowMessage).toHaveBeenCalledWith('stale preview');
     });
 
     test('LLM bulk recommendation guards empty state and uses all-matching when no rows are selected', async () => {

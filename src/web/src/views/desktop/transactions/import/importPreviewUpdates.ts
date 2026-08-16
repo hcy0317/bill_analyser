@@ -1,5 +1,8 @@
 import type { ImportTransaction } from '@/models/imported_transaction.ts';
-import type { ImportPreviewRecord } from '@/models/import_preview.ts';
+import type {
+    ImportPreviewPatchPayload,
+    ImportPreviewRecord,
+} from '@/models/import_preview.ts';
 
 import {
     type ImportPreviewResolvedCategoryPath
@@ -17,10 +20,10 @@ export interface BuildImportPreviewUpdateFromTransactionOptions {
     clearLearningDecision?: boolean;
     clearLlmDecision?: boolean;
     includeSuggestionDecisionClears?: boolean;
+    includeExpectedRowVersion?: boolean;
 }
 
-export type ImportPreviewUpdatePayload = Record<string, unknown> & {
-    id?: number;
+export type ImportPreviewUpdatePayload = ImportPreviewPatchPayload & {
     preview_type: string;
     preview_amount_cents: number;
     preview_destination_amount_cents: number;
@@ -36,7 +39,6 @@ export type ImportPreviewUpdatePayload = Record<string, unknown> & {
     preview_main_category: string;
     preview_sub_category: string;
     clear_transfer_decision: boolean;
-    is_manually_annotated?: boolean;
     selected: boolean;
 };
 
@@ -141,6 +143,12 @@ export function buildImportPreviewUpdateFromTransaction(
     };
     if (transaction.isManuallyAnnotated) {
         update['is_manually_annotated'] = true;
+    }
+    if (options.includeExpectedRowVersion) {
+        const rowVersion = getPreviewRowVersionFromImportTransaction(transaction);
+        if (rowVersion !== undefined) {
+            update.expected_row_version = rowVersion;
+        }
     }
 
     if (options.includeSuggestionDecisionClears) {

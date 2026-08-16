@@ -68,6 +68,29 @@ export interface ImportPreviewRecord {
     selected?: boolean;
 }
 
+export interface ImportPreviewPatchPayload {
+    [field: string]: unknown;
+    id?: number;
+    expected_row_version?: number;
+    preview_type?: string;
+    preview_amount_cents?: number;
+    preview_destination_amount_cents?: number;
+    preview_source_account_id?: number | null;
+    preview_destination_account_id?: number | null;
+    preview_recurring_id?: number | null;
+    preview_recurring_name?: string;
+    preview_recurring_candidate_count?: number;
+    preview_recurring_match_score?: number;
+    preview_recurring_match_reasons?: string;
+    preview_recurring_matched_date?: string;
+    category_id?: number | null;
+    preview_main_category?: string;
+    preview_sub_category?: string;
+    clear_transfer_decision?: boolean;
+    is_manually_annotated?: boolean;
+    selected?: boolean;
+}
+
 export interface ImportPreviewPageData {
     preview: ImportPreviewRecord[];
     total: number;

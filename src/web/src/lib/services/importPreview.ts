@@ -6,8 +6,9 @@ import { DEFAULT_UPLOAD_API_TIMEOUT } from '@/consts/api.ts';
 import type { ImportTransactionResponsePageWrapper } from '@/models/imported_transaction.ts';
 import type {
     ImportPreviewPageData,
+    ImportPreviewPatchPayload,
     ImportPreviewRecord,
-    ImportPreviewRowVersionConflict
+    ImportPreviewRowVersionConflict,
 } from '@/models/import_preview.ts';
 import type {
     ImportLearningPromoteResponse,
@@ -77,6 +78,17 @@ interface UpdateImportPreviewItemPayload {
 interface UpdateImportPreviewItemResponse {
     updated: boolean;
     previewItem?: ImportPreviewRecord;
+}
+
+interface ReclassifyImportPreviewResponse {
+    session_id: string;
+    total?: number;
+    categorized?: number;
+    account_matched?: number;
+    session_samples_saved?: number;
+    annotation_applied?: number;
+    updated: number;
+    preview: ImportPreviewRecord[];
 }
 
 interface ImportPreviewRowVersionConflictEnvelope {
@@ -262,6 +274,21 @@ const importPreviewServices = {
                 updated: !!(response.data?.data?.updated ?? response.data?.success),
                 previewItem: response.data?.data?.previewItem
             });
+        });
+    },
+    // 中文说明：重新分类指定 preview 草稿，并由后端对携带的逐行版本执行批量原子 CAS。
+    reclassifyImportPreview: ({
+        sessionId,
+        previewUpdates
+    }: {
+        sessionId: string,
+        previewUpdates: ImportPreviewPatchPayload[]
+    }): ApiResponsePromise<ReclassifyImportPreviewResponse> => {
+        return axios.post<ApiDataResponse<ReclassifyImportPreviewResponse>>(
+            `bills/import/v2/reclassify/${encodeURIComponent(sessionId)}`,
+            { preview_updates: previewUpdates }
+        ).then(response => {
+            return buildApiResponse(response, response.data?.data);
         });
     },
     // 中文说明：读取导入预览分页数据，显式透传 page、selected_only、preview_ids 和 signal 筛选条件。
