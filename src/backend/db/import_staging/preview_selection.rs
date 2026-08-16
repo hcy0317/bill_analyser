@@ -149,6 +149,62 @@ pub fn apply_preview_patches_preserving_selection(
     replace_preview_selection_with_patches(pool, session_id, user_id, patches)
 }
 
+/// 在同一 session 锁事务内校验选择快照、应用行级 CAS 草稿并读取权威选中行。
+pub fn apply_preview_patches_and_load_selected_if_current(
+    pool: &PostgresPool,
+    session_id: &str,
+    user_id: UserId,
+    patches: &[ImportPreviewPatch],
+    expected_selection_hash: &str,
+) -> DbResult<ImportPreviewActionPreflushResult> {
+    block_on_db(async move {
+        let user_id = user_id_i64(user_id)?;
+        let mut tx = pool.begin().await?;
+        let session_db_id =
+            lock_active_import_session_on_tx(&mut tx, session_id, user_id).await?;
+        let selected_snapshot = validate_expected_selection_hash_on_tx(
+            &mut tx,
+            session_db_id,
+            user_id,
+            Some(expected_selection_hash),
+        )
+        .await?;
+        let selected_ids = selected_snapshot.into_iter().collect::<BTreeSet<_>>();
+        if patches
+            .iter()
+            .any(|patch| !selected_ids.contains(&patch.preview_id))
+        {
+            return Err(DbError::PreviewSelectionTargetMismatch {
+                session_id: session_id.to_string(),
+            });
+        }
+        let applied_preview_updates =
+            apply_preview_patches_on_tx(&mut tx, session_db_id, user_id, patches).await?;
+        let rows = sqlx::query(
+            r#"
+            SELECT p.*, s.session_key
+            FROM import_preview_rows p
+            JOIN import_sessions s ON s.id = p.session_id
+            WHERE p.session_id = $1 AND p.user_id = $2 AND p.selected = true
+            ORDER BY p.occurred_at ASC, p.id ASC
+            "#,
+        )
+        .bind(session_db_id)
+        .bind(user_id)
+        .fetch_all(&mut *tx)
+        .await?;
+        let selected_rows = rows
+            .iter()
+            .map(preview_from_pg_row)
+            .collect::<DbResult<Vec<_>>>()?;
+        tx.commit().await?;
+        Ok(ImportPreviewActionPreflushResult {
+            applied_preview_updates,
+            selected_rows,
+        })
+    })
+}
+
 pub fn update_preview_selection(
     pool: &PostgresPool,
     preview_ids: &[i64],
@@ -264,9 +320,9 @@ async fn validate_expected_selection_hash_on_tx(
     session_db_id: i64,
     user_id: i64,
     expected_selection_hash: Option<&str>,
-) -> DbResult<()> {
+) -> DbResult<Vec<i64>> {
     let Some(expected) = expected_selection_hash else {
-        return Ok(());
+        return Ok(Vec::new());
     };
     let selected_snapshot = sqlx::query_scalar::<_, i64>(
         "SELECT id FROM import_preview_rows WHERE session_id = $1 AND user_id = $2 AND selected = true ORDER BY id ASC",
@@ -282,7 +338,7 @@ async fn validate_expected_selection_hash_on_tx(
             &actual_selection_hash,
         ));
     }
-    Ok(())
+    Ok(selected_snapshot)
 }
 
 async fn lock_active_preview_parent_for_ids_on_tx(

@@ -63,6 +63,7 @@ use bill_analyser_core::{
 use bill_analyser_db::{
     accept_postgres_llm_candidate, activate_postgres_llm_config,
     apply_import_decision_group_command, apply_preview_llm_recommendation,
+    apply_preview_patches_and_load_selected_if_current,
     apply_preview_patches_and_update_selection_by_query,
     apply_preview_patches_preserving_selection, claim_import_group_reclassification,
     clear_import_preview_materialization_state, clear_session_data, confirm_import_command,

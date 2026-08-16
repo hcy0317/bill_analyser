@@ -935,6 +935,7 @@ import {
     type ImportPreviewEditableDraftState,
     type ServerPagedSelectionAction
 } from '../check-data-tab/serverPagedDraftState.ts';
+import { createImportPreviewActionPreflushConflictRebaser } from '../check-data-tab/actionPreflushConflict.ts';
 
 import { useSettingsStore } from '@/stores/setting.ts';
 import { useUserStore } from '@/stores/user.ts';
@@ -2994,6 +2995,17 @@ function getTrackedTransactionByPreviewId(previewId: number): ImportTransaction 
     return serverPagedDrafts.value.get(previewId) || null;
 }
 
+const rebaseImportPreviewActionPreflushConflict = createImportPreviewActionPreflushConflictRebaser({
+    isServerPaged: () => serverPagedMode.value,
+    getTransaction: getTrackedTransactionByPreviewId,
+    setSelectionMetadata: metadata => { serverPagedSelectionMetadataOverride.value = metadata; },
+    rebaseTransaction: (transaction, previewItem) => {
+        syncTransactionFromPreviewDecision(transaction, previewItem);
+        rebaseImportPreviewTextSyncConflict(transaction, previewItem);
+    },
+    reconcileDrafts: reconcileServerPagedDraftsAfterSelection
+});
+
 function buildPreviewActionScope(): Record<string, unknown> {
     const selectedPreviewIds = getTrackedTransactionsForSelection()
         .filter(transaction => transaction.selected)
@@ -3076,9 +3088,9 @@ async function applyLLMPreviewRecommendations(): Promise<void> {
         return;
     }
 
+    const previewUpdates = buildSelectedPreviewUpdates(true);
     llmPreviewRecommending.value = true;
     try {
-        const previewUpdates = buildSelectedPreviewUpdates();
         const response = await services.llmPreviewRecommend({
             sessionId: props.sessionId,
             previewUpdates,
@@ -3118,6 +3130,7 @@ async function applyLLMPreviewRecommendations(): Promise<void> {
 
         snackbar.value?.showMessage(tt('LLM preview recommendation completed, but no suggestions were generated'));
     } catch (error) {
+        rebaseImportPreviewActionPreflushConflict(error, previewUpdates);
         const actionErrorText = getActionErrorMessage(error, 'LLM preview recommendation failed');
         logger.error(`[LLM 黄色建议] 失败: ${actionErrorText}`, error);
         snackbar.value?.showMessage(actionErrorText);
@@ -3143,9 +3156,9 @@ async function analyzeSelectedPreviewWithLLM(): Promise<void> {
         return;
     }
 
+    const previewUpdates = buildSelectedPreviewUpdates(true);
     llmSessionAnalyzing.value = true;
     try {
-        const previewUpdates = buildSelectedPreviewUpdates();
         const response = await services.analyzeLLMTransactions({
             sessionId: props.sessionId,
             previewUpdates,
@@ -3166,6 +3179,7 @@ async function analyzeSelectedPreviewWithLLM(): Promise<void> {
             tt('LLM session analysis completed, but no candidate rules satisfied induction conditions')
         );
     } catch (error) {
+        rebaseImportPreviewActionPreflushConflict(error, previewUpdates);
         const details = getLLMAnalysisErrorDetails(error);
         logger.error(
             `[LLM 会话分析] 失败 code=${details.code || 'unknown'} `
@@ -3192,8 +3206,8 @@ async function promoteSelectedToLongTermLearning(): Promise<void> {
         return;
     }
 
+    const previewUpdates = buildSelectedPreviewUpdates(true);
     try {
-        const previewUpdates = buildSelectedPreviewUpdates();
         const suggestionsResponse = await services.getImportLearningSuggestions({
             sessionId: props.sessionId,
             previewUpdates,
@@ -3229,6 +3243,7 @@ async function promoteSelectedToLongTermLearning(): Promise<void> {
             })
         );
     } catch (error) {
+        rebaseImportPreviewActionPreflushConflict(error, previewUpdates);
         logger.error(`[长期学习提升] 失败: ${error}`);
         snackbar.value?.showMessage(`Promote failed: ${error}`);
     }

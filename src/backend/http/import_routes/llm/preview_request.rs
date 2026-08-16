@@ -56,14 +56,24 @@ pub async fn llm_preview_recommend_runtime_handler(
             Ok(scope) => scope,
             Err(response) => return route_response(response),
         };
-        let mut rows = match selected_preview_rows_for_llm(
+        let patches = match preview_patches_from_payload(
             runtime.connection(),
-            &action_scope,
-            &session_id,
             user_id,
+            &payload,
             limit,
         ) {
-            Ok(rows) => rows,
+            Ok(patches) => patches,
+            Err(response) => return route_response(response),
+        };
+        let mut rows = match preflush_import_preview_action(
+            &mut runtime,
+            &session_id,
+            user_id,
+            &action_scope,
+            &patches,
+            limit,
+        ) {
+            Ok(result) => result.rows,
             Err(response) => return route_response(response),
         };
         if rows.is_empty() {
@@ -74,32 +84,6 @@ pub async fn llm_preview_recommend_runtime_handler(
                     Vec::new(),
                 ),
             });
-        }
-        let patches = match preview_patches_from_payload(
-            runtime.connection(),
-            user_id,
-            &payload,
-            limit,
-        ) {
-            Ok(patches) => patches,
-            Err(response) => return route_response(response),
-        };
-        if !patches.is_empty() {
-            if let Err(error) =
-                apply_preview_patches_preserving_selection(runtime.connection_mut(), &session_id, user_id, &patches)
-            {
-                return route_response(db_error_response(error));
-            }
-            rows = match selected_preview_rows_for_llm(
-                runtime.connection(),
-                &action_scope,
-                &session_id,
-                user_id,
-                limit,
-            ) {
-                Ok(rows) => rows,
-                Err(response) => return route_response(response),
-            };
         }
         rows.retain(preview_row_needs_llm_identity);
         if rows.is_empty() {

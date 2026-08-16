@@ -49,6 +49,12 @@ pub struct ImportPreviewSelectionMutationResult {
     pub updated_selection: usize,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct ImportPreviewActionPreflushResult {
+    pub applied_preview_updates: usize,
+    pub selected_rows: Vec<ImportPreviewRow>,
+}
+
 impl ImportPreviewPatch {
     pub fn new(preview_id: i64) -> Self {
         Self {

@@ -9,6 +9,7 @@ const mockGetImportLearningSuggestions = jest.fn<(...args: Array<unknown>) => Pr
 const mockPromoteImportLearning = jest.fn<(...args: Array<unknown>) => Promise<any>>();
 const mockReclassifyImportPreview = jest.fn<(...args: Array<any>) => Promise<any>>();
 const mockGetImportPreviewRowVersionConflict = jest.fn<(...args: Array<any>) => any>();
+const mockGetImportPreviewSelectionConflict = jest.fn<(...args: Array<any>) => any>();
 const mockLoggerError = jest.fn();
 
 const mockExpenseChild = {
@@ -102,7 +103,8 @@ jest.mock('@/lib/services.ts', () => ({
         getImportLearningSuggestions: mockGetImportLearningSuggestions,
         promoteImportLearning: mockPromoteImportLearning,
         reclassifyImportPreview: mockReclassifyImportPreview,
-        getImportPreviewRowVersionConflict: mockGetImportPreviewRowVersionConflict
+        getImportPreviewRowVersionConflict: mockGetImportPreviewRowVersionConflict,
+        getImportPreviewSelectionConflict: mockGetImportPreviewSelectionConflict
     }
 }));
 jest.mock('@/lib/server_settings.ts', () => ({ isTransactionFromAIImageRecognitionEnabled: () => false }));
@@ -244,15 +246,23 @@ function createTransaction(
 
 function createBindings(
     transactions: ImportTransaction[],
-    sessionId = 'signal-session'
+    sessionId = 'signal-session',
+    serverPaged = false
 ): { bindings: any, emit: jest.Mock } {
     const emit = jest.fn();
     const bindings = (ImportTransactionCheckDataTab as any).setup({
         importTransactions: transactions,
         sessionId,
-        serverPaged: false,
+        serverPaged,
         totalImportTransactionCount: transactions.length,
-        previewMetadata: null
+        previewMetadata: serverPaged ? {
+            counts: {
+                total: transactions.length,
+                selected: transactions.filter(transaction => transaction.selected).length,
+                selected_total: transactions.filter(transaction => transaction.selected).length
+            },
+            selection_hash: 'fnv1a32:12345678'
+        } : null
     }, { emit, expose: jest.fn() });
     bindings.snackbar.value = { showMessage: mockShowMessage };
     return { bindings, emit };
@@ -262,6 +272,7 @@ beforeEach(() => {
     jest.clearAllMocks();
     mockGetLLMMemoryEvents.mockResolvedValue({ data: { result: { events: [] } } });
     mockGetImportPreviewRowVersionConflict.mockReturnValue(null);
+    mockGetImportPreviewSelectionConflict.mockReturnValue(null);
     Object.defineProperty(globalThis, 'fetch', { configurable: true, writable: true, value: mockFetch });
 });
 
@@ -661,6 +672,7 @@ describe('desktop import async action branch matrix', () => {
 
     test('LLM bulk recommendation guards empty state and uses all-matching when no rows are selected', async () => {
         const selected = createTransaction(71);
+        (selected as ImportTransaction & { _rowVersion?: number })._rowVersion = 11;
         const noSession = createBindings([selected], '').bindings;
         await noSession.applyLLMPreviewRecommendations();
         expect(mockLlmPreviewRecommend).not.toHaveBeenCalled();
@@ -697,7 +709,10 @@ describe('desktop import async action branch matrix', () => {
         await success.applyLLMPreviewRecommendations();
         expect(mockLlmPreviewRecommend).toHaveBeenCalledWith(expect.objectContaining({
             sessionId: 'signal-session',
-            previewUpdates: [expect.objectContaining({ id: 71 })],
+            previewUpdates: [expect.objectContaining({
+                id: 71,
+                expected_row_version: 11
+            })],
             actionScope: expect.objectContaining({
                 kind: 'selected',
                 selection_hash: expect.stringMatching(/^fnv1a32:/)
@@ -721,6 +736,7 @@ describe('desktop import async action branch matrix', () => {
 
     test('LLM analysis guards empty state and analyzes all matching rows when no rows are selected', async () => {
         const selected = createTransaction(81);
+        (selected as ImportTransaction & { _rowVersion?: number })._rowVersion = 12;
         const noSession = createBindings([selected], '').bindings;
         await noSession.analyzeSelectedPreviewWithLLM();
         expect(mockAnalyzeLLMTransactions).not.toHaveBeenCalled();
@@ -751,7 +767,10 @@ describe('desktop import async action branch matrix', () => {
         await created.analyzeSelectedPreviewWithLLM();
         expect(mockAnalyzeLLMTransactions).toHaveBeenCalledWith(expect.objectContaining({
             sessionId: 'signal-session',
-            previewUpdates: [expect.objectContaining({ id: 81 })],
+            previewUpdates: [expect.objectContaining({
+                id: 81,
+                expected_row_version: 12
+            })],
             actionScope: expect.objectContaining({ kind: 'selected' })
         }));
         expect(mockShowMessage).toHaveBeenCalledWith(expect.stringContaining('created'));
@@ -771,6 +790,7 @@ describe('desktop import async action branch matrix', () => {
 
     test('long-term learning guards empty state and uses explicit selected promotion after scoped suggestions', async () => {
         const selected = createTransaction(91);
+        (selected as ImportTransaction & { _rowVersion?: number })._rowVersion = 13;
         await createBindings([selected], '').bindings.promoteSelectedToLongTermLearning();
         expect(mockGetImportLearningSuggestions).not.toHaveBeenCalled();
 
@@ -803,7 +823,10 @@ describe('desktop import async action branch matrix', () => {
         await success.promoteSelectedToLongTermLearning();
         expect(mockGetImportLearningSuggestions).toHaveBeenCalledWith(expect.objectContaining({
             sessionId: 'signal-session',
-            previewUpdates: [expect.objectContaining({ id: 91 })],
+            previewUpdates: [expect.objectContaining({
+                id: 91,
+                expected_row_version: 13
+            })],
             actionScope: expect.objectContaining({ kind: 'selected' })
         }));
         expect(mockPromoteImportLearning).toHaveBeenCalledWith({
@@ -815,5 +838,83 @@ describe('desktop import async action branch matrix', () => {
         mockGetImportLearningSuggestions.mockRejectedValueOnce(new Error('learning unavailable'));
         await createBindings([selected]).bindings.promoteSelectedToLongTermLearning();
         expect(mockShowMessage).toHaveBeenCalledWith('Promote failed: Error: learning unavailable');
+    });
+
+    test('action preflush row conflict rebases only the conflicted row and preserves other drafts', async () => {
+        const conflicted = createTransaction(101);
+        const untouched = createTransaction(102);
+        conflicted.comment = 'local conflicted draft';
+        untouched.comment = 'local untouched draft';
+        (conflicted as ImportTransaction & { _rowVersion?: number })._rowVersion = 3;
+        (untouched as ImportTransaction & { _rowVersion?: number })._rowVersion = 4;
+        const error = new Error('row changed');
+        mockLlmPreviewRecommend.mockRejectedValueOnce(error);
+        mockGetImportPreviewRowVersionConflict.mockReturnValueOnce({
+            expected_row_version: 3,
+            actual_row_version: 5,
+            previewItem: {
+                id: 101,
+                row_version: 5,
+                preview_type: '支出',
+                category_id: 8,
+                preview_source_account_id: null,
+                preview_destination_account_id: null,
+                preview_amount_cents: 1_101,
+                preview_destination_amount_cents: 0,
+                preview_counterparty: 'server merchant',
+                preview_payment_method: 'server payment',
+                preview_description: 'server conflicted row',
+                preview_selected: true,
+                matching: {}
+            }
+        });
+
+        const { bindings } = createBindings([conflicted, untouched], 'signal-session', true);
+        await bindings.applyLLMPreviewRecommendations();
+
+        expect(mockLlmPreviewRecommend).toHaveBeenCalledTimes(1);
+        expect(conflicted.comment).toBe('server conflicted row');
+        expect((conflicted as ImportTransaction & { _rowVersion?: number })._rowVersion).toBe(5);
+        expect(untouched.comment).toBe('local untouched draft');
+        expect((untouched as ImportTransaction & { _rowVersion?: number })._rowVersion).toBe(4);
+        expect(bindings.serverPagedDrafts.value.get(102)?.comment).toBe('local untouched draft');
+    });
+
+    test('action preflush selection conflict rebases authoritative target rows without retrying', async () => {
+        const selected = createTransaction(111);
+        selected.comment = 'local selection draft';
+        (selected as ImportTransaction & { _rowVersion?: number })._rowVersion = 6;
+        const error = new Error('selection changed');
+        mockGetImportLearningSuggestions.mockRejectedValueOnce(error);
+        mockGetImportPreviewSelectionConflict.mockReturnValueOnce({
+            expected_selection_hash: 'fnv1a32:11111111',
+            actual_selection_hash: 'fnv1a32:22222222',
+            metadata: {
+                counts: { total: 1, selected: 1, selected_total: 1 },
+                selection_hash: 'fnv1a32:22222222'
+            },
+            previewItems: [{
+                id: 111,
+                row_version: 7,
+                preview_type: '支出',
+                category_id: 8,
+                preview_source_account_id: null,
+                preview_destination_account_id: null,
+                preview_amount_cents: 1_111,
+                preview_destination_amount_cents: 0,
+                preview_counterparty: 'server selection merchant',
+                preview_payment_method: 'server selection payment',
+                preview_description: 'server selection row',
+                preview_selected: true,
+                matching: {}
+            }]
+        });
+
+        await createBindings([selected]).bindings.promoteSelectedToLongTermLearning();
+
+        expect(mockGetImportLearningSuggestions).toHaveBeenCalledTimes(1);
+        expect(mockPromoteImportLearning).not.toHaveBeenCalled();
+        expect(selected.comment).toBe('server selection row');
+        expect((selected as ImportTransaction & { _rowVersion?: number })._rowVersion).toBe(7);
     });
 });

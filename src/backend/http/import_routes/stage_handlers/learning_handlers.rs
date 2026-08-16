@@ -47,19 +47,35 @@ async fn import_learning_suggestions_response(
         Ok(None) => return route_response(import_session_not_found_response()),
         Err(error) => return route_response(db_error_response(error)),
     }
-    let scoped_preview = match payload.as_ref() {
+    let (scoped_preview, applied_preview_updates) = match payload.as_ref() {
         Some(payload) => {
             let scope = match import_preview_action_scope_from_payload(payload) {
                 Ok(scope) => scope,
                 Err(response) => return route_response(response),
             };
-            match selected_preview_rows_for_llm(runtime.connection(), &scope, &session_id, user_id, 500) {
-                Ok(rows) => rows,
+            let patches = match preview_patches_from_payload(
+                runtime.connection(),
+                user_id,
+                payload,
+                500,
+            ) {
+                Ok(patches) => patches,
+                Err(response) => return route_response(response),
+            };
+            match preflush_import_preview_action(
+                &mut runtime,
+                &session_id,
+                user_id,
+                &scope,
+                &patches,
+                500,
+            ) {
+                Ok(result) => (result.rows, result.applied_preview_updates),
                 Err(response) => return route_response(response),
             }
         }
         _ => match get_preview_by_session(runtime.connection(), &session_id, user_id, false) {
-            Ok(rows) => rows,
+            Ok(rows) => (rows, 0),
             Err(error) => return route_response(db_error_response(error)),
         },
     };
@@ -74,15 +90,6 @@ async fn import_learning_suggestions_response(
             "runtime": "rust-import-db-runtime",
         })));
     }
-    let applied_preview_updates = match payload.as_ref() {
-        Some(payload) => {
-            match apply_preview_updates_preserving_selection_from_payload(&mut runtime, &session_id, user_id, payload) {
-                Ok(updated) => updated,
-                Err(response) => return route_response(response),
-            }
-        }
-        None => 0,
-    };
     let preview_ids = payload.as_ref().map(preview_ids_from_payload).unwrap_or_default();
     let suggestions = build_import_learning_suggestions_from_preview(&scoped_preview, &preview_ids);
     let suggestion_count = suggestions.len();
