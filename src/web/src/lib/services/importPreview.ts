@@ -5,6 +5,20 @@ import { TransactionType } from '@/core/transaction.ts';
 import { DEFAULT_UPLOAD_API_TIMEOUT } from '@/consts/api.ts';
 import type { ImportTransactionResponsePageWrapper } from '@/models/imported_transaction.ts';
 import type {
+    ImportConfigDto,
+    ImportConfigListRequest,
+    ImportConfigMatchDto,
+    ImportConfigMatchRequest,
+    ImportConfigSaveRequest,
+    ImportConfigSuggestRequest,
+    ImportConfigSuggestion,
+    ImportFilePreviewData,
+    ImportFilePreviewRequest,
+    ImportGenericParseData,
+    ImportGenericParseRequest,
+    ImportTempFilePreviewRequest
+} from '@/models/import_config.ts';
+import type {
     ImportPreviewPageData,
     ImportPreviewPatchPayload,
     ImportPreviewRecord,
@@ -456,8 +470,8 @@ const importPreviewServices = {
             return buildApiResponse(response, response.data?.data);
         });
     },
-    getImportConfigs: ({ fileFormat }: { fileFormat?: string } = {}): ApiResponsePromise<any[]> => {
-        return axios.get<ApiDataResponse<any[]>>('bills/import/configs', {
+    getImportConfigs: ({ fileFormat }: ImportConfigListRequest = {}): ApiResponsePromise<ImportConfigDto[]> => {
+        return axios.get<ApiDataResponse<ImportConfigDto[]>>('bills/import/configs', {
             params: {
                 file_format: fileFormat
             }
@@ -465,8 +479,8 @@ const importPreviewServices = {
             return buildApiResponse(response, response.data?.data || []);
         });
     },
-    previewImportFile: ({ importFile, fileEncoding, delimiter }: { importFile: File, fileEncoding?: string, delimiter?: string }): ApiResponsePromise<any> => {
-        return axios.postForm<ApiResponse<any>>('bills/import/preview', {
+    previewImportFile: ({ importFile, fileEncoding, delimiter }: ImportFilePreviewRequest): ApiResponsePromise<ImportFilePreviewData> => {
+        return axios.postForm<ApiResponse<ImportFilePreviewData>>('bills/import/preview', {
             file: importFile,
             fileEncoding: fileEncoding,
             delimiter: delimiter
@@ -474,8 +488,8 @@ const importPreviewServices = {
             timeout: DEFAULT_UPLOAD_API_TIMEOUT
         } as ApiRequestConfig);
     },
-    previewImportFileFromTemp: ({ sessionId, tempPath, fileEncoding, delimiter }: { sessionId: string, tempPath: string, fileEncoding?: string, delimiter?: string }): ApiResponsePromise<any> => {
-        return axios.postForm<ApiResponse<any>>('bills/import/preview', {
+    previewImportFileFromTemp: ({ sessionId, tempPath, fileEncoding, delimiter }: ImportTempFilePreviewRequest): ApiResponsePromise<ImportFilePreviewData> => {
+        return axios.postForm<ApiResponse<ImportFilePreviewData>>('bills/import/preview', {
             session_id: sessionId,
             temp_path: tempPath,
             fileEncoding: fileEncoding,
@@ -485,20 +499,8 @@ const importPreviewServices = {
         } as ApiRequestConfig);
     },
     // 中文说明：把临时预览文件按用户列映射解析进既有导入 session，保持 v2 parse_generic payload 字段名。
-    parseGenericIntoSession: ({ sessionId, tempPath, columnMapping, transactionTypeMapping, hasHeaderLine, timeFormat, timezoneFormat, amountDecimalSeparator, amountDigitGroupingSymbol, fileEncoding, delimiter }: {
-        sessionId: string;
-        tempPath: string;
-        columnMapping: Record<string, number>;
-        transactionTypeMapping?: Record<string, number>;
-        hasHeaderLine?: boolean;
-        timeFormat?: string;
-        timezoneFormat?: string;
-        amountDecimalSeparator?: string;
-        amountDigitGroupingSymbol?: string;
-        fileEncoding?: string;
-        delimiter?: string;
-    }): ApiResponsePromise<any> => {
-        return axios.post<ApiResponse<any>>('bills/import/v2/parse_generic', {
+    parseGenericIntoSession: ({ sessionId, tempPath, columnMapping, transactionTypeMapping, hasHeaderLine, timeFormat, timezoneFormat, amountDecimalSeparator, amountDigitGroupingSymbol, fileEncoding, delimiter }: ImportGenericParseRequest): ApiResponsePromise<ImportGenericParseData> => {
+        return axios.post<ApiResponse<ImportGenericParseData>>('bills/import/v2/parse_generic', {
             session_id: sessionId,
             temp_path: tempPath,
             column_mapping: columnMapping,
@@ -514,16 +516,16 @@ const importPreviewServices = {
             timeout: DEFAULT_UPLOAD_API_TIMEOUT
         } as ApiRequestConfig);
     },
-    matchImportConfig: ({ fileFormat, headers }: { fileFormat: string, headers: string[] }): ApiResponsePromise<any | null> => {
-        return axios.post<ApiDataResponse<any | null>>('bills/import/configs/match', {
+    matchImportConfig: ({ fileFormat, headers }: ImportConfigMatchRequest): ApiResponsePromise<ImportConfigMatchDto | null> => {
+        return axios.post<ApiDataResponse<ImportConfigMatchDto | null>>('bills/import/configs/match', {
             fileFormat,
             headers
         }).then(response => {
             return buildApiResponse(response, response.data?.data ?? null);
         });
     },
-    suggestImportConfig: ({ fileFormat, headers, sampleRows }: { fileFormat: string, headers: string[], sampleRows?: string[][] }): ApiResponsePromise<any> => {
-        return axios.post<ApiDataResponse<any>>('bills/import/configs/suggest', {
+    suggestImportConfig: ({ fileFormat, headers, sampleRows }: ImportConfigSuggestRequest): ApiResponsePromise<ImportConfigSuggestion> => {
+        return axios.post<ApiDataResponse<ImportConfigSuggestion>>('bills/import/configs/suggest', {
             fileFormat,
             headers,
             sampleRows
@@ -531,7 +533,7 @@ const importPreviewServices = {
             return buildApiResponse(response, response.data?.data);
         });
     },
-    saveImportConfig: (req: any): ApiResponsePromise<{ id: number }> => {
+    saveImportConfig: (req: ImportConfigSaveRequest): ApiResponsePromise<{ id: number }> => {
         return axios.post<ApiDataResponse<{ id: number }>>('bills/import/configs', req).then(response => {
             return buildApiResponse(response, response.data?.data);
         });

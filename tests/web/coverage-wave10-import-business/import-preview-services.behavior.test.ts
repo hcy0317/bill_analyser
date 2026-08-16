@@ -19,6 +19,7 @@ jest.mock('axios', () => ({
 
 import { TransactionType } from '@/core/transaction.ts';
 import services from '@/lib/services/importPreview.ts';
+import type { ImportConfigSaveRequest } from '@/models/import_config.ts';
 import type {
     ImportPreviewActionScope,
     ImportPreviewHistoryRewriteAcknowledgement
@@ -26,6 +27,23 @@ import type {
 
 function dataEnvelope<T>(data: T, success = true): Record<string, unknown> {
     return { status: 200, data: { success, data } };
+}
+
+function buildImportConfigSaveRequest(name: string): ImportConfigSaveRequest {
+    return {
+        name,
+        fileFormat: 'csv',
+        description: '',
+        fieldMappings: {},
+        sampleHeaders: ['time', 'amount'],
+        dateFormat: 'YYYY-MM-DD',
+        delimiter: ',',
+        encoding: 'utf-8',
+        skipRows: 0,
+        hasHeader: true,
+        customRules: {},
+        isDefault: false
+    };
 }
 
 beforeEach(() => {
@@ -605,7 +623,8 @@ describe('matching and import configuration service behavior', () => {
         await services.suggestImportConfig({
             fileFormat: 'csv', headers: ['time', 'amount'], sampleRows: [['2026-01-01', '1.23']]
         });
-        await services.saveImportConfig({ name: 'bank csv' });
+        const saveRequest = buildImportConfigSaveRequest('bank csv');
+        await services.saveImportConfig(saveRequest);
         await services.deleteImportConfig({ id: 'config/7' });
 
         expect(axiosGet).toHaveBeenNthCalledWith(1, 'bills/import/configs', { params: { file_format: undefined } });
@@ -640,7 +659,7 @@ describe('matching and import configuration service behavior', () => {
         expect(axiosPost).toHaveBeenNthCalledWith(3, 'bills/import/configs/suggest', {
             fileFormat: 'csv', headers: ['time', 'amount'], sampleRows: [['2026-01-01', '1.23']]
         });
-        expect(axiosPost).toHaveBeenNthCalledWith(4, 'bills/import/configs', { name: 'bank csv' });
+        expect(axiosPost).toHaveBeenNthCalledWith(4, 'bills/import/configs', saveRequest);
         expect(axiosDelete).toHaveBeenCalledWith('bills/import/configs/config/7');
     });
 
@@ -655,7 +674,7 @@ describe('matching and import configuration service behavior', () => {
         const listed = await services.getImportConfigs({ fileFormat: 'csv' });
         const matched = await services.matchImportConfig({ fileFormat: 'csv', headers: ['date', 'amount'] });
         const suggested = await services.suggestImportConfig({ fileFormat: 'csv', headers: ['date', 'amount'] });
-        const saved = await services.saveImportConfig({ name: 'CSV' });
+        const saved = await services.saveImportConfig(buildImportConfigSaveRequest('CSV'));
         const deleted = await services.deleteImportConfig({ id: 7 });
 
         expect(listed.data.result).toEqual([{ id: 7, name: 'CSV' }]);

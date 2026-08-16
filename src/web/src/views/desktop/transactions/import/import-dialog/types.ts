@@ -1,3 +1,10 @@
+import type {
+    ImportConfigMatchDto,
+    ImportConfigSuggestion,
+    ImportFieldMappings as NeutralImportFieldMappings,
+    ImportFilePreviewData
+} from '@/models/import_config.ts';
+
 export type ImportTransactionDialogStep = 'uploadFile' | 'defineColumn' | 'executeCustomScript' | 'checkData' | 'finalResult';
 export type ImportFlowProgressKey = 'selectSource' | 'parseStageRows' | 'reviewPreview' | 'confirmImport' | 'result';
 
@@ -13,59 +20,15 @@ export enum ImportDSVProcessMethod {
     ColumnMapping,
 }
 
-export interface ImportFieldMappings {
-    includeHeader?: boolean;
-    columnMapping?: Record<number, number>;
-    transactionTypeMapping?: Record<string, number>;
-    timeFormat?: string;
-    timezoneFormat?: string;
-    amountDecimalSeparator?: string;
-    amountDigitGroupingSymbol?: string;
-    geoLocationSeparator?: string;
-    geoLocationOrder?: string;
-    tagSeparator?: string;
-}
+export type ImportFieldMappings = NeutralImportFieldMappings;
 
-export interface ImportConfigMatchResult {
-    id: number;
-    name: string;
-    fileFormat?: string;
-    description?: string;
-    descriptionSummary?: string;
-    fieldMappings: ImportFieldMappings;
-    sampleHeaders?: string[];
-    dateFormat?: string;
-    delimiter?: string;
-    encoding?: string;
-    skipRows?: number;
-    hasHeader?: boolean;
-    customRules?: Record<string, unknown>;
-    isDefault?: boolean;
-    defaultRecommendation?: boolean;
-    matchScore?: number;
-    matchReason?: string;
-}
+export type ImportConfigMatchResult =
+    Pick<ImportConfigMatchDto, 'id' | 'name' | 'fieldMappings'>
+    & Partial<Omit<ImportConfigMatchDto, 'id' | 'name' | 'fieldMappings'>>;
 
-export interface ImportFilePreviewResult {
-    headers: string[];
-    sampleData: string[][];
-    previewRows?: string[][];
-    totalRows: number;
-    encoding?: string;
-    delimiter?: string;
-}
+export type ImportFilePreviewResult = ImportFilePreviewData;
 
-export interface ImportConfigSuggestionResult {
-    includeHeader?: boolean;
-    columnMapping?: Record<string, number>;
-    transactionTypeMapping?: Record<string, number>;
-    suggestions?: Array<{
-        columnType: number;
-        columnIndex: number;
-        header: string;
-        score: number;
-    }>;
-}
+export type ImportConfigSuggestionResult = ImportConfigSuggestion;
 
 export interface ImportTransactionCheckDataFilterMenuGroup {
     title: string;

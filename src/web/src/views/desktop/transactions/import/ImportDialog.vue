@@ -419,7 +419,6 @@ import {
     ImportDSVProcessMethod,
     type ImportConfigMatchResult,
     type ImportConfigSuggestionResult,
-    type ImportFieldMappings,
     type ImportFilePreviewResult,
     type ImportTransactionDialogStep,
     type UnmatchedFileInfo
@@ -739,7 +738,7 @@ async function loadImportConfigList(): Promise<void> {
     });
     const result = Array.isArray(response.data?.result) ? response.data.result : [];
     importConfigList.value = result
-        .map((config: Partial<ImportConfigMatchResult>) => normalizeImportConfigMatchResult(config))
+        .map(config => normalizeImportConfigMatchResult(config))
         .filter((config): config is ImportConfigMatchResult => config !== null);
 }
 
@@ -786,7 +785,7 @@ async function saveEditedImportConfig(): Promise<void> {
             fieldMappings: targetConfig.fieldMappings,
             dateFormat: targetConfig.dateFormat || '',
             encoding: targetConfig.encoding || 'utf-8',
-            delimiter: targetConfig.delimiter,
+            delimiter: targetConfig.delimiter ?? null,
             skipRows: targetConfig.skipRows || 0,
             hasHeader: targetConfig.hasHeader ?? true,
             customRules: targetConfig.customRules || {},
@@ -983,7 +982,7 @@ async function prepareColumnMappingForUnmatchedFile(fileInfo: UnmatchedFileInfo)
         fileEncoding: parsedFileEncoding.value || undefined,
         delimiter: parsedFileDelimiter.value || undefined
     });
-    const preview = previewResponse.data?.result as ImportFilePreviewResult | undefined;
+    const preview: ImportFilePreviewResult | undefined = previewResponse.data?.result;
     const rows = preview?.sampleData || [];
 
     if (!rows.length) {
@@ -1025,9 +1024,9 @@ async function prepareColumnMappingForUnmatchedFile(fileInfo: UnmatchedFileInfo)
             headers,
             sampleRows: rows.slice(1, 21)
         });
-        const suggestion = suggestionResponse.data?.result as ImportConfigSuggestionResult | undefined;
+        const suggestion: ImportConfigSuggestionResult | undefined = suggestionResponse.data?.result;
         if (suggestion?.columnMapping && Object.keys(suggestion.columnMapping).length > 0) {
-            importTransactionDefineColumnTab.value?.applyFieldMappings(suggestion as ImportFieldMappings);
+            importTransactionDefineColumnTab.value?.applyFieldMappings(suggestion);
             snackbar.value?.showMessage('已自动建议列映射');
         }
     } catch (error) {

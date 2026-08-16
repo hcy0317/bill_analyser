@@ -510,15 +510,32 @@ fn weak_import_api_adapters_are_discoverable_and_cannot_grow() {
         weak_record_count > 0,
         "focused weak-contract discovery must hit"
     );
-    assert!(any_count > 0, "focused any discovery must hit");
     assert!(
         weak_record_count <= 10,
         "typed import work must ratchet Record<string, unknown> down from the C4 baseline"
     );
     assert!(
-        any_count <= 13,
-        "typed import work must ratchet any down from the C4 baseline"
+        any_count == 0,
+        "migrated import service adapters must not use any"
     );
+
+    let import_config_model = source("src/web/src/models/import_config.ts");
+    for contract in [
+        "export interface ImportConfigDto",
+        "export interface ImportConfigMatchDto",
+        "export interface ImportConfigSuggestion",
+        "export interface ImportConfigSaveRequest",
+        "export interface ImportFilePreviewData",
+        "export interface ImportGenericParseData",
+    ] {
+        assert!(
+            import_config_model.contains(contract),
+            "neutral import config model must own {contract}"
+        );
+    }
+    let import_dialog_types =
+        source("src/web/src/views/desktop/transactions/import/import-dialog/types.ts");
+    assert!(import_dialog_types.contains("@/models/import_config.ts"));
 
     let dialog = source("src/web/src/views/desktop/transactions/import/ImportDialog.vue");
     let check_data = source(
