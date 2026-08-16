@@ -79,6 +79,26 @@ describe('useImportCheckDataAnnotations', () => {
         expect(annotations.hasBaselineAnnotationIssue(resolved)).toBe(false);
     });
 
+    test('derives resolved category issues from the current row without a manual refresh', () => {
+        const transaction = createTransaction({
+            categoryId: '',
+            sourceAccountId: 'source',
+            destinationAccountId: 'destination'
+        });
+        const annotations = createAnnotations([transaction]);
+
+        expect(annotations.getAnnotationIssues(transaction)).toStrictEqual(['Missing Category']);
+
+        transaction.categoryId = 'food';
+
+        expect(annotations.getAnnotationIssues(transaction)).toStrictEqual([]);
+        expect(annotations.needsAnnotation(transaction)).toBe(false);
+        expect(annotations.importTransactionSelectionSummary.value).toMatchObject({
+            annotationCount: 0,
+            selectedAnnotationCount: 0
+        });
+    });
+
     test.each([
         ['missing_category', { categoryId: '', sourceAccountId: 'source', destinationAccountId: 'destination' }],
         ['missing_source_account', { categoryId: 'transfer', sourceAccountId: '', destinationAccountId: 'destination' }],

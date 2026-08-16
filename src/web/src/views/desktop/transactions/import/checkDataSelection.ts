@@ -8,7 +8,6 @@ export interface AnnotationReasonSummary {
 }
 
 export interface ImportTransactionSelectionSummary {
-    annotationIssuesByIndex: Record<number, string[]>;
     selectedCount: number;
     selectedExpenseCount: number;
     selectedIncomeCount: number;
@@ -25,7 +24,6 @@ export function collectImportTransactionSelectionSummary(
     transactions: ImportTransaction[],
     collectAnnotationIssues: (transaction: ImportTransaction) => string[]
 ): ImportTransactionSelectionSummary {
-    const annotationIssuesByIndex: Record<number, string[]> = {};
     const annotationReasonSummaryMap: Record<string, AnnotationReasonSummary> = {};
     const selectedAnnotationTransactions: ImportTransaction[] = [];
     let selectedCount = 0;
@@ -39,7 +37,6 @@ export function collectImportTransactionSelectionSummary(
 
     for (const transaction of transactions) {
         const annotationIssues = collectAnnotationIssues(transaction);
-        annotationIssuesByIndex[transaction.index] = annotationIssues;
         const hasAnnotationIssues = annotationIssues.length > 0;
 
         if (hasAnnotationIssues) {
@@ -89,7 +86,6 @@ export function collectImportTransactionSelectionSummary(
     }
 
     return {
-        annotationIssuesByIndex,
         selectedCount,
         selectedExpenseCount,
         selectedIncomeCount,

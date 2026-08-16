@@ -2419,7 +2419,6 @@ function syncTransactionFromPreviewDecision(item: ImportTransaction, previewData
     item.recurringMatchedDate = previewData.preview_recurring_matched_date || '';
 
     updateTransactionData(item);
-    refreshImportTransactionSelectionSummary();
     syncTransferDecisionBaseline(item);
     syncLearningDecisionBaseline(item);
     getPreviewState(item)._shouldClearLlmDecision = false;
@@ -2808,8 +2807,7 @@ const {
     hasMissingSourceAccountIssue,
     hasTransferAccountReviewIssue,
     importTransactionSelectionSummary,
-    needsAnnotation,
-    refreshImportTransactionSelectionSummary
+    needsAnnotation
 } = useImportCheckDataAnnotations({
     translate: tt,
     isTransactionCategoryAccepted,

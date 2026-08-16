@@ -1,4 +1,4 @@
-import { computed, ref } from 'vue';
+import { computed } from 'vue';
 
 import { TransactionType } from '@/core/transaction.ts';
 import type { ImportTransaction } from '@/models/imported_transaction.ts';
@@ -21,8 +21,6 @@ export interface ImportCheckDataAnnotationsOptions {
 }
 
 export function useImportCheckDataAnnotations(options: ImportCheckDataAnnotationsOptions) {
-    const importTransactionSelectionRevision = ref(0);
-
     function hasMissingCategoryIssue(item: ImportTransaction): boolean {
         return item.type !== TransactionType.ModifyBalance
             && !options.isTransactionCategoryAccepted(item);
@@ -65,20 +63,14 @@ export function useImportCheckDataAnnotations(options: ImportCheckDataAnnotation
     }
 
     const importTransactionSelectionSummary = computed<ImportTransactionSelectionSummary>(() => {
-        void importTransactionSelectionRevision.value;
         return collectImportTransactionSelectionSummary(
             options.getTrackedTransactionsForSelection(),
             collectAnnotationIssues
         );
     });
 
-    function refreshImportTransactionSelectionSummary(): void {
-        importTransactionSelectionRevision.value += 1;
-    }
-
     function getAnnotationIssues(item: ImportTransaction): string[] {
-        return importTransactionSelectionSummary.value.annotationIssuesByIndex[item.index]
-            || collectAnnotationIssues(item);
+        return collectAnnotationIssues(item);
     }
 
     function needsAnnotation(item: ImportTransaction): boolean {
@@ -171,7 +163,6 @@ export function useImportCheckDataAnnotations(options: ImportCheckDataAnnotation
         hasMissingSourceAccountIssue,
         hasTransferAccountReviewIssue,
         importTransactionSelectionSummary,
-        needsAnnotation,
-        refreshImportTransactionSelectionSummary
+        needsAnnotation
     };
 }
