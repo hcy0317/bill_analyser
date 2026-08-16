@@ -22,12 +22,163 @@ use bill_analyser_core::{
     ExpectedPreviewState, ImportHistoryRewriteOperation, ImportPreviewIndexData,
     ImportPreviewMatchingPayload, ImportPreviewPageData, ImportPreviewSortDirection,
     ImportSessionSummary, ImportStageConfirmData, ImportStageDedupData, ImportStageParseData,
-    BILLS_PREVIEW_CONTRACT_FIELDS, HISTORY_REWRITE_NOTICE, IMPORT_PREVIEW_VISIBLE_SIGNAL_FAMILIES,
-    IMPORT_STAGING_TABLES, IMPORT_V2_PIPELINE_STEPS,
+    PreviewFamilyEvidence, PreviewIdentityInput, PreviewLearningLevel, PreviewSignalStatus,
+    PreviewStateInput, PreviewStateKernel, ReviewIssueCode, BILLS_PREVIEW_CONTRACT_FIELDS,
+    HISTORY_REWRITE_NOTICE, IMPORT_PREVIEW_VISIBLE_SIGNAL_FAMILIES, IMPORT_STAGING_TABLES,
+    IMPORT_V2_PIPELINE_STEPS,
 };
 use serde_json::{json, Map, Value};
 
 include!("transfer_signal_parity_corpus.rs");
+
+#[derive(serde::Deserialize)]
+struct PreviewStateFixtureCase {
+    name: String,
+    input: PreviewStateInput,
+    legacy_payload: Value,
+    expected_signals: Vec<String>,
+    expected_issues: Vec<ReviewIssueCode>,
+    expected_confirmable: bool,
+}
+
+#[test]
+fn preview_state_kernel_matches_canonical_v1_fixture() {
+    let cases: Vec<PreviewStateFixtureCase> = serde_json::from_str(include_str!(
+        "../../fixtures/import_preview_state_kernel_v1.json"
+    ))
+    .expect("preview state fixture");
+
+    for case in cases {
+        let expected_decisions = [
+            case.input.transfer,
+            case.input.history,
+            case.input.learning,
+            case.input.llm,
+        ];
+        let snapshot = PreviewStateKernel::derive(case.input);
+        assert_eq!(
+            snapshot.signals.names(),
+            case.expected_signals,
+            "{} signals",
+            case.name
+        );
+        assert_eq!(
+            snapshot.issues.codes(),
+            case.expected_issues,
+            "{} issues",
+            case.name
+        );
+        assert_eq!(
+            snapshot.is_confirmable(),
+            case.expected_confirmable,
+            "{} confirmable",
+            case.name
+        );
+        assert_eq!(
+            [
+                snapshot.decisions.transfer,
+                snapshot.decisions.history,
+                snapshot.decisions.learning,
+                snapshot.decisions.llm,
+            ],
+            expected_decisions,
+            "{} decision states",
+            case.name
+        );
+
+        let compatibility_item = build_import_preview_filter_index_item(
+            case.legacy_payload
+                .as_object()
+                .expect("legacy preview payload"),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        );
+        assert_eq!(
+            compatibility_item.preview_state.signals.names(),
+            case.expected_signals,
+            "{} legacy adapter signal parity",
+            case.name
+        );
+    }
+}
+
+#[test]
+fn preview_state_kernel_derives_dual_membership_and_fails_closed_on_unknown_status() {
+    let snapshot = PreviewStateKernel::derive(PreviewStateInput {
+        parser_present: true,
+        transfer: PreviewFamilyEvidence {
+            status: PreviewSignalStatus::Pending,
+            has_evidence: true,
+        },
+        transfer_learning_level: Some(PreviewLearningLevel::Green),
+        llm: PreviewFamilyEvidence {
+            status: PreviewSignalStatus::Unknown,
+            has_evidence: true,
+        },
+        identity: PreviewIdentityInput {
+            category_required: true,
+            ..PreviewIdentityInput::default()
+        },
+        ..PreviewStateInput::default()
+    });
+
+    assert_eq!(
+        snapshot.signals.names(),
+        vec!["transfer", "learning"],
+        "likely transfer must own both memberships while parser-only and unknown LLM stay hidden"
+    );
+    assert_eq!(
+        snapshot.issues.codes(),
+        vec![
+            ReviewIssueCode::MissingCategory,
+            ReviewIssueCode::UnknownLlmState
+        ],
+        "identity gaps and unknown signal states must fail closed as typed review issues"
+    );
+}
+
+#[test]
+fn filter_index_projects_legacy_row_through_preview_state_kernel() {
+    let preview = json!({
+        "id": 812,
+        "preview_type": "支出",
+        "preview_parser_id": "wechat",
+        "preview_matching_feedback": {
+            "transfer": {
+                "review_status": "pending",
+                "candidate_type": "transfer",
+                "learning_level": "green"
+            },
+            "learning": {
+                "review_status": "skipped",
+                "reason": "transfer preview is protected from learning type/category overrides"
+            },
+            "llm": {
+                "review_status": "__invalid_status__",
+                "confidence": 0.95
+            }
+        }
+    });
+
+    let item = build_import_preview_filter_index_item(
+        preview.as_object().expect("preview object"),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+    );
+
+    assert_eq!(
+        item.preview_state.signals.names(),
+        vec!["transfer", "learning"]
+    );
+    assert!(item
+        .preview_state
+        .issues
+        .contains(ReviewIssueCode::UnknownLlmState));
+    assert_eq!(
+        serde_json::to_value(&item.preview_state).unwrap()["signals"],
+        json!(["transfer", "learning"])
+    );
+}
 
 #[test]
 fn strict_decimal_and_text_evidence_follow_sql_grammar() {

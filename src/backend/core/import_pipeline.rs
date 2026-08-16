@@ -2,7 +2,7 @@
 // 维护重点：在这里记录跨路由复用的业务不变式，避免 handler 或 repository 重复推导。
 // 不变式：金额单位、用户可见类型和API payload 在进入或离开本层时必须显式转换。
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use crate::import_pipeline_learning::LearningMatchingPayload;
 use serde::{Deserialize, Serialize};
@@ -53,6 +53,7 @@ pub const BILLS_PREVIEW_CONTRACT_FIELDS: &[&str] = &[
 include!("import_history_rewrite.rs");
 
 include!("import_pipeline/preview_query.rs");
+include!("import_pipeline/preview_state.rs");
 include!("import_pipeline/filter_index.rs");
 include!("import_pipeline/matching_payload.rs");
 include!("import_pipeline/type_mapping.rs");

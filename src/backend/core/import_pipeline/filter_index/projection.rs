@@ -10,7 +10,10 @@ pub struct AccountLookup {
     pub name: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
+)]
+#[serde(rename_all = "snake_case")]
 pub enum ImportPreviewSignalFamily {
     Parser,
     PlatformDuplicate,
@@ -203,6 +206,7 @@ pub struct ImportPreviewFilterIndexItem {
     pub recurring_candidate_count: i64,
     pub recurring_match_reasons: String,
     pub recurring_matched_date: String,
+    pub preview_state: PreviewState,
 }
 
 /// 中文说明：把一行导入预览原始 JSON 投影为前端筛选索引，统一分类、账户、parser、去重和信号状态字段。
@@ -279,6 +283,11 @@ pub fn build_import_preview_filter_index_item(
     let history_status = (!history_has_unknown_status
         && (!history_planned_operation.is_empty() || history_destructive_ack_required))
         .then(|| "pending".to_string());
+    let preview_state = derive_preview_state_from_legacy_row(
+        preview_item,
+        categories_by_id,
+        accounts_by_id,
+    );
 
     ImportPreviewFilterIndexItem {
         id: integer_field_from_map(preview_item, "id"),
@@ -306,11 +315,11 @@ pub fn build_import_preview_filter_index_item(
         parser_tags: list_field_from_map(preview_item, "preview_parser_tags"),
         dedup_type: string_field_from_map(preview_item, "dedup_type"),
         dedup_source_ids: parse_dedup_source_ids(preview_item.get("dedup_source_ids")),
-        transfer_status: resolve_import_preview_transfer_signal_status(preview_item),
+        transfer_status: compatibility_signal_status(preview_state.decisions.transfer),
         transfer_title: matching_section_string_field(preview_item, "transfer", "reason")
             .filter(|value| !value.trim().is_empty())
             .unwrap_or_else(|| string_field_from_map(preview_item, "transfer_suggestion_reason")),
-        learning_status: resolve_import_preview_learning_signal_status(preview_item),
+        learning_status: compatibility_signal_status(preview_state.decisions.learning),
         learning_title: matching_section_string_field(preview_item, "learning", "reason")
             .filter(|value| !value.trim().is_empty())
             .unwrap_or_else(|| {
@@ -324,13 +333,17 @@ pub fn build_import_preview_filter_index_item(
         learning_mode: matching_section_string_field(preview_item, "learning", "mode")
             .filter(|value| !value.trim().is_empty())
             .unwrap_or_else(|| string_field_from_map(preview_item, "learning_recommendation_mode")),
-        llm_status: resolve_import_preview_llm_signal_status(preview_item),
+        llm_status: compatibility_signal_status(preview_state.decisions.llm),
         llm_title: matching_section_string_field(preview_item, "llm", "reason").unwrap_or_default(),
         llm_confidence: matching_section_float_field(preview_item, "llm", "confidence"),
         llm_category_path,
         llm_source_account,
         llm_destination_account,
-        history_status,
+        history_status: preview_state
+            .signals
+            .contains(ImportPreviewSignalFamily::History)
+            .then(|| "pending".to_string())
+            .or(history_status),
         history_title: reconciliation
             .map(|section| {
                 get_first_non_empty_string([
@@ -374,5 +387,6 @@ pub fn build_import_preview_filter_index_item(
             preview_item,
             "preview_recurring_matched_date",
         ),
+        preview_state,
     }
 }

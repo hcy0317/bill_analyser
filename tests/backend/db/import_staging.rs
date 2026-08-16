@@ -47,6 +47,13 @@ use sqlx::Row;
 mod postgres_test_support;
 include!("../core/transfer_signal_parity_corpus.rs");
 
+#[derive(serde::Deserialize)]
+struct PreviewStatePostgresFixtureCase {
+    name: String,
+    legacy_payload: Value,
+    expected_signals: Vec<String>,
+}
+
 fn initial_schema() -> String {
     fs::read_to_string(postgres_initial_schema_path()).expect("initial PostgreSQL schema")
 }
@@ -507,6 +514,37 @@ async fn real_postgres_transfer_signal_projection_uses_shared_parity_corpus(
             "PostgreSQL projection diverged from shared transfer parity corpus: {}",
             case.name
         );
+    }
+
+    test_db.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn real_postgres_signal_flags_match_preview_state_kernel_v1_fixture(
+) -> Result<(), Box<dyn Error>> {
+    let test_db = strict_isolated_postgres_database("preview_state_kernel_v1_parity").await?;
+    let cases: Vec<PreviewStatePostgresFixtureCase> = serde_json::from_str(include_str!(
+        "../../fixtures/import_preview_state_kernel_v1.json"
+    ))?;
+
+    for case in cases {
+        let flags: Value = sqlx::query_scalar("SELECT import_preview_signal_flags($1::jsonb)")
+            .bind(case.legacy_payload)
+            .fetch_one(&test_db.pool)
+            .await?;
+        let actual = bill_analyser_core::ImportPreviewSignalFamily::ORDER
+            .into_iter()
+            .filter(|family| {
+                flags
+                    .get(family.as_str())
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+            })
+            .map(|family| family.as_str().to_string())
+            .collect::<Vec<_>>();
+
+        assert_eq!(actual, case.expected_signals, "{} signal parity", case.name);
     }
 
     test_db.cleanup().await?;

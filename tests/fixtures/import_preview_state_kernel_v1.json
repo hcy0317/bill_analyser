@@ -1,0 +1,161 @@
+[
+  {
+    "name": "parser_only",
+    "input": { "parser_present": true },
+    "legacy_payload": {
+      "preview_parser_id": "wechat",
+      "preview_matching_feedback": {}
+    },
+    "expected_signals": ["parser"],
+    "expected_issues": [],
+    "expected_confirmable": true
+  },
+  {
+    "name": "parser_hidden_by_platform_duplicate",
+    "input": { "parser_present": true, "platform_duplicate": true },
+    "legacy_payload": {
+      "preview_parser_id": "wechat",
+      "dedup_type": "platform_bank",
+      "preview_matching_feedback": {}
+    },
+    "expected_signals": ["platform_duplicate"],
+    "expected_issues": [],
+    "expected_confirmable": true
+  },
+  {
+    "name": "non_parser_families_can_overlap",
+    "input": {
+      "parser_present": true,
+      "platform_duplicate": true,
+      "transfer": { "status": "pending", "has_evidence": true },
+      "history": { "status": "pending", "has_evidence": true },
+      "learning": { "status": "accepted", "has_evidence": true },
+      "llm": { "status": "auto_applied", "has_evidence": true }
+    },
+    "legacy_payload": {
+      "preview_parser_id": "wechat",
+      "dedup_type": "platform_bank",
+      "preview_matching_feedback": {
+        "transfer": { "review_status": "pending", "candidate_type": "transfer" },
+        "reconciliation": { "planned_operation": "update_history" },
+        "learning": { "review_status": "accepted" },
+        "llm": { "review_status": "auto_applied" }
+      }
+    },
+    "expected_signals": ["platform_duplicate", "transfer", "history", "learning", "llm"],
+    "expected_issues": [],
+    "expected_confirmable": true
+  },
+  {
+    "name": "likely_transfer_owns_learning_membership",
+    "input": {
+      "transfer": { "status": "pending", "has_evidence": true },
+      "transfer_learning_level": "green",
+      "learning": { "status": "skipped", "has_evidence": true }
+    },
+    "legacy_payload": {
+      "preview_type": "支出",
+      "preview_matching_feedback": {
+        "transfer": {
+          "review_status": "pending",
+          "candidate_type": "transfer",
+          "learning_level": "green"
+        },
+        "learning": {
+          "review_status": "skipped",
+          "reason": "transfer preview is protected from learning type/category overrides"
+        }
+      }
+    },
+    "expected_signals": ["transfer", "learning"],
+    "expected_issues": [],
+    "expected_confirmable": true
+  },
+  {
+    "name": "unknown_states_fail_closed",
+    "input": {
+      "transfer": { "status": "unknown", "has_evidence": true },
+      "history": { "status": "unknown", "has_evidence": true },
+      "learning": { "status": "unknown", "has_evidence": true },
+      "llm": { "status": "unknown", "has_evidence": true }
+    },
+    "legacy_payload": {
+      "preview_matching_feedback": {
+        "transfer": { "review_status": "__invalid_status__", "candidate_type": "transfer" },
+        "reconciliation": {
+          "status": "__invalid_status__",
+          "planned_operation": "update_history"
+        },
+        "learning": { "review_status": "__invalid_status__", "score": 0.95 },
+        "llm": { "review_status": "__invalid_status__", "confidence": 0.95 }
+      }
+    },
+    "expected_signals": [],
+    "expected_issues": [
+      "unknown_transfer_state",
+      "unknown_history_state",
+      "unknown_learning_state",
+      "unknown_llm_state"
+    ],
+    "expected_confirmable": false
+  },
+  {
+    "name": "identity_gaps_are_issues_not_signals",
+    "input": {
+      "identity": {
+        "category_required": true,
+        "source_account_required": true,
+        "source_account_id": 17,
+        "source_account_valid": false,
+        "destination_account_required": true
+      }
+    },
+    "legacy_payload": {
+      "preview_type": "支出",
+      "preview_matching_feedback": {
+        "identity_validation": {
+          "issues": [
+            { "field": "category_id", "reason": "missing" },
+            { "field": "source_account_id", "reason": "not_active_or_not_found" },
+            { "field": "destination_account_id", "reason": "missing" }
+          ]
+        }
+      }
+    },
+    "expected_signals": [],
+    "expected_issues": [
+      "missing_category",
+      "invalid_source_account",
+      "missing_destination_account"
+    ],
+    "expected_confirmable": false
+  },
+  {
+    "name": "same_transfer_accounts_block_confirm",
+    "input": {
+      "identity": {
+        "source_account_required": true,
+        "source_account_id": 23,
+        "source_account_valid": true,
+        "destination_account_required": true,
+        "destination_account_id": 23,
+        "destination_account_valid": true
+      }
+    },
+    "legacy_payload": {
+      "preview_type": "transfer",
+      "preview_source_account_id": 23,
+      "preview_destination_account_id": 23,
+      "preview_matching_feedback": {
+        "identity_validation": {
+          "issues": [
+            { "field": "destination_account_id", "reason": "same_as_source_account" }
+          ]
+        }
+      }
+    },
+    "expected_signals": [],
+    "expected_issues": ["same_transfer_accounts"],
+    "expected_confirmable": false
+  }
+]
