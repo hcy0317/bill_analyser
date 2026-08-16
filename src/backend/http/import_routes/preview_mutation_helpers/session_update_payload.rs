@@ -50,7 +50,15 @@ fn preview_id_from_payload(object: &Map<String, Value>) -> Result<i64, ImportV2R
 fn expected_row_version_from_payload(
     object: &Map<String, Value>,
 ) -> Result<Option<i64>, ImportV2RouteResponse> {
-    let Some(value) = first_value(object, &["expected_row_version", "expectedRowVersion"]) else {
+    let Some(value) = first_value(
+        object,
+        &[
+            "expected_row_version",
+            "expectedRowVersion",
+            "row_version",
+            "rowVersion",
+        ],
+    ) else {
         return Ok(None);
     };
     value_to_i64(value)

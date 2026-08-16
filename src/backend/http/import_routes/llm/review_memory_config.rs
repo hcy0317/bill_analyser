@@ -157,6 +157,27 @@ async fn llm_preview_recommend_review_response(
             preview_id,
             decision_text,
         )),
+        Err(bill_analyser_db::DbError::PreviewVersionConflict {
+            preview_id: conflict_preview_id,
+            expected,
+            ..
+        }) if conflict_preview_id == preview_id => {
+            let latest_row = match get_preview_bill_by_id(
+                runtime.connection(),
+                conflict_preview_id,
+                user_id,
+            ) {
+                Ok(Some(row)) if row.session_id == session_id => row,
+                Ok(Some(_)) | Ok(None) => {
+                    return route_response(import_v2_error_response(
+                        404,
+                        "Preview recommendation is no longer available",
+                    ));
+                }
+                Err(error) => return route_response(db_error_response(error)),
+            };
+            route_response(preview_row_version_conflict_response(expected, latest_row))
+        }
         Err(error) => route_response(db_error_response(error)),
     }
 }

@@ -1845,22 +1845,19 @@ export default {
         });
     },
 
-    llmPreviewRecommendAccept: ({ sessionId, previewId, suggestion }: LLMPreviewRecommendAcceptRequest): ApiResponsePromise<any> => {
+    llmPreviewRecommendAccept: ({ sessionId, previewId, suggestion, expectedState }: LLMPreviewRecommendAcceptRequest): ApiResponsePromise<any> => {
         return axios.post('llm/preview-recommend/accept', {
-            session_id: sessionId,
-            preview_id: previewId,
-            suggestion
+            session_id: sessionId, preview_id: previewId,
+            suggestion, expected_state: expectedState
         }).then(response => {
             return buildApiResponse(response, response.data?.data);
         });
     },
 
-    llmPreviewRecommendReject: ({ sessionId, previewId, suggestion, userCorrection }: LLMPreviewRecommendRejectRequest): ApiResponsePromise<any> => {
+    llmPreviewRecommendReject: ({ sessionId, previewId, suggestion, userCorrection, expectedState }: LLMPreviewRecommendRejectRequest): ApiResponsePromise<any> => {
         return axios.post('llm/preview-recommend/reject', {
-            session_id: sessionId,
-            preview_id: previewId,
-            suggestion,
-            user_correction: userCorrection
+            session_id: sessionId, preview_id: previewId,
+            suggestion, user_correction: userCorrection, expected_state: expectedState
         }).then(response => {
             return buildApiResponse(response, response.data?.data);
         });

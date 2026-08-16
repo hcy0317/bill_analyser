@@ -430,16 +430,39 @@ async function reviewLlm(row: MobileImportPreviewRow, decision: ImportPreviewSig
 
     row.busy = true;
     const suggestion = row.record.matching?.llm || {};
+    const expectedState = withImportPreviewRowVersion(
+        { sessionId },
+        row.record.row_version
+    );
     try {
         if (decision === 'accept') {
-            await services.llmPreviewRecommendAccept({ sessionId, previewId: row.id, suggestion });
+            await services.llmPreviewRecommendAccept({
+                sessionId,
+                previewId: row.id,
+                suggestion,
+                expectedState
+            });
         } else {
-            await services.llmPreviewRecommendReject({ sessionId, previewId: row.id, suggestion });
+            await services.llmPreviewRecommendReject({
+                sessionId,
+                previewId: row.id,
+                suggestion,
+                expectedState
+            });
         }
         await reload();
     } catch (error) {
         showToast(error instanceof Error && error.message ? error.message : 'LLM recommendation decision failed');
-        await reload();
+        const conflict = services.getImportPreviewRowVersionConflict(error);
+        if (conflict && Number(conflict.previewItem.id) === row.id) {
+            row.record = conflict.previewItem;
+            row.selected = !!(conflict.previewItem.preview_selected ?? conflict.previewItem.selected);
+            row.signal = buildImportPreviewSignalViewModelFromRecord(conflict.previewItem, {
+                formatAmountWithCurrency: formatAmountToLocalizedNumeralsWithCurrency
+            });
+        } else {
+            await reload();
+        }
     } finally {
         row.busy = false;
     }

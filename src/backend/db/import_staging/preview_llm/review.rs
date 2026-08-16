@@ -129,6 +129,29 @@ fn review_preview_llm_recommendation_with_expected_state(
             }
             ImportPreviewTerminalAction::Apply => {}
         }
+        if let Some(expected_row_version) = request
+            .expected_state
+            .and_then(|expected| expected.expected_row_version)
+            .filter(|expected| *expected != preview.version)
+        {
+            transaction.rollback().await?;
+            tracing::warn!(
+                domain = "import_signal_lifecycle",
+                operation = "lifecycle_transition",
+                signal_family = "llm",
+                outcome = "row_version_conflict",
+                session_key = %request.session_id,
+                decision = decision_name,
+                expected_row_version,
+                actual_row_version = preview.version,
+                "import preview signal lifecycle transition rejected"
+            );
+            return Err(DbError::preview_version_conflict(
+                request.preview_id,
+                expected_row_version,
+                preview.version,
+            ));
+        }
         if recommendation_expected_state_conflicts(
             &preview,
             request.expected_state,
@@ -197,7 +220,9 @@ fn review_preview_llm_recommendation_with_expected_state(
                 preview_id: request.preview_id,
                 session_db_id,
                 user_id,
-                expected_row_version: None,
+                expected_row_version: request
+                    .expected_state
+                    .and_then(|expected| expected.expected_row_version),
             },
         );
         update.build().execute(&mut *transaction).await?;

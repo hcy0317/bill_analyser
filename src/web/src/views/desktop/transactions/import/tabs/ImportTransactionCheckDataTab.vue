@@ -906,7 +906,8 @@ import {
 } from '../checkDataLearning.ts';
 import {
     buildImportCheckDecisionExpectedState,
-    buildImportCheckLearningDecisionExpectedState
+    buildImportCheckLearningDecisionExpectedState,
+    withImportPreviewRowVersion
 } from '../checkDataCandidateReview.ts';
 import {
     buildLLMSignalMemoryMap,
@@ -1944,6 +1945,7 @@ function syncTransactionFromLLMPreviewPayload(
         item.parserTags = Array.isArray(previewData.preview_parser_tags)
             ? previewData.preview_parser_tags
             : item.parserTags;
+        syncPreviewRowVersionToImportTransaction(item, previewData);
     }
 
     mergeLLMMatchingFromPayload(item, payload.matching?.llm);
@@ -2244,6 +2246,21 @@ function getLearningDecisionExpectedState(item: ImportTransaction): Record<strin
         sourceAccountId: item.sourceAccountId,
         destinationAccountId: item.destinationAccountId
     });
+}
+
+function getLLMDecisionExpectedState(item: ImportTransaction): Record<string, string | number | null> {
+    return withImportPreviewRowVersion(
+        buildImportCheckDecisionExpectedState({
+            sessionId: props.sessionId || '',
+            reviewStatus: item.matching?.llm?.review_status || '',
+            type: item.type,
+            categoryId: item.categoryId,
+            recurringTemplateId: item.recurringTemplateId,
+            sourceAccountId: item.sourceAccountId,
+            destinationAccountId: item.destinationAccountId
+        }),
+        getPreviewRowVersionFromImportTransaction(item)
+    );
 }
 
 function getActionErrorMessage(error: unknown, fallbackMessage: string): string {
@@ -2694,12 +2711,14 @@ async function reviewLLMRecommendation(
             ? await services.llmPreviewRecommendAccept({
                 sessionId: props.sessionId,
                 previewId,
-                suggestion
+                suggestion,
+                expectedState: getLLMDecisionExpectedState(item)
             })
             : await services.llmPreviewRecommendReject({
                 sessionId: props.sessionId,
                 previewId,
-                suggestion
+                suggestion,
+                expectedState: getLLMDecisionExpectedState(item)
             });
 
         const result = response.data?.result;
@@ -2713,7 +2732,13 @@ async function reviewLLMRecommendation(
         logger.info(`[LLM 建议决策] 完成: preview_id=${previewId}, decision=${decision}`);
         snackbar.value?.showMessage(tt(decision === 'accept' ? 'LLM Suggestion Accepted' : 'LLM Suggestion Rejected'));
     } catch (error) {
-        await refreshLLMSessionSignalMemory(true);
+        const conflict = services.getImportPreviewRowVersionConflict(error);
+        if (conflict && Number(conflict.previewItem.id) === previewId) {
+            syncTransactionFromPreviewDecision(item, conflict.previewItem);
+            rebaseImportPreviewTextSyncConflict(item, conflict.previewItem);
+        } else {
+            await refreshLLMSessionSignalMemory(true);
+        }
         const actionErrorText = getActionErrorMessage(error, 'LLM recommendation decision failed');
         logger.error(`[LLM 建议决策] 失败: ${actionErrorText}`, error);
         snackbar.value?.showMessage(actionErrorText);

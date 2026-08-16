@@ -632,11 +632,12 @@ describe('services budget, learning, recurring, rules, and LLM facade', () => {
         });
         await invoke('llmPreviewRecommend', { sessionId: 'session-1' });
         await invoke('llmPreviewRecommendAccept', {
-            sessionId: 'session-1', previewId: 'preview-1', suggestion: { categoryId: 3 }
+            sessionId: 'session-1', previewId: 'preview-1', suggestion: { categoryId: 3 },
+            expectedState: { rowVersion: 7 }
         });
         await invoke('llmPreviewRecommendReject', {
             sessionId: 'session-1', previewId: 'preview-1', suggestion: { categoryId: 3 },
-            userCorrection: { categoryId: 4 }
+            userCorrection: { categoryId: 4 }, expectedState: { rowVersion: 8 }
         });
         axiosGet.mockResolvedValueOnce({
             ...genericResponse(), data: { success: true, data: [{ id: 1 }], total: 3 }
@@ -666,6 +667,12 @@ describe('services budget, learning, recurring, rules, and LLM facade', () => {
         }), expect.objectContaining({ timeout: expect.any(Number) }));
         expect(axiosPost).toHaveBeenCalledWith('llm/analyze-transactions', expect.objectContaining({ limit: 20 }), expect.any(Object));
         expect(axiosPost).toHaveBeenCalledWith('llm/preview-recommend', expect.objectContaining({ limit: 20 }), expect.any(Object));
+        expect(axiosPost).toHaveBeenCalledWith('llm/preview-recommend/accept', expect.objectContaining({
+            expected_state: { rowVersion: 7 }
+        }));
+        expect(axiosPost).toHaveBeenCalledWith('llm/preview-recommend/reject', expect.objectContaining({
+            expected_state: { rowVersion: 8 }
+        }));
         expect(urls(axiosPut)).toEqual(['llm/configs/1']);
         expect(urls(axiosDelete)).toEqual(['llm/configs/1']);
     });

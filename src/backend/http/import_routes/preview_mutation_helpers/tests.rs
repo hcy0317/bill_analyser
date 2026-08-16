@@ -406,6 +406,7 @@ mod preview_mutation_helper_tests {
         let payload = json!({
             "expected_state": {
                 "session_id": "session-llm",
+                "row_version": 9,
                 "review_status": "Pending",
                 "category_id": "42"
             }
@@ -415,7 +416,18 @@ mod preview_mutation_helper_tests {
             .expect("expected state");
 
         assert_eq!(expected.session_id.as_deref(), Some("session-llm"));
+        assert_eq!(expected.expected_row_version, Some(9));
         assert_eq!(expected.review_status.as_deref(), Some("pending"));
         assert_eq!(expected.preview_category_id, Some(Some(42)));
+    }
+
+    #[test]
+    fn llm_review_expected_state_parser_rejects_invalid_row_versions() {
+        for value in [json!(0), json!(-1), json!(true), json!(1.5)] {
+            let payload = json!({"expectedState": {"rowVersion": value}});
+            let error = expected_state_from_payload(payload.as_object().expect("payload object"))
+                .expect_err("invalid LLM row version");
+            assert_eq!(error.status_code, 400);
+        }
     }
 }

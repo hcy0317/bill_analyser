@@ -141,6 +141,7 @@ export interface LLMPreviewRecommendAcceptRequest {
     sessionId: string;
     previewId: number;
     suggestion: Record<string, any>;
+    expectedState?: Record<string, string | number | null>;
 }
 
 export interface LLMPreviewRecommendRejectRequest extends LLMPreviewRecommendAcceptRequest {

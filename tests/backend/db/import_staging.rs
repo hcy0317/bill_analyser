@@ -4841,6 +4841,10 @@ async fn real_postgres_learning_and_llm_lifecycle_transitions_are_transactional_
             json!({"llm": {"signal_state": "pending", "confidence": 0.73}}),
         ),
         ("llm stale", json!({"llm": {"review_status": "pending"}})),
+        (
+            "llm version stale",
+            json!({"llm": {"review_status": "pending"}}),
+        ),
         ("llm absent", json!({"parser": {"source": "fixture"}})),
     ] {
         let mut draft = preview_draft(
@@ -5282,6 +5286,60 @@ async fn real_postgres_learning_and_llm_lifecycle_transitions_are_transactional_
         },
     )?;
     assert!(llm_stale.state_conflict);
+
+    let llm_stale_version_id = id_for("llm version stale");
+    let llm_stale_version_before =
+        get_preview_bill_by_id(pool, llm_stale_version_id, scoped_user_id)?
+            .expect("LLM version stale preview");
+    let llm_expected_version = llm_stale_version_before.version + 1;
+    let llm_stale_version_error = review_preview_llm_recommendation(
+        pool,
+        &ImportPreviewLlmReviewRequest {
+            session_id,
+            preview_id: llm_stale_version_id,
+            user_id: scoped_user_id,
+            decision: ImportPreviewDecision::Accept,
+            suggestion: None,
+            user_correction_category: None,
+            user_correction_account: None,
+            expected_state: Some(&ImportPreviewExpectedState {
+                expected_row_version: Some(llm_expected_version),
+                ..ImportPreviewExpectedState::default()
+            }),
+        },
+    )
+    .expect_err("stale row version must reject LLM decision");
+    assert!(matches!(
+        llm_stale_version_error,
+        DbError::PreviewVersionConflict {
+            preview_id,
+            expected,
+            actual,
+        } if preview_id == llm_stale_version_id
+            && expected == llm_expected_version
+            && actual == llm_stale_version_before.version
+    ));
+    let llm_stale_version_after =
+        get_preview_bill_by_id(pool, llm_stale_version_id, scoped_user_id)?
+            .expect("LLM version stale preview after conflict");
+    assert_eq!(
+        llm_stale_version_after.version,
+        llm_stale_version_before.version
+    );
+    assert_eq!(
+        llm_stale_version_after
+            .preview_matching_feedback
+            .pointer("/llm/review_status"),
+        Some(&json!("pending"))
+    );
+    let llm_stale_version_event_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*)::BIGINT FROM llm_memory_events WHERE user_id = $1 AND preview_id = $2 AND event_type = 'preview_review'",
+    )
+    .bind(user_id)
+    .bind(llm_stale_version_id)
+    .fetch_one(pool)
+    .await?;
+    assert_eq!(llm_stale_version_event_count, 0);
     let wrong_session_llm = review_preview_llm_recommendation(
         pool,
         &ImportPreviewLlmReviewRequest {

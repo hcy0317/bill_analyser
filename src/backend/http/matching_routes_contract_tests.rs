@@ -1,4 +1,5 @@
 use super::*;
+use crate::import_routes::llm_preview_recommend_accept_runtime_handler;
 use axum::{
     body::to_bytes,
     extract::{Query, State},
@@ -106,26 +107,33 @@ async fn learning_row_version_conflict_returns_the_authoritative_preview_snapsho
     );
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn learning_action_handler_rebases_stale_row_version_from_postgres(
-) -> Result<(), Box<dyn std::error::Error>> {
+struct RowVersionConflictFixture {
+    state: HttpAppState,
+    user_id: i64,
+    session_id: String,
+    preview_id: i64,
+}
+
+async fn row_version_conflict_fixture(
+    family: &str,
+) -> Result<RowVersionConflictFixture, Box<dyn std::error::Error>> {
     let postgres_url = std::env::var("BILL_ANALYSER_TEST_POSTGRES_URL").map_err(|_| {
         std::io::Error::new(
             std::io::ErrorKind::NotFound,
-            "BILL_ANALYSER_TEST_POSTGRES_URL is required for the matching row CAS contract",
+            "BILL_ANALYSER_TEST_POSTGRES_URL is required for the preview row CAS contract",
         )
     })?;
     let config = HttpShellConfig::default()
         .with_postgres_url(postgres_url)?
         .with_trusted_user_header_secret("matching-secret");
     let state = HttpAppState::new(config)?;
-    let runtime = state.open_postgres_repository_runtime("matching-row-cas-test")?;
+    let runtime = state.open_postgres_repository_runtime("preview-row-cas-test")?;
     bill_analyser_db::run_postgres_migrations(runtime.pool()).await?;
 
     let unique = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)?
         .as_nanos();
-    let username = format!("matching-row-cas-{unique}");
+    let username = format!("{family}-row-cas-{unique}");
     let user_id: i64 = sqlx::query_scalar(
         "INSERT INTO users (username, email) VALUES ($1, $2) RETURNING id",
     )
@@ -134,7 +142,7 @@ async fn learning_action_handler_rebases_stale_row_version_from_postgres(
     .fetch_one(runtime.pool())
     .await?;
     let scoped_user_id = UserId::new(user_id as u64).expect("positive user id");
-    let session_id = format!("matching-row-cas-session-{unique}");
+    let session_id = format!("{family}-row-cas-session-{unique}");
     bill_analyser_db::create_import_session(
         runtime.pool(),
         &bill_analyser_db::ImportSessionDraft {
@@ -143,6 +151,16 @@ async fn learning_action_handler_rebases_stale_row_version_from_postgres(
             file_count: 1,
         },
     )?;
+    let preview_matching_feedback = match family {
+        "learning" => json!({
+            "learning": {
+                "review_status": "pending",
+                "recommendation_key": "matching-row-cas"
+            }
+        }),
+        "llm" => json!({"llm": {"review_status": "pending", "confidence": 0.9}}),
+        _ => unreachable!("row version conflict fixtures use a supported signal family"),
+    };
     let preview_id = bill_analyser_db::insert_preview_bill(
         runtime.pool(),
         &session_id,
@@ -152,47 +170,118 @@ async fn learning_action_handler_rebases_stale_row_version_from_postgres(
             preview_type: "支出".to_string(),
             preview_amount_cents: -1234,
             preview_counterparty: "CAS 测试商户".to_string(),
-            preview_parser_id: "matching-row-cas-test".to_string(),
-            preview_matching_feedback: json!({
-                "learning": {
-                    "review_status": "pending",
-                    "recommendation_key": "matching-row-cas"
-                }
-            }),
+            preview_parser_id: "preview-row-cas-test".to_string(),
+            preview_matching_feedback,
             preview_selected: true,
             ..bill_analyser_db::ImportPreviewDraft::default()
         },
     )?;
 
+    Ok(RowVersionConflictFixture {
+        state,
+        user_id,
+        session_id,
+        preview_id,
+    })
+}
+
+async fn cleanup_row_version_conflict_fixture(
+    fixture: &RowVersionConflictFixture,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let runtime = fixture
+        .state
+        .open_postgres_repository_runtime("preview-row-cas-cleanup")?;
+    sqlx::query("DELETE FROM users WHERE id = $1")
+        .bind(fixture.user_id)
+        .execute(runtime.pool())
+        .await?;
+    Ok(())
+}
+
+fn assert_row_version_conflict(
+    status: StatusCode,
+    body: &Value,
+    fixture: &RowVersionConflictFixture,
+    family: &str,
+) {
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(body["code"], "PREVIEW_ROW_VERSION_CONFLICT");
+    assert_eq!(body["data"]["expected_row_version"], 2);
+    assert_eq!(body["data"]["actual_row_version"], 1);
+    assert_eq!(
+        body["data"]["previewItem"]["id"],
+        fixture.preview_id
+    );
+    assert_eq!(body["data"]["previewItem"]["row_version"], 1);
+    assert_eq!(
+        body["data"]["previewItem"]["preview_state"]["decisions"][family]["status"],
+        "pending"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn learning_action_handler_rebases_stale_row_version_from_postgres(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let fixture = row_version_conflict_fixture("learning").await?;
+
     let response = matching_candidate_action_response(
-        &state,
-        &trusted_headers_for_user(user_id),
-        format!("preview:{preview_id}:learning"),
+        &fixture.state,
+        &trusted_headers_for_user(fixture.user_id),
+        format!("preview:{}:learning", fixture.preview_id),
         "accept",
         Some(Json(json!({
             "expectedState": {
-                "sessionId": session_id,
+                "sessionId": fixture.session_id,
                 "rowVersion": 2
             },
             "responseMode": "preview-item"
         }))),
     );
     let (status, body) = response_value(response).await;
-    sqlx::query("DELETE FROM users WHERE id = $1")
-        .bind(user_id)
-        .execute(runtime.pool())
-        .await?;
+    cleanup_row_version_conflict_fixture(&fixture).await?;
+    assert_row_version_conflict(status, &body, &fixture, "learning");
+    Ok(())
+}
 
-    assert_eq!(status, StatusCode::CONFLICT);
-    assert_eq!(body["code"], "PREVIEW_ROW_VERSION_CONFLICT");
-    assert_eq!(body["data"]["expected_row_version"], 2);
-    assert_eq!(body["data"]["actual_row_version"], 1);
-    assert_eq!(body["data"]["previewItem"]["id"], preview_id);
-    assert_eq!(body["data"]["previewItem"]["row_version"], 1);
-    assert_eq!(
-        body["data"]["previewItem"]["preview_state"]["decisions"]["learning"]["status"],
-        "pending"
+#[tokio::test(flavor = "multi_thread")]
+async fn llm_action_handler_rebases_stale_row_version_from_postgres(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let fixture = row_version_conflict_fixture("llm").await?;
+
+    let response = matching_candidate_action_response(
+        &fixture.state,
+        &trusted_headers_for_user(fixture.user_id),
+        format!("preview:{}:llm", fixture.preview_id),
+        "accept",
+        Some(Json(json!({
+            "expectedState": {"sessionId": fixture.session_id, "rowVersion": 2},
+            "responseMode": "preview-item"
+        }))),
     );
+    let (status, body) = response_value(response).await;
+    cleanup_row_version_conflict_fixture(&fixture).await?;
+    assert_row_version_conflict(status, &body, &fixture, "llm");
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn direct_llm_review_handler_rebases_stale_row_version_from_postgres(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let fixture = row_version_conflict_fixture("llm").await?;
+
+    let response = llm_preview_recommend_accept_runtime_handler(
+        State(fixture.state.clone()),
+        trusted_headers_for_user(fixture.user_id),
+        Json(json!({
+            "session_id": fixture.session_id,
+            "preview_id": fixture.preview_id,
+            "expected_state": {"row_version": 2}
+        })),
+    )
+    .await;
+    let (status, body) = response_value(response).await;
+    cleanup_row_version_conflict_fixture(&fixture).await?;
+    assert_row_version_conflict(status, &body, &fixture, "llm");
     Ok(())
 }
 

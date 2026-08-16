@@ -148,7 +148,9 @@ fn matching_candidate_action_response(
             preview_id,
             expected,
             ..
-        }) if context.kind == "learning" && preview_id == context.preview_id => {
+        }) if matches!(context.kind.as_str(), "learning" | "llm")
+            && preview_id == context.preview_id =>
+        {
             match get_preview_bill_by_id(runtime.pool(), preview_id, user_id) {
                 Ok(Some(latest)) if latest.session_id == context.session_id => {
                     preview_row_version_conflict_response(expected, latest)

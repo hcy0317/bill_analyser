@@ -752,6 +752,114 @@ describe('P3 import lifecycle production SFC coverage', () => {
         }
     });
 
+    test('desktop LLM row-version conflict rebases from the 409 snapshot', async () => {
+        const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+        const transaction = createDesktopDecisionTransaction();
+        transaction._rowVersion = 5;
+        const latest = {
+            id: 77,
+            row_version: 6,
+            preview_type: 'expense',
+            preview_description: 'authoritative LLM memo',
+            preview_counterparty: 'authoritative LLM merchant',
+            preview_payment_method: 'card',
+            matching: {
+                ...transaction.matching,
+                llm: { ...transaction.matching.llm, review_status: 'accepted' }
+            }
+        };
+        const conflictError = new Error('preview row changed');
+        mockLlmPreviewRecommendReject.mockRejectedValueOnce(conflictError);
+        mockGetImportPreviewRowVersionConflict.mockReturnValueOnce({
+            expected_row_version: 5,
+            actual_row_version: 6,
+            previewItem: latest
+        });
+        mockGetLLMMemoryEvents.mockClear();
+        try {
+            const bindings = (ImportTransactionCheckDataTab as any).setup(
+                {
+                    importTransactions: [transaction],
+                    sessionId: 'session-desktop',
+                    serverPaged: false
+                },
+                { emit: jest.fn(), expose: jest.fn() }
+            );
+            mockGetLLMMemoryEvents.mockClear();
+
+            await bindings.reviewLLMRecommendation(transaction, 'reject');
+
+            expect(mockLlmPreviewRecommendReject).toHaveBeenCalledWith(expect.objectContaining({
+                sessionId: 'session-desktop',
+                previewId: 77,
+                expectedState: expect.objectContaining({ rowVersion: 5 })
+            }));
+            expect(transaction._rowVersion).toBe(6);
+            expect(transaction.comment).toBe('authoritative LLM memo');
+            expect(mockGetLLMMemoryEvents).not.toHaveBeenCalled();
+        } finally {
+            warnSpy.mockRestore();
+        }
+    });
+
+    test('mobile LLM row-version conflict rebases from the 409 snapshot without reloading', async () => {
+        const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+        const conflictError = new Error('preview row changed');
+        const latest = {
+            id: 45,
+            row_version: 6,
+            preview_selected: false,
+            preview_counterparty: 'Authoritative LLM merchant',
+            preview_state: previewStateSnapshot(['llm'], { llm: 'accepted' }),
+            matching: { llm: { review_status: 'accepted' } }
+        };
+        mockLlmPreviewRecommendAccept.mockRejectedValueOnce(conflictError);
+        mockGetImportPreviewRowVersionConflict.mockReturnValueOnce({
+            expected_row_version: 5,
+            actual_row_version: 6,
+            previewItem: latest
+        });
+        mockGetImportPreviewPage.mockClear();
+        try {
+            const bindings = (ImportPreviewPage as any).setup(
+                {
+                    f7route: { query: { sessionId: 'session-mobile' } },
+                    f7router: { back: jest.fn() }
+                },
+                { expose: jest.fn() }
+            );
+            const row = {
+                id: 45,
+                record: {
+                    id: 45,
+                    row_version: 5,
+                    preview_selected: true,
+                    preview_state: previewStateSnapshot(['llm']),
+                    matching: { llm: { review_status: 'pending', confidence: 0.9 } }
+                },
+                selected: true,
+                signal: {},
+                busy: false
+            };
+            bindings.rows.value = [row];
+
+            await bindings.reviewLlm(row, 'accept');
+
+            expect(mockLlmPreviewRecommendAccept).toHaveBeenCalledWith({
+                sessionId: 'session-mobile',
+                previewId: 45,
+                suggestion: { review_status: 'pending', confidence: 0.9 },
+                expectedState: { sessionId: 'session-mobile', rowVersion: 5 }
+            });
+            expect(row.record).toBe(latest);
+            expect(row.selected).toBe(false);
+            expect(mockGetImportPreviewPage).not.toHaveBeenCalled();
+            expect(row.busy).toBe(false);
+        } finally {
+            warnSpy.mockRestore();
+        }
+    });
+
     test('desktop decision failures refresh authoritative learning and LLM state', async () => {
         const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
         const transaction = createDesktopDecisionTransaction();
@@ -840,7 +948,8 @@ describe('P3 import lifecycle production SFC coverage', () => {
             expect(mockLlmPreviewRecommendReject).toHaveBeenCalledWith({
                 sessionId: 'session-mobile',
                 previewId: 45,
-                suggestion: row.record.matching.llm
+                suggestion: row.record.matching.llm,
+                expectedState: { sessionId: 'session-mobile' }
             });
             expect(mockGetImportPreviewPage).toHaveBeenCalledWith({
                 sessionId: 'session-mobile',
