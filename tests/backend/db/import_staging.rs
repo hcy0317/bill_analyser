@@ -4823,6 +4823,10 @@ async fn real_postgres_learning_and_llm_lifecycle_transitions_are_transactional_
             "learning stale",
             json!({"learning": {"review_status": "pending"}}),
         ),
+        (
+            "learning version stale",
+            json!({"learning": {"review_status": "pending", "recommendation_key": "learning:version-stale"}}),
+        ),
         ("learning absent", json!({"parser": {"source": "fixture"}})),
         (
             "llm accept",
@@ -4999,6 +5003,43 @@ async fn real_postgres_learning_and_llm_lifecycle_transitions_are_transactional_
         }),
     )?;
     assert!(stale_learning.state_conflict);
+
+    let stale_version_id = id_for("learning version stale");
+    let stale_version_before = get_preview_bill_by_id(pool, stale_version_id, scoped_user_id)?
+        .expect("learning version stale preview");
+    let expected_version = stale_version_before.version + 1;
+    let stale_version_error = apply_preview_learning_decision(
+        pool,
+        session_id,
+        stale_version_id,
+        scoped_user_id,
+        ImportPreviewDecision::Accept,
+        None,
+        Some(&ImportPreviewExpectedState {
+            expected_row_version: Some(expected_version),
+            ..ImportPreviewExpectedState::default()
+        }),
+    )
+    .expect_err("stale row version must reject learning decision");
+    assert!(matches!(
+        stale_version_error,
+        DbError::PreviewVersionConflict {
+            preview_id,
+            expected,
+            actual,
+        } if preview_id == stale_version_id
+            && expected == expected_version
+            && actual == stale_version_before.version
+    ));
+    let stale_version_after = get_preview_bill_by_id(pool, stale_version_id, scoped_user_id)?
+        .expect("learning version stale preview after conflict");
+    assert_eq!(stale_version_after.version, stale_version_before.version);
+    assert_eq!(
+        stale_version_after
+            .preview_matching_feedback
+            .pointer("/learning/review_status"),
+        Some(&json!("pending"))
+    );
     assert!(apply_preview_learning_decision(
         pool,
         "wrong-session",

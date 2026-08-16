@@ -2,6 +2,26 @@ fn matching_error_response(error: MatchingRuntimeError) -> Response {
     error_response(status_or_internal(error.status_code()), error.message())
 }
 
+fn preview_row_version_conflict_response(
+    expected_row_version: i64,
+    latest_row: bill_analyser_db::ImportPreviewRow,
+) -> Response {
+    let actual_row_version = latest_row.version;
+    json_response(
+        StatusCode::CONFLICT,
+        json!({
+            "success": false,
+            "error": "Preview row changed, please refresh",
+            "code": "PREVIEW_ROW_VERSION_CONFLICT",
+            "data": {
+                "expected_row_version": expected_row_version,
+                "actual_row_version": actual_row_version,
+                "previewItem": matching_preview_item_value(latest_row),
+            },
+        }),
+    )
+}
+
 fn success_data(status: StatusCode, data: Value) -> Response {
     json_response(status, json!({ "success": true, "data": data }))
 }

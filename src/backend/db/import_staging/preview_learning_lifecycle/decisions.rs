@@ -141,6 +141,28 @@ pub fn apply_preview_learning_decision(
             }
             ImportPreviewTerminalAction::Apply => {}
         }
+        if let Some(expected_row_version) = expected_state
+            .and_then(|expected| expected.expected_row_version)
+            .filter(|expected| *expected != preview.version)
+        {
+            transaction.rollback().await?;
+            tracing::warn!(
+                domain = "import_signal_lifecycle",
+                operation = "lifecycle_transition",
+                signal_family = "learning",
+                outcome = "row_version_conflict",
+                session_key = %session_id,
+                decision = decision_name,
+                expected_row_version,
+                actual_row_version = preview.version,
+                "import preview signal lifecycle transition rejected"
+            );
+            return Err(DbError::preview_version_conflict(
+                preview_id,
+                expected_row_version,
+                preview.version,
+            ));
+        }
         if recommendation_expected_state_conflicts(
             &preview,
             expected_state,
@@ -242,7 +264,8 @@ pub fn apply_preview_learning_decision(
                 preview_id,
                 session_db_id,
                 user_id,
-                expected_row_version: None,
+                expected_row_version: expected_state
+                    .and_then(|expected| expected.expected_row_version),
             },
         );
         update.build().execute(&mut *transaction).await?;
@@ -352,7 +375,8 @@ fn recommendation_expected_state_conflicts(
     let Some(expected) = expected else {
         return false;
     };
-    expected
+    expected.expected_row_version.is_some_and(|value| value != preview.version)
+        || expected
         .review_status
         .as_deref()
         .is_some_and(|value| {

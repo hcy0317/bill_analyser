@@ -36,7 +36,19 @@ interface ImportCheckDecisionExpectedStateInput {
     destinationAccountId?: string | null;
 }
 
-type ImportCheckLearningDecisionExpectedStateInput = ImportCheckDecisionExpectedStateInput;
+type ImportCheckLearningDecisionExpectedStateInput = ImportCheckDecisionExpectedStateInput & {
+    rowVersion?: number;
+};
+
+export function withImportPreviewRowVersion<T extends Record<string, string | number | null>>(
+    expectedState: T,
+    rowVersion: unknown
+): T & { rowVersion?: number } {
+    if (Number.isInteger(rowVersion) && Number(rowVersion) > 0) {
+        return { ...expectedState, rowVersion: Number(rowVersion) };
+    }
+    return { ...expectedState };
+}
 
 export function buildImportCheckDecisionExpectedState(
     input: ImportCheckDecisionExpectedStateInput
@@ -55,5 +67,8 @@ export function buildImportCheckDecisionExpectedState(
 export function buildImportCheckLearningDecisionExpectedState(
     input: ImportCheckLearningDecisionExpectedStateInput
 ): Record<string, string | number | null> {
-    return buildImportCheckDecisionExpectedState(input);
+    return withImportPreviewRowVersion(
+        buildImportCheckDecisionExpectedState(input),
+        input.rowVersion
+    );
 }

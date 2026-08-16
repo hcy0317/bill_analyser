@@ -28,6 +28,7 @@ describe('checkDataCandidateReview helpers', () => {
     test('builds learning expectedState with source and destination accounts', () => {
         expect(buildImportCheckLearningDecisionExpectedState({
             sessionId: 'session-learning-review',
+            rowVersion: 12,
             reviewStatus: 'pending',
             type: TransactionType.Transfer,
             categoryId: '',
@@ -36,6 +37,7 @@ describe('checkDataCandidateReview helpers', () => {
             destinationAccountId: '19'
         })).toStrictEqual({
             sessionId: 'session-learning-review',
+            rowVersion: 12,
             reviewStatus: 'pending',
             previewType: '转账',
             categoryId: null,
@@ -43,5 +45,14 @@ describe('checkDataCandidateReview helpers', () => {
             sourceAccountId: null,
             destinationAccountId: 19
         });
+    });
+
+    test('omits an invalid row version from the learning expectedState', () => {
+        expect(buildImportCheckLearningDecisionExpectedState({
+            sessionId: 'session-learning-legacy',
+            rowVersion: 0,
+            reviewStatus: 'pending',
+            type: TransactionType.Expense
+        })).not.toHaveProperty('rowVersion');
     });
 });

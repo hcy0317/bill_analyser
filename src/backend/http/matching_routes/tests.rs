@@ -23,6 +23,7 @@ mod tests {
             },
             "expectedState": {
                 "sessionId": "session-http",
+                "rowVersion": 7,
                 "reviewStatus": "Pending",
                 "previewType": "expense",
                 "categoryId": "42",
@@ -50,6 +51,7 @@ mod tests {
 
         let expected = request.expected_state.expect("expected state");
         assert_eq!(expected.session_id.as_deref(), Some("session-http"));
+        assert_eq!(expected.expected_row_version, Some(7));
         assert_eq!(expected.review_status.as_deref(), Some("pending"));
         assert_eq!(expected.preview_type.as_deref(), Some("支出"));
         assert_eq!(expected.preview_category_id, Some(Some(42)));
@@ -78,6 +80,15 @@ mod tests {
         let error = preview_action_request_from_payload(invalid.as_object().expect("object"))
             .expect_err("invalid expected state");
         assert_eq!(error.status(), StatusCode::BAD_REQUEST);
+
+        for invalid_row_version in [json!(0), json!(-1), json!("7"), json!(7.5)] {
+            let invalid = json!({"expectedState": {"rowVersion": invalid_row_version}});
+            let error = preview_action_request_from_payload(
+                invalid.as_object().expect("invalid row version object"),
+            )
+            .expect_err("invalid row version");
+            assert_eq!(error.status(), StatusCode::BAD_REQUEST);
+        }
 
         let empty = json!({});
         let request = preview_action_request_from_payload(empty.as_object().expect("object"))
@@ -116,6 +127,7 @@ mod tests {
         let snake_case_expected = json!({
             "expected_state": {
                 "session_id": "session-snake",
+                "row_version": 9,
                 "review_status": "rejected",
                 "category_id": null
             }
@@ -127,6 +139,7 @@ mod tests {
         .expected_state
         .expect("expected state");
         assert_eq!(expected.review_status.as_deref(), Some("rejected"));
+        assert_eq!(expected.expected_row_version, Some(9));
         assert_eq!(expected.preview_category_id, Some(None));
     }
 

@@ -2236,6 +2236,7 @@ function getTransferDecisionExpectedState(item: ImportTransaction): Record<strin
 function getLearningDecisionExpectedState(item: ImportTransaction): Record<string, string | number | null> {
     return buildImportCheckLearningDecisionExpectedState({
         sessionId: props.sessionId || '',
+        rowVersion: getPreviewRowVersionFromImportTransaction(item),
         reviewStatus: item.getLearningRecommendationReviewStatus(),
         type: item.type,
         categoryId: item.categoryId,
@@ -2642,13 +2643,19 @@ async function reviewLearningSuggestion(
         logger.info(`[学习建议决策] 完成: preview_id=${previewId}, decision=${decision}`);
         snackbar.value?.showMessage(tt(getLearningDecisionMessageKey(decision)));
     } catch (error) {
-        try {
-            const refreshedCandidate = await fetchMatchingSessionCandidate(candidateId);
-            if (refreshedCandidate) {
-                syncLearningCandidateFromSessionCandidate(item, refreshedCandidate);
+        const conflict = services.getImportPreviewRowVersionConflict(error);
+        if (conflict && Number(conflict.previewItem.id) === previewId) {
+            syncTransactionFromPreviewDecision(item, conflict.previewItem);
+            rebaseImportPreviewTextSyncConflict(item, conflict.previewItem);
+        } else {
+            try {
+                const refreshedCandidate = await fetchMatchingSessionCandidate(candidateId);
+                if (refreshedCandidate) {
+                    syncLearningCandidateFromSessionCandidate(item, refreshedCandidate);
+                }
+            } catch (refreshError) {
+                logger.error('[学习建议决策] 服务端状态回读失败:', refreshError);
             }
-        } catch (refreshError) {
-            logger.error('[学习建议决策] 服务端状态回读失败:', refreshError);
         }
         const actionErrorText = getActionErrorMessage(error, 'Learning decision failed');
         logger.error(`[学习建议决策] 失败: ${actionErrorText}`, error);

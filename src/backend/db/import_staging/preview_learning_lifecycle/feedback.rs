@@ -247,9 +247,18 @@ mod lifecycle_action_tests {
             (
                 ImportPreviewExpectedState {
                     session_id: Some("session".to_string()),
+                    expected_row_version: Some(1),
                     ..ImportPreviewExpectedState::default()
                 },
                 false,
+            ),
+            (
+                ImportPreviewExpectedState {
+                    session_id: Some("session".to_string()),
+                    expected_row_version: Some(2),
+                    ..ImportPreviewExpectedState::default()
+                },
+                true,
             ),
             (
                 ImportPreviewExpectedState {

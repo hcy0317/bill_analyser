@@ -112,6 +112,7 @@ pub struct ImportPreviewClassificationUpdate {
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct ImportPreviewExpectedState {
     pub session_id: Option<String>,
+    pub expected_row_version: Option<i64>,
     pub review_status: Option<String>,
     pub preview_type: Option<String>,
     pub preview_category_id: Option<Option<i64>>,

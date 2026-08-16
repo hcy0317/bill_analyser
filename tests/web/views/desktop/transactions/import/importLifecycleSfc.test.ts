@@ -624,7 +624,10 @@ describe('P3 import lifecycle production SFC coverage', () => {
 
             expect(mockAcceptMatchingCandidate).toHaveBeenCalledWith({
                 candidateId: 'preview:44:learning',
-                payload: { sessionId: 'session-mobile', responseMode: 'preview-item' }
+                payload: {
+                    expectedState: { sessionId: 'session-mobile' },
+                    responseMode: 'preview-item'
+                }
             });
             expect(mockGetImportPreviewPage).toHaveBeenCalledWith({
                 sessionId: 'session-mobile',
@@ -634,6 +637,116 @@ describe('P3 import lifecycle production SFC coverage', () => {
             expect(mockShowToast).toHaveBeenCalledWith('stale action');
             expect(row.busy).toBe(false);
             expect(back).not.toHaveBeenCalled();
+        } finally {
+            warnSpy.mockRestore();
+        }
+    });
+
+    test('mobile learning row-version conflict rebases from the 409 snapshot without reloading', async () => {
+        const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+        const conflictError = new Error('preview row changed');
+        const latest = {
+            id: 44,
+            row_version: 6,
+            preview_selected: false,
+            preview_counterparty: 'Authoritative merchant',
+            preview_state: previewStateSnapshot(['learning'], { learning: 'accepted' }),
+            matching: { learning: { review_status: 'accepted' } }
+        };
+        mockRejectMatchingCandidate.mockRejectedValueOnce(conflictError);
+        mockGetImportPreviewRowVersionConflict.mockReturnValueOnce({
+            expected_row_version: 5,
+            actual_row_version: 6,
+            previewItem: latest
+        });
+        mockGetImportPreviewPage.mockClear();
+        try {
+            const bindings = (ImportPreviewPage as any).setup(
+                {
+                    f7route: { query: { sessionId: 'session-mobile' } },
+                    f7router: { back: jest.fn() }
+                },
+                { expose: jest.fn() }
+            );
+            const row = {
+                id: 44,
+                record: {
+                    id: 44,
+                    row_version: 5,
+                    preview_selected: true,
+                    preview_state: previewStateSnapshot(['learning']),
+                    matching: { learning: { review_status: 'pending' } }
+                },
+                selected: true,
+                signal: {},
+                busy: false
+            };
+            bindings.rows.value = [row];
+
+            await bindings.reviewLearning(row, 'reject');
+
+            expect(mockRejectMatchingCandidate).toHaveBeenCalledWith({
+                candidateId: 'preview:44:learning',
+                payload: {
+                    expectedState: { sessionId: 'session-mobile', rowVersion: 5 },
+                    responseMode: 'preview-item'
+                }
+            });
+            expect(row.record).toBe(latest);
+            expect(row.selected).toBe(false);
+            expect(mockGetImportPreviewPage).not.toHaveBeenCalled();
+            expect(row.busy).toBe(false);
+        } finally {
+            warnSpy.mockRestore();
+        }
+    });
+
+    test('desktop learning row-version conflict rebases from the 409 snapshot without candidate reload', async () => {
+        const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+        const transaction = createDesktopDecisionTransaction();
+        transaction._rowVersion = 5;
+        const latest = {
+            id: 77,
+            row_version: 6,
+            preview_type: 'expense',
+            preview_description: 'authoritative memo',
+            preview_counterparty: 'authoritative merchant',
+            preview_payment_method: 'card',
+            matching: {
+                ...transaction.matching,
+                learning: { ...transaction.matching.learning, review_status: 'accepted' }
+            }
+        };
+        const conflictError = new Error('preview row changed');
+        mockRejectMatchingCandidate.mockRejectedValueOnce(conflictError);
+        mockGetImportPreviewRowVersionConflict.mockReturnValueOnce({
+            expected_row_version: 5,
+            actual_row_version: 6,
+            previewItem: latest
+        });
+        mockGetMatchingSessionCandidates.mockClear();
+        try {
+            const bindings = (ImportTransactionCheckDataTab as any).setup(
+                {
+                    importTransactions: [transaction],
+                    sessionId: 'session-desktop',
+                    serverPaged: false
+                },
+                { emit: jest.fn(), expose: jest.fn() }
+            );
+            bindings.syncLearningDecisionBaseline(transaction);
+
+            await bindings.reviewLearningSuggestion(transaction, 'reject');
+
+            expect(mockRejectMatchingCandidate).toHaveBeenCalledWith(expect.objectContaining({
+                candidateId: 'preview:77:learning',
+                payload: expect.objectContaining({
+                    expectedState: expect.objectContaining({ rowVersion: 5 })
+                })
+            }));
+            expect(transaction._rowVersion).toBe(6);
+            expect(transaction.comment).toBe('authoritative memo');
+            expect(mockGetMatchingSessionCandidates).not.toHaveBeenCalled();
         } finally {
             warnSpy.mockRestore();
         }

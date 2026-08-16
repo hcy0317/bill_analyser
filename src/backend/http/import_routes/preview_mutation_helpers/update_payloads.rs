@@ -63,6 +63,7 @@ fn expected_state_from_payload(
     Ok(ImportPreviewExpectedState {
         session_id: first_value(expected_state, &["sessionId", "session_id"])
             .and_then(value_to_text),
+        expected_row_version: None,
         review_status: first_value(
             expected_state,
             &["reviewStatus", "review_status", "status"],

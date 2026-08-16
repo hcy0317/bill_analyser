@@ -144,6 +144,19 @@ fn matching_candidate_action_response(
                 ),
             )
         }
+        Err(DbError::PreviewVersionConflict {
+            preview_id,
+            expected,
+            ..
+        }) if context.kind == "learning" && preview_id == context.preview_id => {
+            match get_preview_bill_by_id(runtime.pool(), preview_id, user_id) {
+                Ok(Some(latest)) if latest.session_id == context.session_id => {
+                    preview_row_version_conflict_response(expected, latest)
+                }
+                Ok(_) => error_response(StatusCode::NOT_FOUND, "Preview candidate not found"),
+                Err(error) => matching_error_response(error.into()),
+            }
+        }
         Err(error) => matching_error_response(error.into()),
     }
 }
@@ -231,6 +244,7 @@ fn matching_preview_item_value(preview: bill_analyser_db::ImportPreviewRow) -> V
     let mut value = serde_json::to_value(preview).unwrap_or_else(|_| json!({}));
     if let Some(object) = value.as_object_mut() {
         bill_analyser_core::attach_import_preview_matching_payload(object);
+        bill_analyser_core::attach_import_preview_state_snapshot_to_canonical_row(object);
     }
     value
 }
@@ -277,6 +291,10 @@ fn expected_state_from_payload(
     Ok(Some(ImportPreviewExpectedState {
         session_id: first_value(expected_state, &["sessionId", "session_id"])
             .and_then(value_to_text),
+        expected_row_version: positive_row_version_field(
+            expected_state,
+            &["rowVersion", "row_version"],
+        )?,
         review_status: first_value(
             expected_state,
             &["reviewStatus", "review_status", "status"],
@@ -344,6 +362,20 @@ fn expected_state_from_payload(
         )
         .cloned(),
     }))
+}
+
+fn positive_row_version_field(
+    object: &Map<String, Value>,
+    keys: &[&str],
+) -> RouteResult<Option<i64>> {
+    let Some(value) = first_value(object, keys) else {
+        return Ok(None);
+    };
+    value
+        .as_i64()
+        .filter(|version| *version > 0)
+        .map(Some)
+        .ok_or_else(|| Box::new(error_response(StatusCode::BAD_REQUEST, "Invalid request")))
 }
 
 fn learning_apply_from_payload(object: &Map<String, Value>) -> Option<ImportPreviewLearningApply> {

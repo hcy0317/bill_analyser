@@ -163,6 +163,7 @@ import {
     type ImportPreviewVisibleSignalFilterValue
 } from '@/views/desktop/transactions/import/checkDataMatching.ts';
 import { buildImportPreviewSignalViewModelFromRecord } from '@/views/desktop/transactions/import/importPreviewSignalProjection.ts';
+import { withImportPreviewRowVersion } from '@/views/desktop/transactions/import/checkDataCandidateReview.ts';
 
 const props = defineProps<{
     f7route: Router.Route;
@@ -389,18 +390,34 @@ async function reviewTransfer(row: MobileImportPreviewRow, decision: ImportPrevi
 async function reviewLearning(row: MobileImportPreviewRow, decision: ImportPreviewSignalDecision['decision']): Promise<void> {
     row.busy = true;
     const candidateId = `preview:${row.id}:learning`;
+    const payload = {
+        expectedState: withImportPreviewRowVersion(
+            { sessionId },
+            row.record.row_version
+        ),
+        responseMode: 'preview-item'
+    };
     try {
         if (decision === 'accept') {
-            await services.acceptMatchingCandidate({ candidateId, payload: { sessionId, responseMode: 'preview-item' } });
+            await services.acceptMatchingCandidate({ candidateId, payload });
         } else if (decision === 'reject') {
-            await services.rejectMatchingCandidate({ candidateId, payload: { sessionId, responseMode: 'preview-item' } });
+            await services.rejectMatchingCandidate({ candidateId, payload });
         } else {
-            await services.clearMatchingCandidate({ candidateId, payload: { sessionId, responseMode: 'preview-item' } });
+            await services.clearMatchingCandidate({ candidateId, payload });
         }
         await reload();
     } catch (error) {
         showToast(error instanceof Error && error.message ? error.message : 'Learning decision failed');
-        await reload();
+        const conflict = services.getImportPreviewRowVersionConflict(error);
+        if (conflict && Number(conflict.previewItem.id) === row.id) {
+            row.record = conflict.previewItem;
+            row.selected = !!(conflict.previewItem.preview_selected ?? conflict.previewItem.selected);
+            row.signal = buildImportPreviewSignalViewModelFromRecord(conflict.previewItem, {
+                formatAmountWithCurrency: formatAmountToLocalizedNumeralsWithCurrency
+            });
+        } else {
+            await reload();
+        }
     } finally {
         row.busy = false;
     }

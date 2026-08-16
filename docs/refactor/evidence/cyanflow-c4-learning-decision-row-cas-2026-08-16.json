@@ -1,0 +1,94 @@
+{
+  "schema_version": 1,
+  "date": "2026-08-16",
+  "cyanflow_slice": "C4 learning decision row CAS",
+  "status": "local_full_audit_passed",
+  "production_behavior_changed": true,
+  "breaking_change": false,
+  "contracts": {
+    "route_family": "POST /api/matching/candidates/:candidate_id/{accept|reject|clear}",
+    "candidate_kind": "learning",
+    "expected_state_row_version_optional": true,
+    "expected_state_row_version_aliases": [
+      "rowVersion",
+      "row_version"
+    ],
+    "expected_state_row_version_must_be_positive_integer": true,
+    "same_terminal_action_idempotency_precedes_row_version_cas": true,
+    "stale_token_rolls_back_before_lifecycle_writes": true,
+    "conflict_http_status": 409,
+    "conflict_code": "PREVIEW_ROW_VERSION_CONFLICT",
+    "conflict_returns_user_session_scoped_latest_row": true,
+    "latest_row_includes_canonical_preview_state": true,
+    "schema_changed": false,
+    "money_contract_changed": false
+  },
+  "scope": {
+    "learning_decision": "cas_enabled",
+    "single_preview_update": "existing_cas_preserved",
+    "transfer_decision": "unchanged",
+    "llm_decision": "unchanged",
+    "reclassify": "unchanged",
+    "selection": "unchanged",
+    "decision_group": "unchanged",
+    "confirm": "unchanged"
+  },
+  "frontend": {
+    "wire_field": "expectedState.rowVersion",
+    "desktop_conflict_rebase": [
+      "preview decision snapshot",
+      "text sync fields"
+    ],
+    "mobile_conflict_rebase": [
+      "row record",
+      "selection",
+      "signal view model"
+    ],
+    "conflict_extra_reload": false
+  },
+  "focused_verification": {
+    "real_postgres_repository_stale_cas": {
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0
+    },
+    "real_postgres_http_handler_stale_cas": {
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0
+    },
+    "rust_payload_alias_and_validation": "passed",
+    "frontend_learning_decision_contracts": "passed"
+  },
+  "full_audit": {
+    "status": "passed",
+    "real_postgres_fail_closed": true,
+    "cargo_test_workspace": "passed",
+    "cargo_fmt_all_check": "passed",
+    "cargo_clippy_workspace_all_targets": "passed",
+    "rust_full_runtime_coverage_percent": 65.17,
+    "rust_changed_executable_lines": 66,
+    "rust_changed_covered_lines": 63,
+    "rust_changed_executable_line_coverage_percent": 95.45,
+    "frontend_test_suites_passed": 308,
+    "frontend_tests_passed": 41474,
+    "frontend_total_line_coverage_percent": 94.23,
+    "frontend_changed_executable_lines": 25,
+    "frontend_changed_covered_lines": 25,
+    "frontend_changed_executable_line_coverage_percent": 100,
+    "frontend_lint_errors": 0,
+    "frontend_existing_warnings": 141,
+    "rust_only_source_tree_tracked_paths": 1979,
+    "frontend_structure_scanned_files": 616,
+    "frontend_large_file_allowlist_entries": 39
+  },
+  "audit_recovery": {
+    "initial_rust_changed_line_coverage_percent": 86.36,
+    "real_handler_postgres_test_added": true,
+    "final_rust_changed_line_coverage_percent": 95.45
+  },
+  "delivery": {
+    "authority": "Gitea pull request and exact-head Actions run",
+    "dynamic_ids_embedded_in_repository": false
+  }
+}

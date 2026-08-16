@@ -48,7 +48,8 @@ jest.mock('@/lib/services.ts', () => ({
     default: {
         getLLMMemoryEvents: mockGetLLMMemoryEvents,
         rejectMatchingCandidate: mockRejectMatchingCandidate,
-        getMatchingSessionCandidates: mockGetMatchingSessionCandidates
+        getMatchingSessionCandidates: mockGetMatchingSessionCandidates,
+        getImportPreviewRowVersionConflict: () => null
     }
 }));
 jest.mock('@/lib/server_settings.ts', () => ({
