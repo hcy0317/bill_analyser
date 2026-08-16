@@ -386,3 +386,155 @@ fn ocr_llm_vision_runtime_validates_url_and_caps_payload_before_network_post() {
     assert!(encode_payload < post_request);
     assert!(clamp_tokens < post_request);
 }
+
+#[test]
+fn preview_row_version_characterizes_the_storage_to_api_contract_gap() {
+    let migration =
+        source("src/backend/db/postgres/migrations/0001_initial_authoritative_schema.sql");
+    let preview_table = section_between(
+        &migration,
+        "CREATE TABLE IF NOT EXISTS import_preview_rows",
+        "COMMENT ON COLUMN import_preview_rows.amount_cents",
+    );
+    assert!(
+        preview_table.contains("version BIGINT NOT NULL DEFAULT 1"),
+        "preview rows need a persistent monotonic version before CAS can be introduced"
+    );
+
+    let patch_helpers = source("src/backend/db/import_staging/patch_payload_helpers.rs");
+    assert!(
+        patch_helpers.contains("version = version + 1"),
+        "preview mutations must keep advancing the stored version"
+    );
+    assert!(
+        !patch_helpers.contains("AND version ="),
+        "C4 baseline: preview update SQL does not yet enforce row-version CAS"
+    );
+
+    let preview_types = source("src/backend/db/import_staging/types/preview_query.rs");
+    let public_row = section_between(
+        &preview_types,
+        "pub struct ImportPreviewRow",
+        "pub struct ImportPreviewFilterIndexRow",
+    );
+    assert!(
+        !public_row.contains("pub version:"),
+        "C4 baseline: the public preview row still drops the stored version"
+    );
+
+    let row_mapping = source("src/backend/db/import_staging/row_mapping.rs");
+    let preview_mapping = section_between(
+        &row_mapping,
+        "fn preview_from_pg_row",
+        "fn import_decision_member_from_pg_row",
+    );
+    assert!(
+        !preview_mapping.contains("try_get(\"version\")"),
+        "C4 baseline: PostgreSQL preview mapping still drops the stored version"
+    );
+
+    let mutation_handler =
+        source("src/backend/http/import_routes/stage_handlers/preview_mutation_handlers.rs");
+    assert!(
+        !mutation_handler.contains("expected_row_version"),
+        "C4 baseline: the preview update route cannot accept a row CAS token"
+    );
+    let responses = source("src/backend/core/import_pipeline/responses.rs");
+    let conflict_response =
+        &responses[position(&responses, "pub fn preview_state_conflict_response")..];
+    assert!(
+        conflict_response
+            .contains("import_v2_error_response(409, \"Preview state changed, please refresh\")"),
+        "C4 baseline: a preview conflict is a simple error envelope without the latest row"
+    );
+}
+
+#[test]
+fn session_version_characterizes_the_confirm_client_contract_gap() {
+    let migration =
+        source("src/backend/db/postgres/migrations/0001_initial_authoritative_schema.sql");
+    let session_table = section_between(
+        &migration,
+        "CREATE TABLE IF NOT EXISTS import_sessions",
+        "CREATE TABLE IF NOT EXISTS import_sources",
+    );
+    assert!(
+        session_table.contains("version BIGINT NOT NULL DEFAULT 1"),
+        "import sessions need a persistent version for confirm CAS"
+    );
+
+    let session_types = source("src/backend/db/import_staging/types/session.rs");
+    let session_row = &session_types[position(&session_types, "pub struct ImportSessionRow")..];
+    assert!(
+        !session_row.contains("pub version:"),
+        "C4 baseline: the repository session row does not expose its stored version"
+    );
+
+    let response_types = source("src/backend/core/import_pipeline/response_types.rs");
+    let session_summary =
+        &response_types[position(&response_types, "pub struct ImportSessionSummary")..];
+    assert!(
+        !session_summary.contains("pub version:"),
+        "C4 baseline: GET session cannot provide a confirm CAS token"
+    );
+
+    let confirm_handler =
+        source("src/backend/http/import_routes/stage_handlers/confirm_handler.rs");
+    assert!(confirm_handler.contains("expected_session_version"));
+    assert!(confirm_handler.contains("expectedSessionVersion"));
+
+    let service = source("src/web/src/lib/services/importPreview.ts");
+    assert!(
+        !service.contains("expectedSessionVersion"),
+        "C4 baseline: the frontend confirm facade does not send the supported CAS token"
+    );
+}
+
+#[test]
+fn weak_import_api_adapters_are_discoverable_and_cannot_grow() {
+    let service = source("src/web/src/lib/services/importPreview.ts");
+    let weak_record_count = service.matches("Record<string, unknown>").count();
+    let any_count = service
+        .split(|character: char| !character.is_ascii_alphanumeric() && character != '_')
+        .filter(|token| *token == "any")
+        .count();
+    assert!(
+        weak_record_count > 0,
+        "focused weak-contract discovery must hit"
+    );
+    assert!(any_count > 0, "focused any discovery must hit");
+    assert!(
+        weak_record_count <= 28,
+        "typed import work must ratchet Record<string, unknown> down from the C4 baseline"
+    );
+    assert!(
+        any_count <= 13,
+        "typed import work must ratchet any down from the C4 baseline"
+    );
+
+    let dialog = source("src/web/src/views/desktop/transactions/import/ImportDialog.vue");
+    let check_data = source(
+        "src/web/src/views/desktop/transactions/import/tabs/ImportTransactionCheckDataTab.vue",
+    );
+    let direct_v2_count = dialog.matches("/api/bills/import/v2").count()
+        + check_data.matches("/api/bills/import/v2").count();
+    assert!(
+        direct_v2_count > 0,
+        "focused direct-adapter discovery must hit"
+    );
+    assert!(
+        direct_v2_count <= 13,
+        "direct import v2 adapters must not grow beyond the C4 baseline"
+    );
+
+    let preview_model = source("src/web/src/views/desktop/transactions/import/importPreview.ts");
+    let preview_record = section_between(
+        &preview_model,
+        "export interface ImportPreviewRecord",
+        "function normalizePreviewCategoryId",
+    );
+    assert!(
+        !preview_record.contains("version:"),
+        "C4 baseline: the frontend preview record cannot carry a row CAS token"
+    );
+}

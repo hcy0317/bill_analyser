@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "date": "2026-08-16",
+  "cyanflow_slice": "C4 typed import contract characterization",
+  "production_behavior_changed": false,
+  "findings": {
+    "preview_row_version_persisted": true,
+    "preview_patch_increments_version": true,
+    "preview_row_version_exposed_by_repository_dto": false,
+    "preview_update_row_cas": false,
+    "session_version_accepted_by_confirm_backend": true,
+    "session_version_exposed_to_current_web_client": false,
+    "selection_hash_is_row_cas": false,
+    "import_preview_service_record_unknown_occurrences": 28,
+    "import_preview_service_any_lexical_occurrences": 13,
+    "desktop_import_v2_direct_string_occurrences": 13,
+    "import_preview_row_constructor_occurrences": 11,
+    "import_session_row_constructor_occurrences": 2
+  },
+  "characterization_tests": [
+    "preview_row_version_characterizes_the_storage_to_api_contract_gap",
+    "session_version_characterizes_the_confirm_client_contract_gap",
+    "weak_import_api_adapters_are_discoverable_and_cannot_grow"
+  ],
+  "token_ownership": {
+    "row_version": "single preview row mutation and projection",
+    "session_version": "confirm transaction and terminal session state",
+    "selection_hash": "selected preview id set",
+    "decision_group_version": "decision group aggregate",
+    "history_bill_version": "history rewrite target"
+  },
+  "next_slice": {
+    "name": "C4 additive preview row version",
+    "scope": "Expose row_version through Rust repository DTO, shared presenter, TypeScript preview model and cross-language fixtures without enforcing CAS",
+    "breaking_change": false,
+    "cas_claimed": false
+  },
+  "verification": {
+    "status": "passed_local",
+    "focused_contract": {
+      "passed": 10,
+      "failed": 0,
+      "ignored": 0
+    },
+    "rust_only_source_tree_tracked_paths": 1969,
+    "commands": [
+      "cargo test -p bill-analyser-http --test import_runtime_contract",
+      "cargo fmt --all -- --check",
+      "node scripts/check-rust-only-source-tree.mjs"
+    ]
+  }
+}
