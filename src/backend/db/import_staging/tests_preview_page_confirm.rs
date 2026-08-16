@@ -282,7 +282,7 @@ fn import_confirm_and_lifecycle_observability_is_complete_and_secret_safe() {
             "fingerprint_conflict",
         ),
         (
-            DbError::InvalidOperation("version conflict".to_string()),
+            DbError::import_session_version_conflict("session-observability", 2, 3),
             "session_version_conflict",
         ),
         (

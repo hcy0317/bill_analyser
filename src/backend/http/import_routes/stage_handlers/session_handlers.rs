@@ -17,17 +17,32 @@ pub async fn import_session_runtime_handler(
     if let Err(response) = init_import_runtime_schema(&runtime) {
         return route_response(response);
     }
-    match get_import_session(runtime.connection(), &session_id, user_id) {
-        Ok(Some(session)) => route_response(import_session_success(ImportSessionSummary {
-            session_id: session.session_id,
-            status: session.status,
-            created_at: session.created_at,
-            parsed_count: non_negative_usize(session.total_parsed),
-            preview_count: non_negative_usize(session.total_preview),
-            file_paths: json!([]),
-        })),
+    match load_import_session_summary(&runtime, &session_id, user_id) {
+        Ok(Some(session)) => route_response(import_session_success(session)),
         Ok(None) => route_response(import_session_not_found_response()),
         Err(error) => route_response(db_error_response(error)),
+    }
+}
+
+fn load_import_session_summary(
+    runtime: &ImportRuntime,
+    session_id: &str,
+    user_id: UserId,
+) -> Result<Option<ImportSessionSummary>, DbError> {
+    get_import_session(runtime.connection(), session_id, user_id)
+        .map(|session| session.map(import_session_summary))
+}
+
+fn import_session_summary(session: ImportSessionRow) -> ImportSessionSummary {
+    let session_version = session.session_version();
+    ImportSessionSummary {
+        session_id: session.session_id,
+        session_version,
+        status: session.status,
+        created_at: session.created_at,
+        parsed_count: non_negative_usize(session.total_parsed),
+        preview_count: non_negative_usize(session.total_preview),
+        file_paths: json!([]),
     }
 }
 

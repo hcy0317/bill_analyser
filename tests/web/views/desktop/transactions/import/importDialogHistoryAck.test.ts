@@ -6,13 +6,14 @@ function readSource(relativePath: string): string {
 }
 
 describe('import dialog history rewrite acknowledgement', () => {
-    test('confirm payload includes selected preview ids and history rewrite acknowledgement', () => {
+    test('confirm service receives selected preview ids and history rewrite acknowledgement', () => {
         const source = readSource('src/views/desktop/transactions/import/ImportDialog.vue');
 
         expect(source).toContain('buildHistoryRewriteConfirmAcknowledgement');
         expect(source).toContain("selected_only: 'true'");
         expect(source).toContain('getSelectedHistoryRewriteOperations');
-        expect(source).toContain("confirmPayload['history_rewrite_acknowledgement']");
+        expect(source).toContain('services.confirmImportPreview');
+        expect(source).toContain('historyRewriteAcknowledgement');
         expect(source).toContain('if (!confirmed)');
     });
 });

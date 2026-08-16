@@ -8,3 +8,4 @@ include!("runtime/conditional_selection_cas.rs");
 include!("runtime/action_preflush_cas.rs");
 include!("runtime/preview_reclassify_row_cas.rs");
 include!("runtime/reclassification_handlers.rs");
+include!("runtime/confirm_session_cas.rs");

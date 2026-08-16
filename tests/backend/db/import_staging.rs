@@ -2156,10 +2156,18 @@ async fn real_postgres_confirm_command_applies_patch_selection_version_and_repla
         history_acknowledgement: None,
         declared_confirm_time_effects: Vec::new(),
     };
-    assert!(confirm_import_command(pool, scoped_user_id, &empty_command)
-        .expect_err("stale session version must reject before mutation")
-        .to_string()
-        .contains("version conflict"));
+    let stale_error = confirm_import_command(pool, scoped_user_id, &empty_command)
+        .expect_err("stale session version must reject before mutation");
+    assert!(matches!(
+        stale_error,
+        DbError::ImportSessionVersionConflict {
+            ref session_id,
+            expected,
+            actual,
+        } if session_id == empty_session
+            && expected == empty_version - 1
+            && actual == empty_version
+    ));
     assert_failed_confirm_retryable(pool, user_id, empty_session, 1, 1).await?;
     empty_command.expected_session_version = Some(empty_version);
     let empty = confirm_import_command(pool, scoped_user_id, &empty_command)?;

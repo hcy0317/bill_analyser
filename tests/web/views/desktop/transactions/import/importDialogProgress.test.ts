@@ -33,6 +33,7 @@ describe('import dialog progress UI contract', () => {
 
         expect(source).toContain("fetchImportStage('/api/bills/import/v2/parse'");
         expect(source).toContain("fetchImportStage('/api/bills/import/v2/dedup'");
-        expect(source).toContain("fetchImportStage('/api/bills/import/v2/confirm'");
+        expect(source).toContain('services.getImportSession');
+        expect(source).toContain('services.confirmImportPreview');
     });
 });

@@ -196,11 +196,11 @@ fn confirm_import_command_in_transaction(
                 session_version = session.version,
                 "import confirmation validation failed"
             );
-            return Err(DbError::InvalidOperation(format!(
-                "import session version conflict: expected {}, current {}",
+            return Err(DbError::import_session_version_conflict(
+                &command.session_id,
                 command.expected_session_version.unwrap_or_default(),
-                session.version
-            )));
+                session.version,
+            ));
         }
 
         apply_confirm_command_mutations(&mut tx, session.id, user_id, command).await?;
@@ -406,9 +406,7 @@ fn confirm_rollback_reason(error: &DbError) -> &'static str {
         DbError::InvalidOperation(message) if message.contains("fingerprint conflict") => {
             "fingerprint_conflict"
         }
-        DbError::InvalidOperation(message) if message.contains("version conflict") => {
-            "session_version_conflict"
-        }
+        DbError::ImportSessionVersionConflict { .. } => "session_version_conflict",
         DbError::InvalidOperation(message)
             if message.contains("identity validation") || message.contains("requires review") =>
         {

@@ -179,7 +179,6 @@ interface MobileImportPreviewRow {
     signal: ImportPreviewSignalViewModel;
     busy: boolean;
 }
-
 const { tt, formatAmountToLocalizedNumeralsWithCurrency } = useI18n();
 const { showAlert, showConfirm, showToast, routeBackOnError } = useI18nUIComponents();
 
@@ -358,8 +357,14 @@ function confirmSelected(): void {
 async function confirmSelectedNow(): Promise<void> {
     confirming.value = true;
     try {
+        const sessionResponse = await services.getImportSession({ sessionId });
+        const expectedSessionVersion = Number(sessionResponse.data.result.session_version);
+        if (!Number.isSafeInteger(expectedSessionVersion) || expectedSessionVersion < 1) {
+            throw new Error('Import session changed, please refresh');
+        }
         await services.confirmImportPreview({
             sessionId,
+            expectedSessionVersion,
             previewUpdates: buildPreviewUpdates(),
             preserveUnpatchedSelection: true,
             historyRewriteAcknowledgement: buildHistoryAcknowledgement()

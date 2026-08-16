@@ -30,6 +30,7 @@ import {
 } from './http.ts';
 import importPreviewSelectionServices from './importPreviewSelection.ts';
 import importPreviewRecurringServices from './importPreviewRecurring.ts';
+import importSessionServices from './importSession.ts';
 
 type MatchingCandidateActionName = 'accept' | 'reject' | 'clear';
 
@@ -167,6 +168,7 @@ function postMatchingCandidateAction(
 const importPreviewServices = {
     ...importPreviewSelectionServices,
     ...importPreviewRecurringServices,
+    ...importSessionServices,
     getImportPreviewRowVersionConflict,
     // 中文说明：提交通用导入文件解析请求，按旧表单字段发送列映射、类型映射和文件格式参数。
     parseImportTransaction: ({ fileType, fileEncoding, importFile, columnMapping, transactionTypeMapping, hasHeaderLine, timeFormat, timezoneFormat, amountDecimalSeparator, amountDigitGroupingSymbol, geoSeparator, geoOrder, tagSeparator, delimiter }: { fileType: string, fileEncoding?: string, importFile: File, columnMapping?: Record<number, number>, transactionTypeMapping?: Record<string, TransactionType>, hasHeaderLine?: boolean, timeFormat?: string, timezoneFormat?: string, amountDecimalSeparator?: string, amountDigitGroupingSymbol?: string, geoSeparator?: string, geoOrder?: string, tagSeparator?: string, delimiter?: string }): ApiResponsePromise<ImportTransactionResponsePageWrapper> => {
@@ -331,33 +333,6 @@ const importPreviewServices = {
         return axios.get<ApiDataResponse<ImportPreviewPageData>>(`bills/import/v2/preview/${encodeURIComponent(sessionId)}`, {
             params
         }).then(response => {
-            return buildApiResponse(response, response.data?.data);
-        });
-    },
-    // 中文说明：确认导入预览，保留未 patch 选择状态和历史重写确认字段，避免确认链路丢失用户选择。
-    confirmImportPreview: ({
-        sessionId,
-        previewUpdates,
-        preserveUnpatchedSelection,
-        historyRewriteAcknowledgement
-    }: {
-        sessionId: string,
-        previewUpdates?: Record<string, unknown>[],
-        preserveUnpatchedSelection?: boolean,
-        historyRewriteAcknowledgement?: unknown | null
-    }): ApiResponsePromise<Record<string, unknown>> => {
-        const payload: Record<string, unknown> = {
-            session_id: sessionId,
-            preserve_unpatched_selection: !!preserveUnpatchedSelection,
-            preview_updates: previewUpdates || []
-        };
-        if (historyRewriteAcknowledgement) {
-            payload['history_rewrite_acknowledgement'] = historyRewriteAcknowledgement;
-        }
-
-        return axios.post<ApiDataResponse<Record<string, unknown>>>('bills/import/v2/confirm', payload, {
-            timeout: DEFAULT_UPLOAD_API_TIMEOUT
-        } as ApiRequestConfig).then(response => {
             return buildApiResponse(response, response.data?.data);
         });
     },

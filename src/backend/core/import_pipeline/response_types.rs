@@ -191,6 +191,7 @@ pub struct ImportPreviewIndexData {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ImportSessionSummary {
     pub session_id: String,
+    pub session_version: i64,
     pub status: String,
     pub created_at: String,
     pub parsed_count: usize,

@@ -208,6 +208,57 @@ describe('import preview lifecycle service behavior', () => {
         expect(services.getImportPreviewRowVersionConflict(new Error('network'))).toBeNull();
     });
 
+    test('recognizes only a complete typed import session version conflict', () => {
+        const session = {
+            session_id: 'session-conflict',
+            session_version: 9,
+            status: 'previewing',
+            created_at: '2026-08-17T00:00:00Z',
+            parsed_count: 2,
+            preview_count: 1,
+            file_paths: []
+        };
+        expect(services.getImportSessionVersionConflict({
+            response: {
+                status: 409,
+                data: {
+                    code: 'IMPORT_SESSION_VERSION_CONFLICT',
+                    data: {
+                        expected_session_version: 8,
+                        actual_session_version: 9,
+                        session
+                    }
+                }
+            }
+        })).toEqual({
+            expected_session_version: 8,
+            actual_session_version: 9,
+            session
+        });
+        expect(services.getImportSessionVersionConflict({
+            response: { status: 409, data: { code: 'OTHER_CONFLICT' } }
+        })).toBeNull();
+        expect(services.getImportSessionVersionConflict({
+            response: {
+                status: 409,
+                data: { code: 'IMPORT_SESSION_VERSION_CONFLICT', data: null }
+            }
+        })).toBeNull();
+        expect(services.getImportSessionVersionConflict({
+            response: {
+                status: 409,
+                data: {
+                    code: 'IMPORT_SESSION_VERSION_CONFLICT',
+                    data: {
+                        expected_session_version: '8',
+                        actual_session_version: 9,
+                        session
+                    }
+                }
+            }
+        })).toBeNull();
+    });
+
     test('patches selection with the collection token and recognizes only its typed conflict', async () => {
         axiosPut.mockResolvedValueOnce(dataEnvelope({
             updated: 2,
@@ -372,26 +423,41 @@ describe('import preview lifecycle service behavior', () => {
     });
 
     test('confirms with stable defaults and attaches history acknowledgement only when provided', async () => {
+        axiosGet.mockResolvedValueOnce(dataEnvelope({
+            session_id: 's2',
+            session_version: 7,
+            status: 'previewing',
+            created_at: '2026-08-17T00:00:00Z',
+            parsed_count: 2,
+            preview_count: 2,
+            file_paths: []
+        }));
+        const session = await services.getImportSession({ sessionId: 's2' });
+        expect(axiosGet).toHaveBeenCalledWith('bills/import/v2/session/s2');
+        expect(session.data.result.session_version).toBe(7);
+
         await services.confirmImportPreview({ sessionId: 's1' });
         expect(axiosPost).toHaveBeenNthCalledWith(1, 'bills/import/v2/confirm', {
             session_id: 's1',
             preserve_unpatched_selection: false,
             preview_updates: []
-        }, expect.objectContaining({ timeout: expect.any(Number) }));
+        }, expect.objectContaining({ timeout: 1_800_000 }));
 
         const acknowledgement = { token: 'ack-token' };
         await services.confirmImportPreview({
             sessionId: 's2',
             previewUpdates: [{ id: 4 }],
             preserveUnpatchedSelection: true,
+            expectedSessionVersion: 7,
             historyRewriteAcknowledgement: acknowledgement
         });
         expect(axiosPost).toHaveBeenNthCalledWith(2, 'bills/import/v2/confirm', {
             session_id: 's2',
             preserve_unpatched_selection: true,
             preview_updates: [{ id: 4 }],
+            expected_session_version: 7,
             history_rewrite_acknowledgement: acknowledgement
-        }, expect.any(Object));
+        }, expect.objectContaining({ timeout: 1_800_000 }));
     });
 
     test('submits transfer review decisions with encoded ids and optional decision details', async () => {

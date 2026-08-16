@@ -2,6 +2,8 @@ import { describe, expect, jest, test } from '@jest/globals';
 import { previewStateSnapshot } from '../../../../helpers/importPreviewState.ts';
 
 const mockGetImportPreviewPage = jest.fn<(...args: Array<unknown>) => Promise<any>>();
+const mockGetImportSession = jest.fn<(...args: Array<unknown>) => Promise<any>>()
+    .mockResolvedValue({ data: { result: { session_id: 'session-mobile', session_version: 11 } } });
 const mockAcceptMatchingCandidate = jest.fn<(...args: Array<unknown>) => Promise<any>>();
 const mockRejectMatchingCandidate = jest.fn<(...args: Array<unknown>) => Promise<any>>();
 const mockClearMatchingCandidate = jest.fn<(...args: Array<unknown>) => Promise<any>>();
@@ -98,6 +100,7 @@ jest.mock('@/lib/services.ts', () => ({
     __esModule: true,
     default: {
         getImportPreviewPage: mockGetImportPreviewPage,
+        getImportSession: mockGetImportSession,
         acceptMatchingCandidate: mockAcceptMatchingCandidate,
         rejectMatchingCandidate: mockRejectMatchingCandidate,
         clearMatchingCandidate: mockClearMatchingCandidate,
@@ -2147,6 +2150,7 @@ describe('P3 import lifecycle production SFC coverage', () => {
 
             expect(mockConfirmImportPreview).toHaveBeenCalledWith(expect.objectContaining({
                 sessionId: 'session-mobile',
+                expectedSessionVersion: 11,
                 preserveUnpatchedSelection: true
             }));
             expect(mockReviewImportTransferDecision).toHaveBeenLastCalledWith({
@@ -2164,6 +2168,15 @@ describe('P3 import lifecycle production SFC coverage', () => {
             expect(mockLlmPreviewRecommendReject).toHaveBeenCalled();
             expect(back).toHaveBeenCalled();
             expect(row.busy).toBe(false);
+
+            mockGetImportSession.mockResolvedValueOnce({
+                data: { result: { session_id: 'session-mobile', session_version: 0 } }
+            });
+            mockConfirmImportPreview.mockClear();
+            await bindings.confirmSelectedNow();
+            expect(mockConfirmImportPreview).not.toHaveBeenCalled();
+            expect(mockShowToast).toHaveBeenLastCalledWith('Import session changed, please refresh');
+            expect(bindings.confirming.value).toBe(false);
         } finally {
             warnSpy.mockRestore();
         }
@@ -2295,7 +2308,7 @@ describe('P3 import lifecycle production SFC coverage', () => {
             mockConfirmImportPreview.mockResolvedValueOnce({ data: { result: {} } });
             mockShowConfirm.mockImplementationOnce((...args: unknown[]) => (args[1] as () => void)());
             bindings.confirmSelected();
-            await Promise.resolve();
+            await new Promise(resolve => setTimeout(resolve, 0));
             expect(mockShowConfirm).toHaveBeenCalledWith('format.misc.confirmImportTransactions', expect.any(Function));
 
             const historyRecord = {

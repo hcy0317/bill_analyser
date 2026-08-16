@@ -18,6 +18,14 @@ pub enum DbError {
         expected: i64,
         actual: i64,
     },
+    #[error(
+        "import session version conflict for {session_id}: expected {expected}, actual {actual}"
+    )]
+    ImportSessionVersionConflict {
+        session_id: String,
+        expected: i64,
+        actual: i64,
+    },
     #[error("preview selection version conflict: expected {expected}, actual {actual}")]
     PreviewSelectionConflict { expected: String, actual: String },
     #[error("preview selection target is outside session {session_id}")]
@@ -41,6 +49,18 @@ impl DbError {
         Self::PreviewSelectionConflict {
             expected: expected.to_string(),
             actual: actual.to_string(),
+        }
+    }
+
+    pub(crate) fn import_session_version_conflict(
+        session_id: &str,
+        expected: i64,
+        actual: i64,
+    ) -> Self {
+        Self::ImportSessionVersionConflict {
+            session_id: session_id.to_string(),
+            expected,
+            actual,
         }
     }
 }

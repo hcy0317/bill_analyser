@@ -1233,6 +1233,7 @@ fn stage_envelopes_and_matching_payload_pin_pipeline_wire_contracts() {
 fn success_envelopes_keep_session_and_preview_page_data_keys() {
     let session = ImportSessionSummary {
         session_id: "sess-1".to_string(),
+        session_version: 7,
         status: "previewing".to_string(),
         created_at: "2026-05-01 08:00:00".to_string(),
         parsed_count: 3,
@@ -1242,6 +1243,7 @@ fn success_envelopes_keep_session_and_preview_page_data_keys() {
     let response = import_session_success(session);
     assert_eq!(response.status_code, 200);
     assert_eq!(response.body["data"]["session_id"], "sess-1");
+    assert_eq!(response.body["data"]["session_version"], 7);
     assert_eq!(response.body["data"]["preview_count"], 2);
     assert_eq!(response.body["data"]["file_paths"], "a.csv");
 

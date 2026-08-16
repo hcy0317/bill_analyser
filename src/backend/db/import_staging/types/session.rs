@@ -25,6 +25,7 @@ pub struct ImportParseStagingResult {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ImportSessionRow {
     pub id: i64,
+    pub version: i64,
     pub session_id: String,
     pub user_id: i64,
     pub status: String,
@@ -34,4 +35,10 @@ pub struct ImportSessionRow {
     pub total_confirmed: i64,
     pub created_at: String,
     pub updated_at: String,
+}
+
+impl ImportSessionRow {
+    pub fn session_version(&self) -> i64 {
+        self.version
+    }
 }

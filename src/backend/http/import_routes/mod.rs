@@ -104,7 +104,7 @@ use bill_analyser_db::{
     ImportPreviewPatch, ImportPreviewPatchField, ImportPreviewPatchValue,
     ImportPreviewQueryFilters, ImportPreviewRecurringCandidate, ImportPreviewRecurringMatchUpdate,
     ImportPreviewRow, ImportPreviewSelectionMode, ImportPreviewSelectionTarget, ImportSessionDraft,
-    ImportSessionStatusUpdate, ImportSourceDraft, ImportStage2CategoryRecord,
+    ImportSessionRow, ImportSessionStatusUpdate, ImportSourceDraft, ImportStage2CategoryRecord,
     ImportStage2CategoryRuleRecord, ImportStage2ContextRows, ImportStage2RecurringTemplateRecord,
     ImportStandardRowDraft, LlmCandidateDraft, LlmConfigDraft, LlmConfigUpdate, PostgresPool,
     PostgresRepositoryRuntime,

@@ -29,6 +29,15 @@ pub async fn import_confirm_runtime_handler(
             status_code: receipt.http_status,
             body: receipt.success_envelope,
         }),
+        Err(DbError::ImportSessionVersionConflict {
+            session_id,
+            expected,
+            ..
+        }) => route_response(match load_import_session_summary(&runtime, &session_id, user_id) {
+            Ok(Some(session)) => confirm_session_version_conflict_response(expected, session),
+            Ok(None) => import_session_not_found_response(),
+            Err(error) => db_error_response(error),
+        }),
         Err(DbError::InvalidOperation(message)) => {
             route_response(confirm_invalid_operation_response(&message))
         }
@@ -85,7 +94,7 @@ fn optional_confirm_session_version(
         return Ok(None);
     }
     value_to_i64(value)
-        .filter(|version| *version >= 0)
+        .filter(|version| *version > 0)
         .map(Some)
         .ok_or_else(|| import_v2_error_response(400, "Invalid expected session version"))
 }
@@ -205,6 +214,26 @@ fn confirm_invalid_operation_response(message: &str) -> ImportV2RouteResponse {
         return import_v2_error_response(409, message);
     }
     import_v2_error_response(400, message)
+}
+
+fn confirm_session_version_conflict_response(
+    expected_session_version: i64,
+    latest_session: ImportSessionSummary,
+) -> ImportV2RouteResponse {
+    let actual_session_version = latest_session.session_version;
+    ImportV2RouteResponse {
+        status_code: 409,
+        body: json!({
+            "success": false,
+            "error": "Import session changed, please refresh",
+            "code": "IMPORT_SESSION_VERSION_CONFLICT",
+            "data": {
+                "expected_session_version": expected_session_version,
+                "actual_session_version": actual_session_version,
+                "session": latest_session,
+            },
+        }),
+    }
 }
 
 fn history_rewrite_acknowledgement_from_payload(
@@ -347,6 +376,19 @@ mod confirm_handler_contract_tests {
 
         assert!(absent.selected_preview_ids.is_none());
         assert_eq!(empty.selected_preview_ids, Some(Vec::new()));
+    }
+
+    #[test]
+    fn confirm_payload_rejects_non_positive_session_versions() {
+        for version in [json!(0), json!(-1)] {
+            let error = confirm_command_from_payload(&json!({
+                "session_id": "session-1",
+                "expected_session_version": version
+            }))
+            .expect_err("session versions must be positive");
+            assert_eq!(error.status_code, 400);
+            assert_eq!(error.body["error"], "Invalid expected session version");
+        }
     }
 
     #[test]

@@ -1678,42 +1678,24 @@ async function submit(): Promise<void> {
                     });
                 });
 
-            const token = getCurrentToken();
-            const headers: Record<string, string> = {
-                'Content-Type': 'application/json'
-            };
-            if (token) {
-                headers['Authorization'] = `Bearer ${token}`;
+            const sessionResponse = await services.getImportSession({
+                sessionId: serverSessionId.value
+            });
+            const expectedSessionVersion = Number(sessionResponse.data.result.session_version);
+            if (!Number.isSafeInteger(expectedSessionVersion) || expectedSessionVersion < 1) {
+                throw new Error('导入会话版本无效，请刷新后重试');
             }
+            const response = await services.confirmImportPreview({
+                sessionId: serverSessionId.value,
+                expectedSessionVersion,
+                preserveUnpatchedSelection: serverPagedPreviewMode.value,
+                previewUpdates,
+                historyRewriteAcknowledgement
+            });
+            const result = response.data.result;
+            logger.info(`[三阶段导入-阶段3] 完成: imported=${result?.imported_count}`);
 
-            const confirmPayload: Record<string, unknown> = {
-                session_id: serverSessionId.value,
-                preserve_unpatched_selection: serverPagedPreviewMode.value,
-                preview_updates: previewUpdates
-            };
-            if (historyRewriteAcknowledgement) {
-                confirmPayload['history_rewrite_acknowledgement'] = historyRewriteAcknowledgement;
-            }
-
-            const response = await fetchImportStage('/api/bills/import/v2/confirm', {
-                method: 'POST',
-                headers: headers,
-                body: JSON.stringify(confirmPayload)
-            }, '阶段3确认导入', DEFAULT_IMPORT_API_TIMEOUT);
-
-            if (!response.ok) {
-                const errorText = await response.text();
-                throw new Error(`确认导入失败: ${errorText}`);
-            }
-
-            const result = await response.json();
-            logger.info(`[三阶段导入-阶段3] 完成: imported=${result.data?.imported_count}`);
-
-            if (!result.success) {
-                throw new Error(result.error || '确认导入失败');
-            }
-
-            importedCount.value = result.data?.imported_count || selectedCount;
+            importedCount.value = Number(result?.imported_count) || selectedCount;
             currentStep.value = 'finalResult';
 
             // 但为了健壮性，在成功时也显式调用清理以确保数据被删除）

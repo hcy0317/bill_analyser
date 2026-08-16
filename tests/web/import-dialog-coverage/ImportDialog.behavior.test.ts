@@ -19,7 +19,9 @@ const mockServices = {
     parseGenericIntoSession: jest.fn<(...args: any[]) => Promise<any>>(),
     previewImportFileFromTemp: jest.fn<(...args: any[]) => Promise<any>>(),
     matchImportConfig: jest.fn<(...args: any[]) => Promise<any>>(),
-    suggestImportConfig: jest.fn<(...args: any[]) => Promise<any>>()
+    suggestImportConfig: jest.fn<(...args: any[]) => Promise<any>>(),
+    getImportSession: jest.fn<(...args: any[]) => Promise<any>>(),
+    confirmImportPreview: jest.fn<(...args: any[]) => Promise<any>>()
 };
 
 const mockAccountStore = {
@@ -382,6 +384,12 @@ beforeEach(() => {
     });
     mockServices.matchImportConfig.mockResolvedValue({ data: { success: false } });
     mockServices.suggestImportConfig.mockResolvedValue({ data: { result: {} } });
+    mockServices.getImportSession.mockResolvedValue({
+        data: { result: { session_id: 'default-session', session_version: 1 } }
+    });
+    mockServices.confirmImportPreview.mockResolvedValue({
+        data: { result: { imported_count: 0 } }
+    });
     mockCoordinator.begin.mockImplementation((key: string) => ({ key, controller: new AbortController() }));
     mockCoordinator.isCurrent.mockReturnValue(true);
     Object.assign(mockSourceSelection, {
@@ -1254,6 +1262,12 @@ describe('ImportDialog production-loaded behavior coverage', () => {
         bindings.serverSessionId.value = 'session-confirm';
         bindings.serverPagedPreviewMode.value = true;
         (globalThis.fetch as any).mockResolvedValue(createResponse());
+        mockServices.getImportSession.mockResolvedValueOnce({
+            data: { result: { session_id: 'session-confirm', session_version: 13 } }
+        });
+        mockServices.confirmImportPreview.mockResolvedValueOnce({
+            data: { result: { imported_count: 1 } }
+        });
 
         mockFetchImportStage
             .mockResolvedValueOnce(createResponse({
@@ -1276,9 +1290,6 @@ describe('ImportDialog production-loaded behavior coverage', () => {
                         }]
                     }
                 }
-            }))
-            .mockResolvedValueOnce(createResponse({
-                result: { success: true, data: { imported_count: 1 } }
             }));
         await bindings.submit();
         await flushAsync();
@@ -1286,16 +1297,15 @@ describe('ImportDialog production-loaded behavior coverage', () => {
             'format.misc.confirmImportTransactions',
             expect.objectContaining({ warning: 'History Rewrite', color: 'warning' })
         );
-        const confirmCall = mockFetchImportStage.mock.calls.find(call => call[0] === '/api/bills/import/v2/confirm');
-        expect(confirmCall).toBeDefined();
-        const confirmPayload = JSON.parse(confirmCall?.[1].body);
-        expect(confirmPayload).toMatchObject({
-            session_id: 'session-confirm',
-            preserve_unpatched_selection: true,
-            preview_updates: [{ id: 61, selected: true }],
-            history_rewrite_acknowledgement: {
+        expect(mockServices.getImportSession).toHaveBeenCalledWith({ sessionId: 'session-confirm' });
+        expect(mockServices.confirmImportPreview).toHaveBeenCalledWith({
+            sessionId: 'session-confirm',
+            expectedSessionVersion: 13,
+            preserveUnpatchedSelection: true,
+            previewUpdates: [{ id: 61, selected: true }],
+            historyRewriteAcknowledgement: expect.objectContaining({
                 operations: [expect.objectContaining({ preview_id: 61, history_bill_id: 9 })]
-            }
+            })
         });
         expect(bindings.currentStep.value).toBe('finalResult');
         expect(bindings.serverSessionId.value).toBe('');
@@ -1314,15 +1324,17 @@ describe('ImportDialog production-loaded behavior coverage', () => {
         await failedBindings.submit();
         expect(snackbar.showError).toHaveBeenCalledWith('history unavailable');
 
-        mockFetchImportStage
-            .mockResolvedValueOnce(createResponse({ result: { success: true, data: { preview: [] } } }))
-            .mockResolvedValueOnce(createResponse({ ok: false, text: 'confirm rejected' }));
+        mockFetchImportStage.mockResolvedValueOnce(createResponse({
+            result: { success: true, data: { preview: [] } }
+        }));
+        mockServices.confirmImportPreview.mockRejectedValueOnce(new Error('confirm rejected'));
         await failedBindings.submit();
         await flushAsync();
         expect(snackbar.showError).toHaveBeenCalledWith(expect.stringContaining('confirm rejected'));
-        mockFetchImportStage
-            .mockResolvedValueOnce(createResponse({ result: { success: true, data: { preview: [] } } }))
-            .mockResolvedValueOnce(createResponse({ result: { success: false, error: 'confirm business failed' } }));
+        mockFetchImportStage.mockResolvedValueOnce(createResponse({
+            result: { success: true, data: { preview: [] } }
+        }));
+        mockServices.confirmImportPreview.mockRejectedValueOnce(new Error('confirm business failed'));
         await failedBindings.submit();
         await flushAsync();
         expect(snackbar.showError).toHaveBeenCalledWith(expect.stringContaining('confirm business failed'));
@@ -1347,23 +1359,48 @@ describe('ImportDialog production-loaded behavior coverage', () => {
         bindings.serverSessionId.value = 'session-visible-confirm';
         bindings.serverPagedPreviewMode.value = false;
         mockGetCurrentToken.mockReturnValue('');
-        mockFetchImportStage.mockResolvedValueOnce(createResponse({
-            result: { success: true, data: {} }
-        }));
+        mockServices.getImportSession.mockResolvedValueOnce({
+            data: { result: { session_id: 'session-visible-confirm', session_version: 17 } }
+        });
+        mockServices.confirmImportPreview.mockResolvedValueOnce({ data: { result: {} } });
         (globalThis.fetch as any).mockResolvedValue(createResponse());
 
         await bindings.submit();
         await flushAsync();
-        const confirmCall = mockFetchImportStage.mock.calls.find(call => call[0] === '/api/bills/import/v2/confirm');
-        const payload = JSON.parse(confirmCall?.[1].body);
-        expect(payload.preserve_unpatched_selection).toBe(false);
-        expect(payload.preview_updates).toEqual([
+        const confirmCall = mockServices.confirmImportPreview.mock.calls.at(-1)?.[0];
+        expect(confirmCall.preserveUnpatchedSelection).toBe(false);
+        expect(confirmCall.expectedSessionVersion).toBe(17);
+        expect(confirmCall.previewUpdates).toEqual([
             expect.objectContaining({ id: 71, amount_cents: -1234, category_path: mockCategoryStore.allTransactionCategoriesMap.food }),
             expect.objectContaining({ id: 72, amount_cents: -1234, category_path: null })
         ]);
-        expect(payload.preview_updates[0].clear_transfer_decision).toBe(true);
-        expect(confirmCall?.[1].headers).toEqual({ 'Content-Type': 'application/json' });
+        expect(confirmCall.previewUpdates[0].clear_transfer_decision).toBe(true);
         expect(bindings.importedCount.value).toBe(2);
+    });
+
+    test('blocks desktop confirmation when the current session version is invalid', async () => {
+        const bindings = createBindings();
+        const snackbar = createSnackbar();
+        const confirmDialog = { open: jest.fn<(...args: any[]) => Promise<boolean>>(async () => true) };
+        setTemplateRef('snackbar', snackbar);
+        setTemplateRef('confirmDialog', confirmDialog);
+        setTemplateRef('importTransactionCheckDataTab', {
+            isEditing: false,
+            getSelectedVisibleHistoryRewriteOperationCount: () => 0
+        });
+        bindings.importTransactions.value = [mockBuildTransaction({ id: 73, selected: true, type: 3 }, 0)];
+        bindings.serverSessionId.value = 'session-invalid-version';
+        bindings.serverPagedPreviewMode.value = false;
+        mockServices.getImportSession.mockResolvedValueOnce({
+            data: { result: { session_id: 'session-invalid-version', session_version: 0 } }
+        });
+
+        await bindings.submit();
+        await flushAsync();
+
+        expect(mockServices.confirmImportPreview).not.toHaveBeenCalled();
+        expect(snackbar.showError).toHaveBeenCalledWith(expect.stringContaining('导入会话版本无效'));
+        expect(bindings.submitting.value).toBe(false);
     });
 
     test('covers optional API fields and fallback values without changing the import contract', async () => {

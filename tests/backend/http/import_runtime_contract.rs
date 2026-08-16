@@ -449,7 +449,7 @@ fn preview_row_version_is_mapped_serialized_and_enforced_by_single_update_cas() 
 }
 
 #[test]
-fn session_version_characterizes_the_confirm_client_contract_gap() {
+fn session_version_is_exposed_and_consumed_by_current_confirm_clients() {
     let migration =
         source("src/backend/db/postgres/migrations/0001_initial_authoritative_schema.sql");
     let session_table = section_between(
@@ -465,16 +465,16 @@ fn session_version_characterizes_the_confirm_client_contract_gap() {
     let session_types = source("src/backend/db/import_staging/types/session.rs");
     let session_row = &session_types[position(&session_types, "pub struct ImportSessionRow")..];
     assert!(
-        !session_row.contains("pub version:"),
-        "C4 baseline: the repository session row does not expose its stored version"
+        session_row.contains("pub version: i64"),
+        "the repository session row must expose its stored version"
     );
 
     let response_types = source("src/backend/core/import_pipeline/response_types.rs");
     let session_summary =
         &response_types[position(&response_types, "pub struct ImportSessionSummary")..];
     assert!(
-        !session_summary.contains("pub version:"),
-        "C4 baseline: GET session cannot provide a confirm CAS token"
+        session_summary.contains("pub session_version: i64"),
+        "GET session must provide the authoritative confirm CAS token"
     );
 
     let confirm_handler =
@@ -482,11 +482,20 @@ fn session_version_characterizes_the_confirm_client_contract_gap() {
     assert!(confirm_handler.contains("expected_session_version"));
     assert!(confirm_handler.contains("expectedSessionVersion"));
 
-    let service = source("src/web/src/lib/services/importPreview.ts");
-    assert!(
-        !service.contains("expectedSessionVersion"),
-        "C4 baseline: the frontend confirm facade does not send the supported CAS token"
-    );
+    let service_facade = source("src/web/src/lib/services/importPreview.ts");
+    assert!(service_facade.contains("importSessionServices"));
+    let service = source("src/web/src/lib/services/importSession.ts");
+    assert!(service.contains("getImportSession"));
+    assert!(service.contains("expectedSessionVersion"));
+    assert!(service.contains("payload['expected_session_version'] = expectedSessionVersion"));
+
+    for client in [
+        source("src/web/src/views/desktop/transactions/import/ImportDialog.vue"),
+        source("src/web/src/views/mobile/transactions/ImportPreviewPage.vue"),
+    ] {
+        assert!(client.contains("services.getImportSession"));
+        assert!(client.contains("expectedSessionVersion"));
+    }
 }
 
 #[test]

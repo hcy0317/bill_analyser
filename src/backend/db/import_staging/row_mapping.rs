@@ -3,6 +3,7 @@ fn import_session_from_pg_row(row: &PgRow) -> DbResult<ImportSessionRow> {
     let updated_at = format_pg_time(row.try_get("updated_at")?);
     Ok(ImportSessionRow {
         id: row.try_get("id")?,
+        version: row.try_get("version")?,
         session_id: row.try_get("session_key")?,
         user_id: row.try_get("user_id")?,
         status: row.try_get("status")?,

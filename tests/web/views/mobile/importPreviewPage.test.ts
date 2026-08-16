@@ -27,6 +27,8 @@ describe('mobile import preview parity', () => {
         expect(source).toContain('services.rejectMatchingCandidate');
         expect(source).toContain('services.llmPreviewRecommendAccept');
         expect(source).toContain('buildImportPreviewHistoryRewriteAcknowledgement');
+        expect(source).toContain('services.getImportSession');
+        expect(source).toContain('expectedSessionVersion');
         expect(source).toContain('historyRewriteAcknowledgement: buildHistoryAcknowledgement()');
     });
 });

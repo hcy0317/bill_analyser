@@ -104,6 +104,28 @@ export interface ImportPreviewRowVersionConflict {
     previewItem: ImportPreviewRecord;
 }
 
+export interface ImportSessionSummary {
+    session_id: string;
+    session_version: number;
+    status: string;
+    created_at: string;
+    parsed_count: number;
+    preview_count: number;
+    file_paths: unknown;
+}
+
+export interface ImportSessionVersionConflict {
+    expected_session_version: number;
+    actual_session_version: number;
+    session: ImportSessionSummary;
+}
+
+export interface ImportConfirmResult {
+    imported_count: number;
+    skipped_count: number;
+    errors: string[];
+}
+
 export interface ImportPreviewSelectionMetadata {
     selection_hash?: string;
     [field: string]: unknown;
