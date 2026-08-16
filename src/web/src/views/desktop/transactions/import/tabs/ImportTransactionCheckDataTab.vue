@@ -834,7 +834,13 @@ import {
 import {
     getImportPreviewTransactionTypeNumber
 } from '../importPreviewTransaction.ts';
-import { buildImportPreviewUpdateFromTransaction, getPreviewUpdateId } from '../importPreviewUpdates.ts';
+import {
+    buildImportPreviewUpdateFromTransaction,
+    getPreviewRowVersionFromImportTransaction,
+    getPreviewUpdateId,
+    rebaseImportPreviewTextSyncConflict,
+    syncPreviewRowVersionToImportTransaction
+} from '../importPreviewUpdates.ts';
 import {
     clearResolvedImportPreviewReviewState
 } from '../importPreviewReviewState.ts';
@@ -2417,6 +2423,7 @@ function syncTransactionFromPreviewDecision(item: ImportTransaction, previewData
     item.recurringMatchScore = Number(previewData.preview_recurring_match_score || 0);
     item.recurringMatchReasons = previewData.preview_recurring_match_reasons || '';
     item.recurringMatchedDate = previewData.preview_recurring_matched_date || '';
+    syncPreviewRowVersionToImportTransaction(item, previewData);
 
     updateTransactionData(item);
     syncTransferDecisionBaseline(item);
@@ -2746,6 +2753,7 @@ async function syncLearningDecisionDraftToPreview(item: ImportTransaction, candi
             sessionId: props.sessionId,
             payload: {
                 ...payload,
+                expectedRowVersion: getPreviewRowVersionFromImportTransaction(item),
                 responseMode: 'preview-item'
             }
         });
@@ -2773,6 +2781,11 @@ async function syncLearningDecisionDraftToPreview(item: ImportTransaction, candi
         syncLearningCandidateFromSessionCandidate(item, refreshedCandidate);
         return true;
     } catch (error) {
+        const conflict = services.getImportPreviewRowVersionConflict(error);
+        if (conflict) {
+            syncTransactionFromPreviewDecision(item, conflict.previewItem);
+            rebaseImportPreviewTextSyncConflict(item, conflict.previewItem);
+        }
         const actionErrorText = getActionErrorMessage(error, 'Failed to sync preview text edits before reviewing learning suggestions');
         logger.error(`[学习建议预览同步] 失败: ${actionErrorText}`, error);
         snackbar.value?.showMessage(actionErrorText);

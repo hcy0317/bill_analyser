@@ -36,6 +36,7 @@ pub enum ImportPreviewPatchValue {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImportPreviewPatch {
     pub preview_id: i64,
+    pub expected_row_version: Option<i64>,
     pub changes: Vec<(ImportPreviewPatchField, ImportPreviewPatchValue)>,
     pub clear_transfer_decision: bool,
     pub clear_learning_decision: bool,
@@ -52,11 +53,17 @@ impl ImportPreviewPatch {
     pub fn new(preview_id: i64) -> Self {
         Self {
             preview_id,
+            expected_row_version: None,
             changes: Vec::new(),
             clear_transfer_decision: false,
             clear_learning_decision: false,
             clear_llm_decision: false,
         }
+    }
+
+    pub fn with_expected_row_version(mut self, expected_row_version: i64) -> Self {
+        self.expected_row_version = Some(expected_row_version);
+        self
     }
 
     pub fn with_change(

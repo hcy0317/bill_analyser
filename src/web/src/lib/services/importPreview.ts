@@ -4,7 +4,11 @@ import type { ApiResponse } from '@/core/api.ts';
 import { TransactionType } from '@/core/transaction.ts';
 import { DEFAULT_UPLOAD_API_TIMEOUT } from '@/consts/api.ts';
 import type { ImportTransactionResponsePageWrapper } from '@/models/imported_transaction.ts';
-import type { ImportPreviewPageData, ImportPreviewRecord } from '@/models/import_preview.ts';
+import type {
+    ImportPreviewPageData,
+    ImportPreviewRecord,
+    ImportPreviewRowVersionConflict
+} from '@/models/import_preview.ts';
 import type {
     ImportLearningPromoteResponse,
     ImportLearningSuggestionsResponse
@@ -55,6 +59,7 @@ interface MatchingPairOperationResponse {
 
 interface UpdateImportPreviewItemPayload {
     id: number;
+    expectedRowVersion?: number;
     type?: string;
     amountCents?: number;
     destinationAmountCents?: number;
@@ -72,6 +77,49 @@ interface UpdateImportPreviewItemPayload {
 interface UpdateImportPreviewItemResponse {
     updated: boolean;
     previewItem?: ImportPreviewRecord;
+}
+
+interface ImportPreviewRowVersionConflictEnvelope {
+    code?: unknown;
+    data?: unknown;
+}
+
+interface ImportPreviewRowVersionConflictPayload {
+    expected_row_version?: unknown;
+    actual_row_version?: unknown;
+    previewItem?: unknown;
+}
+
+function getImportPreviewRowVersionConflict(
+    error: unknown
+): ImportPreviewRowVersionConflict | null {
+    const response = (error as {
+        response?: { status?: number; data?: ImportPreviewRowVersionConflictEnvelope };
+    })?.response;
+    if (response?.status !== 409 || response.data?.code !== 'PREVIEW_ROW_VERSION_CONFLICT') {
+        return null;
+    }
+    const data = response.data.data;
+    if (!data || typeof data !== 'object') {
+        return null;
+    }
+    const conflict = data as ImportPreviewRowVersionConflictPayload;
+    const expected = conflict.expected_row_version;
+    const actual = conflict.actual_row_version;
+    const previewItem = conflict.previewItem;
+    if (
+        !Number.isInteger(expected)
+        || !Number.isInteger(actual)
+        || !previewItem
+        || typeof previewItem !== 'object'
+    ) {
+        return null;
+    }
+    return {
+        expected_row_version: expected as number,
+        actual_row_version: actual as number,
+        previewItem: previewItem as ImportPreviewRecord
+    };
 }
 
 interface ImportPreviewDecisionResponse {
@@ -103,6 +151,7 @@ function postMatchingCandidateAction(
 
 // 中文说明：导入预览域服务 facade，集中保留旧 endpoint、timeout 和 payload 字段名，供根 services.ts 继续透出。
 const importPreviewServices = {
+    getImportPreviewRowVersionConflict,
     // 中文说明：提交通用导入文件解析请求，按旧表单字段发送列映射、类型映射和文件格式参数。
     parseImportTransaction: ({ fileType, fileEncoding, importFile, columnMapping, transactionTypeMapping, hasHeaderLine, timeFormat, timezoneFormat, amountDecimalSeparator, amountDigitGroupingSymbol, geoSeparator, geoOrder, tagSeparator, delimiter }: { fileType: string, fileEncoding?: string, importFile: File, columnMapping?: Record<number, number>, transactionTypeMapping?: Record<string, TransactionType>, hasHeaderLine?: boolean, timeFormat?: string, timezoneFormat?: string, amountDecimalSeparator?: string, amountDigitGroupingSymbol?: string, geoSeparator?: string, geoOrder?: string, tagSeparator?: string, delimiter?: string }): ApiResponsePromise<ImportTransactionResponsePageWrapper> => {
         let textualColumnMapping: string | undefined = undefined;
@@ -204,7 +253,11 @@ const importPreviewServices = {
         sessionId: string,
         payload: UpdateImportPreviewItemPayload
     }): ApiResponsePromise<UpdateImportPreviewItemResponse> => {
-        return axios.put<{ success?: boolean, data?: { updated?: boolean, previewItem?: ImportPreviewRecord } }>(`bills/import/v2/preview/${encodeURIComponent(sessionId)}/update`, payload).then(response => {
+        const { expectedRowVersion, ...previewPayload } = payload;
+        const requestPayload = expectedRowVersion === undefined
+            ? previewPayload
+            : { ...previewPayload, expected_row_version: expectedRowVersion };
+        return axios.put<{ success?: boolean, data?: { updated?: boolean, previewItem?: ImportPreviewRecord } }>(`bills/import/v2/preview/${encodeURIComponent(sessionId)}/update`, requestPayload).then(response => {
             return buildApiResponse(response, {
                 updated: !!(response.data?.data?.updated ?? response.data?.success),
                 previewItem: response.data?.data?.previewItem

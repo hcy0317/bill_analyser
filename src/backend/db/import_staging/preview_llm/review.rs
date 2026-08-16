@@ -193,9 +193,12 @@ fn review_preview_llm_recommendation_with_expected_state(
             payload.to_string(),
             amount_cents,
             direction,
-            request.preview_id,
-            session_db_id,
-            user_id,
+            PreviewRowUpdateTarget {
+                preview_id: request.preview_id,
+                session_db_id,
+                user_id,
+                expected_row_version: None,
+            },
         );
         update.build().execute(&mut *transaction).await?;
         let event_id = insert_llm_review_event_in_transaction(

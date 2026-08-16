@@ -15,6 +15,26 @@ fn preview_row_to_value(row: ImportPreviewRow) -> Value {
     value
 }
 
+fn preview_row_version_conflict_response(
+    expected_row_version: i64,
+    latest_row: ImportPreviewRow,
+) -> ImportV2RouteResponse {
+    let actual_row_version = latest_row.version;
+    ImportV2RouteResponse {
+        status_code: 409,
+        body: json!({
+            "success": false,
+            "error": "Preview row changed, please refresh",
+            "code": "PREVIEW_ROW_VERSION_CONFLICT",
+            "data": {
+                "expected_row_version": expected_row_version,
+                "actual_row_version": actual_row_version,
+                "previewItem": preview_row_to_value(latest_row),
+            },
+        }),
+    }
+}
+
 fn preview_row_is_categorized(row: &&ImportPreviewRow) -> bool {
     !row.preview_main_category.trim().is_empty() || !row.preview_sub_category.trim().is_empty()
 }

@@ -364,9 +364,12 @@ fn bulk_insert_query_builders_preserve_insert_shapes() {
         json!({"category_id": 42}).to_string(),
         1000,
         "expense",
-        7,
-        1,
-        2,
+        PreviewRowUpdateTarget {
+            preview_id: 7,
+            session_db_id: 1,
+            user_id: 2,
+            expected_row_version: None,
+        },
     );
     let update_sql = update_builder.build().sql().to_string();
     assert!(update_sql.contains("UPDATE import_preview_rows"));
@@ -380,12 +383,16 @@ fn bulk_insert_query_builders_preserve_insert_shapes() {
         json!({"preview_type": "支出"}).to_string(),
         1000,
         "expense",
-        7,
-        1,
-        2,
+        PreviewRowUpdateTarget {
+            preview_id: 7,
+            session_db_id: 1,
+            user_id: 2,
+            expected_row_version: Some(11),
+        },
     );
     let demoted_update_sql = demoted_update_builder.build().sql().to_string();
     assert!(demoted_update_sql.contains("hidden_transfer_payload = '{}'::jsonb"));
+    assert!(demoted_update_sql.contains("AND version ="));
 }
 
 #[test]

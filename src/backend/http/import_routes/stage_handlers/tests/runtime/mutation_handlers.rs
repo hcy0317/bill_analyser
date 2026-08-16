@@ -52,6 +52,54 @@
             },
         )
         .expect("insert preview for empty update reclassify");
+
+        let (status, body) = import_test_response(
+            import_preview_update_runtime_handler(
+                State(state.clone()),
+                Path(session_id.clone()),
+                headers.clone(),
+                Json(json!({
+                    "previewId": preview_id,
+                    "description": "first HTTP writer",
+                    "expected_row_version": 1
+                })),
+            )
+            .await,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "body: {body}");
+        assert_eq!(body["data"]["updated"], true);
+        assert_eq!(body["data"]["previewItem"]["row_version"], 2);
+        assert_eq!(
+            body["data"]["previewItem"]["preview_description"],
+            "first HTTP writer"
+        );
+
+        let (status, body) = import_test_response(
+            import_preview_update_runtime_handler(
+                State(state.clone()),
+                Path(session_id.clone()),
+                headers.clone(),
+                Json(json!({
+                    "previewId": preview_id,
+                    "description": "stale HTTP writer",
+                    "expected_row_version": 1
+                })),
+            )
+            .await,
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT, "body: {body}");
+        assert_eq!(body["success"], false);
+        assert_eq!(body["code"], "PREVIEW_ROW_VERSION_CONFLICT");
+        assert_eq!(body["data"]["expected_row_version"], 1);
+        assert_eq!(body["data"]["actual_row_version"], 2);
+        assert_eq!(body["data"]["previewItem"]["row_version"], 2);
+        assert_eq!(
+            body["data"]["previewItem"]["preview_description"],
+            "first HTTP writer"
+        );
+
         let version_before: i64 = sqlx::query_scalar(
             "SELECT version FROM import_preview_rows WHERE id=$1 AND user_id=$2",
         )

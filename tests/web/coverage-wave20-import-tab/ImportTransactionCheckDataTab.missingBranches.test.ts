@@ -9,6 +9,7 @@ const mockLlmPreviewRecommendAccept = jest.fn<(...args: Array<any>) => Promise<a
 const mockLlmPreviewRecommendReject = jest.fn<(...args: Array<any>) => Promise<any>>();
 const mockGetMatchingSessionCandidates = jest.fn<(...args: Array<any>) => Promise<any>>();
 const mockUpdateImportPreviewItem = jest.fn<(...args: Array<any>) => Promise<any>>();
+const mockGetImportPreviewRowVersionConflict = jest.fn<(...args: Array<any>) => any>();
 const mockLlmPreviewRecommend = jest.fn<(...args: Array<any>) => Promise<any>>();
 const mockAnalyzeLLMTransactions = jest.fn<(...args: Array<any>) => Promise<any>>();
 const mockGetImportLearningSuggestions = jest.fn<(...args: Array<any>) => Promise<any>>();
@@ -145,6 +146,7 @@ jest.mock('@/lib/services.ts', () => ({
         llmPreviewRecommendReject: mockLlmPreviewRecommendReject,
         getMatchingSessionCandidates: mockGetMatchingSessionCandidates,
         updateImportPreviewItem: mockUpdateImportPreviewItem,
+        getImportPreviewRowVersionConflict: mockGetImportPreviewRowVersionConflict,
         llmPreviewRecommend: mockLlmPreviewRecommend,
         analyzeLLMTransactions: mockAnalyzeLLMTransactions,
         getImportLearningSuggestions: mockGetImportLearningSuggestions,

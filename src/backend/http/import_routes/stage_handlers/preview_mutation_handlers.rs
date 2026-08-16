@@ -32,6 +32,10 @@ pub async fn import_preview_update_runtime_handler(
         Ok(preview_id) => preview_id,
         Err(response) => return route_response(response),
     };
+    let expected_row_version = match expected_row_version_from_payload(object) {
+        Ok(expected_row_version) => expected_row_version,
+        Err(response) => return route_response(response),
+    };
     let preview = match get_preview_bill_by_id(runtime.connection(), preview_id, user_id) {
         Ok(Some(preview)) if preview.session_id == session_id => preview,
         Ok(Some(_)) | Ok(None) => {
@@ -39,7 +43,7 @@ pub async fn import_preview_update_runtime_handler(
         }
         Err(error) => return route_response(db_error_response(error)),
     };
-    let patch = match build_preview_patch_from_payload_with_category_lookup(
+    let mut patch = match build_preview_patch_from_payload_with_category_lookup(
         runtime.connection(),
         user_id,
         preview.id,
@@ -48,11 +52,32 @@ pub async fn import_preview_update_runtime_handler(
         Ok(patch) => patch,
         Err(response) => return route_response(response),
     };
+    if let Some(expected_row_version) = expected_row_version {
+        patch = patch.with_expected_row_version(expected_row_version);
+    }
     let updated = match update_preview_bill(runtime.connection(), &session_id, user_id, &patch) {
         Ok(updated) => updated,
+        Err(bill_analyser_db::DbError::PreviewVersionConflict {
+            preview_id,
+            expected,
+            ..
+        }) => {
+            let latest_row = match get_preview_bill_by_id(
+                runtime.connection(),
+                preview_id,
+                user_id,
+            ) {
+                Ok(Some(row)) if row.session_id == session_id => row,
+                Ok(Some(_)) | Ok(None) => {
+                    return route_response(import_v2_error_response(404, "Preview bill not found"));
+                }
+                Err(error) => return route_response(db_error_response(error)),
+            };
+            return route_response(preview_row_version_conflict_response(expected, latest_row));
+        }
         Err(error) => return route_response(db_error_response(error)),
     };
-    if response_mode_is_preview_item(object) {
+    if expected_row_version.is_some() || response_mode_is_preview_item(object) {
         let preview_item = match get_preview_bill_by_id(runtime.connection(), preview_id, user_id) {
             Ok(Some(preview)) if preview.session_id == session_id => preview_row_to_value(preview),
             Ok(Some(_)) | Ok(None) => Value::Null,

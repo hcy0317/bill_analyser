@@ -74,3 +74,9 @@ export interface ImportPreviewPageData {
     page: number;
     page_size: number;
 }
+
+export interface ImportPreviewRowVersionConflict {
+    expected_row_version: number;
+    actual_row_version: number;
+    previewItem: ImportPreviewRecord;
+}

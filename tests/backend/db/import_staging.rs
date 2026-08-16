@@ -28,7 +28,7 @@ use bill_analyser_db::{
     stage_import_parser_templates, stage_import_parser_templates_with_sources,
     update_import_session_status, update_parser_template_status, update_preview_bill,
     update_preview_bills_batch, update_preview_recurring_match_decision, update_preview_selection,
-    update_session_preview_selection_by_query, ConfirmCommand, ImportDecisionGroupCommand,
+    update_session_preview_selection_by_query, ConfirmCommand, DbError, ImportDecisionGroupCommand,
     ImportDecisionGroupCommandResult, ImportDecisionGroupDraft, ImportDecisionGroupMemberDraft,
     ImportDecisionGroupMutation, ImportDecisionPreviewVersion, ImportHistoryMaterializationDraft,
     ImportHistoryRewriteAcknowledgement, ImportHistoryRewriteAcknowledgementOperation,
@@ -2622,6 +2622,72 @@ async fn real_postgres_preview_multi_patch_rolls_back_when_second_patch_fails(
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn real_postgres_preview_row_version_cas_rejects_stale_updates_without_writes(
+) -> Result<(), Box<dyn Error>> {
+    let test_db = strict_isolated_postgres_database("preview_row_version_cas").await?;
+    let pool = &test_db.pool;
+    let user_id = insert_user(pool, "preview-row-version-cas").await?;
+    let scoped_user_id = UserId::new(user_id as u64).expect("positive user id");
+    let session_id = "preview-row-version-cas-session";
+    create_import_session(
+        pool,
+        &ImportSessionDraft {
+            session_id: session_id.to_string(),
+            user_id: scoped_user_id,
+            file_count: 1,
+        },
+    )?;
+    let preview_id = insert_preview_bill(
+        pool,
+        session_id,
+        scoped_user_id,
+        &preview_draft("2026-08-16 08:00:00", "支出", -100, None, None, None, true),
+    )?;
+
+    let first_patch = ImportPreviewPatch::new(preview_id)
+        .with_expected_row_version(1)
+        .with_change(
+            ImportPreviewPatchField::Description,
+            ImportPreviewPatchValue::Text("first writer".to_string()),
+        );
+    assert!(update_preview_bill(
+        pool,
+        session_id,
+        scoped_user_id,
+        &first_patch
+    )?);
+    let after_first = get_preview_bill_by_id(pool, preview_id, scoped_user_id)?
+        .expect("preview after first CAS write");
+    assert_eq!(after_first.version, 2);
+    assert_eq!(after_first.preview_description, "first writer");
+
+    let stale_patch = ImportPreviewPatch::new(preview_id)
+        .with_expected_row_version(1)
+        .with_change(
+            ImportPreviewPatchField::Description,
+            ImportPreviewPatchValue::Text("stale writer".to_string()),
+        );
+    let error = update_preview_bill(pool, session_id, scoped_user_id, &stale_patch)
+        .expect_err("stale preview row version must conflict");
+    assert!(matches!(
+        error,
+        DbError::PreviewVersionConflict {
+            preview_id: conflict_id,
+            expected: 1,
+            actual: 2,
+        } if conflict_id == preview_id
+    ));
+
+    let after_conflict = get_preview_bill_by_id(pool, preview_id, scoped_user_id)?
+        .expect("preview after stale CAS conflict");
+    assert_eq!(after_conflict.version, 2);
+    assert_eq!(after_conflict.preview_description, "first writer");
+
+    test_db.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn real_postgres_confirmed_session_rejects_every_public_preview_mutation_without_writes(
 ) -> Result<(), Box<dyn Error>> {
     let test_db = strict_isolated_postgres_database("preview_terminal_mutation_guards").await?;
@@ -3414,6 +3480,7 @@ async fn real_postgres_confirm_failure_stage_matrix_restores_full_state_and_retr
             ConfirmFailureStage::Patch => {
                 let patch = ImportPreviewPatch {
                     preview_id: valid_preview_id,
+                    expected_row_version: None,
                     changes: vec![(
                         ImportPreviewPatchField::Description,
                         ImportPreviewPatchValue::Text("patched before rollback".to_string()),

@@ -388,7 +388,7 @@ fn ocr_llm_vision_runtime_validates_url_and_caps_payload_before_network_post() {
 }
 
 #[test]
-fn preview_row_version_is_mapped_and_serialized_but_cas_remains_pending() {
+fn preview_row_version_is_mapped_serialized_and_enforced_by_single_update_cas() {
     let migration =
         source("src/backend/db/postgres/migrations/0001_initial_authoritative_schema.sql");
     let preview_table = section_between(
@@ -398,7 +398,7 @@ fn preview_row_version_is_mapped_and_serialized_but_cas_remains_pending() {
     );
     assert!(
         preview_table.contains("version BIGINT NOT NULL DEFAULT 1"),
-        "preview rows need a persistent monotonic version before CAS can be introduced"
+        "preview rows need a persistent monotonic version for CAS"
     );
 
     let patch_helpers = source("src/backend/db/import_staging/patch_payload_helpers.rs");
@@ -407,8 +407,8 @@ fn preview_row_version_is_mapped_and_serialized_but_cas_remains_pending() {
         "preview mutations must keep advancing the stored version"
     );
     assert!(
-        !patch_helpers.contains("AND version ="),
-        "C4 baseline: preview update SQL does not yet enforce row-version CAS"
+        patch_helpers.contains("AND version ="),
+        "single preview update SQL must enforce row-version CAS when a token is present"
     );
 
     let preview_types = source("src/backend/db/import_staging/types/preview_query.rs");
@@ -431,17 +431,21 @@ fn preview_row_version_is_mapped_and_serialized_but_cas_remains_pending() {
     let mutation_handler =
         source("src/backend/http/import_routes/stage_handlers/preview_mutation_handlers.rs");
     assert!(
-        !mutation_handler.contains("expected_row_version"),
-        "C4 baseline: the preview update route cannot accept a row CAS token"
+        mutation_handler.contains("expected_row_version_from_payload"),
+        "the preview update route must parse a row CAS token"
     );
-    let responses = source("src/backend/core/import_pipeline/responses.rs");
-    let conflict_response =
-        &responses[position(&responses, "pub fn preview_state_conflict_response")..];
+    let response_projection =
+        source("src/backend/http/import_routes/preview_mutation_helpers/response_projection.rs");
     assert!(
-        conflict_response
-            .contains("import_v2_error_response(409, \"Preview state changed, please refresh\")"),
-        "C4 baseline: a preview conflict is a simple error envelope without the latest row"
+        response_projection.contains("PREVIEW_ROW_VERSION_CONFLICT")
+            && response_projection.contains("expected_row_version")
+            && response_projection.contains("actual_row_version")
+            && response_projection.contains("previewItem"),
+        "row-version conflicts must return a typed 409 envelope with the latest row"
     );
+    let preview_service = source("src/web/src/lib/services/importPreview.ts");
+    assert!(preview_service.contains("expected_row_version: expectedRowVersion"));
+    assert!(preview_service.contains("getImportPreviewRowVersionConflict"));
 }
 
 #[test]

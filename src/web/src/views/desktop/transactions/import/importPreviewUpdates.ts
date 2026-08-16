@@ -1,4 +1,5 @@
 import type { ImportTransaction } from '@/models/imported_transaction.ts';
+import type { ImportPreviewRecord } from '@/models/import_preview.ts';
 
 import {
     type ImportPreviewResolvedCategoryPath
@@ -65,6 +66,36 @@ function parseOptionalInteger(
 export function getPreviewIdFromImportTransaction(transaction: ImportTransaction): number | null {
     const previewId = (transaction as ImportPreviewTransactionDraft)._previewId;
     return typeof previewId === 'number' && Number.isFinite(previewId) && previewId > 0 ? previewId : null;
+}
+
+export function getPreviewRowVersionFromImportTransaction(
+    transaction: ImportTransaction
+): number | undefined {
+    const rowVersion = (transaction as ImportPreviewTransactionDraft)._rowVersion;
+    return Number.isInteger(rowVersion) && Number(rowVersion) > 0 ? rowVersion : undefined;
+}
+
+export function syncPreviewRowVersionToImportTransaction(
+    transaction: ImportTransaction,
+    preview: ImportPreviewRecord
+): void {
+    if (Number.isInteger(preview.row_version) && Number(preview.row_version) > 0) {
+        (transaction as ImportPreviewTransactionDraft)._rowVersion = preview.row_version;
+    }
+}
+
+export function rebaseImportPreviewTextSyncConflict(
+    transaction: ImportTransaction,
+    preview: ImportPreviewRecord
+): void {
+    transaction.counterparty = preview.preview_counterparty || '';
+    transaction.paymentMethod = preview.preview_payment_method || '';
+    transaction.comment = preview.preview_description || '';
+    const selected = preview.preview_selected ?? preview.selected;
+    if (typeof selected === 'boolean') {
+        transaction.selected = selected;
+    }
+    syncPreviewRowVersionToImportTransaction(transaction, preview);
 }
 
 export function getPreviewUpdateId(update: Record<string, unknown>): number | null {

@@ -79,6 +79,7 @@ export interface TransferDecisionPreviewBaseline {
 
 export type ImportTransactionWithPreviewState = ImportTransaction & {
     _previewId?: number;
+    _rowVersion?: number;
     _previewDecisionBaseline?: TransferDecisionPreviewBaseline;
     _shouldClearTransferDecision?: boolean;
     _shouldClearLearningDecision?: boolean;

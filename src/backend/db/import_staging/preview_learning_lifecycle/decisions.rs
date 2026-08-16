@@ -238,9 +238,12 @@ pub fn apply_preview_learning_decision(
             payload.to_string(),
             amount_cents,
             direction,
-            preview_id,
-            session_db_id,
-            user_id,
+            PreviewRowUpdateTarget {
+                preview_id,
+                session_db_id,
+                user_id,
+                expected_row_version: None,
+            },
         );
         update.build().execute(&mut *transaction).await?;
 

@@ -6,7 +6,10 @@ import type { ImportPreviewResolvedCategoryPath } from '@/views/desktop/transact
 import {
     buildImportPreviewUpdateFromTransaction,
     getPreviewIdFromImportTransaction,
-    getPreviewUpdateId
+    getPreviewRowVersionFromImportTransaction,
+    getPreviewUpdateId,
+    rebaseImportPreviewTextSyncConflict,
+    syncPreviewRowVersionToImportTransaction
 } from '@/views/desktop/transactions/import/importPreviewUpdates.ts';
 import type { ImportPreviewTransactionDraft } from '@/views/desktop/transactions/import/importPreviewTransaction.ts';
 
@@ -156,5 +159,45 @@ describe('import preview update helper', () => {
         expect(getPreviewUpdateId({ id: -1 })).toBeNull();
         expect(getPreviewUpdateId({ id: 'abc' })).toBeNull();
         expect(getPreviewUpdateId({})).toBeNull();
+    });
+
+    test('extracts only positive integer row versions from preview drafts', () => {
+        const transaction = makeTransaction();
+        transaction._rowVersion = 9;
+        expect(getPreviewRowVersionFromImportTransaction(transaction)).toBe(9);
+
+        for (const invalidVersion of [0, -1, 1.5, Number.NaN]) {
+            transaction._rowVersion = invalidVersion;
+            expect(getPreviewRowVersionFromImportTransaction(transaction)).toBeUndefined();
+        }
+
+        syncPreviewRowVersionToImportTransaction(transaction, { id: 42, row_version: 12 });
+        expect(transaction._rowVersion).toBe(12);
+        syncPreviewRowVersionToImportTransaction(transaction, { id: 42, row_version: 0 });
+        expect(transaction._rowVersion).toBe(12);
+    });
+
+    test('rebases learning text sync fields from the authoritative conflict row', () => {
+        const transaction = makeTransaction({
+            counterparty: 'stale counterparty',
+            paymentMethod: 'stale payment',
+            comment: 'stale comment',
+            selected: true
+        });
+
+        rebaseImportPreviewTextSyncConflict(transaction, {
+            id: 42,
+            row_version: 9,
+            preview_counterparty: '',
+            preview_payment_method: 'server payment',
+            preview_description: 'server comment',
+            preview_selected: false
+        });
+
+        expect(transaction.counterparty).toBe('');
+        expect(transaction.paymentMethod).toBe('server payment');
+        expect(transaction.comment).toBe('server comment');
+        expect(transaction.selected).toBe(false);
+        expect(getPreviewRowVersionFromImportTransaction(transaction)).toBe(9);
     });
 });

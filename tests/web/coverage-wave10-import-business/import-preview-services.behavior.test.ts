@@ -122,7 +122,7 @@ describe('import preview lifecycle service behavior', () => {
 
         const explicit = await services.updateImportPreviewItem({
             sessionId: 'session/a',
-            payload: { id: 7, amountCents: 1234 }
+            payload: { id: 7, amountCents: 1234, expectedRowVersion: 8 }
         });
         const fallback = await services.updateImportPreviewItem({
             sessionId: 'session/b',
@@ -131,10 +131,38 @@ describe('import preview lifecycle service behavior', () => {
 
         expect(axiosPut).toHaveBeenNthCalledWith(1, 'bills/import/v2/preview/session%2Fa/update', {
             id: 7,
-            amountCents: 1234
+            amountCents: 1234,
+            expected_row_version: 8
         });
         expect(explicit.data.result).toEqual({ updated: false, previewItem: { id: 7, row_version: 9 } });
         expect(fallback.data.result).toEqual({ updated: true, previewItem: undefined });
+    });
+
+    test('recognizes only the typed preview row version conflict envelope', () => {
+        const previewItem = { id: 7, row_version: 9 };
+        expect(services.getImportPreviewRowVersionConflict({
+            response: {
+                status: 409,
+                data: {
+                    success: false,
+                    code: 'PREVIEW_ROW_VERSION_CONFLICT',
+                    error: 'Preview row changed, please refresh',
+                    data: {
+                        expected_row_version: 8,
+                        actual_row_version: 9,
+                        previewItem
+                    }
+                }
+            }
+        })).toEqual({
+            expected_row_version: 8,
+            actual_row_version: 9,
+            previewItem
+        });
+        expect(services.getImportPreviewRowVersionConflict({
+            response: { status: 409, data: { code: 'OTHER_CONFLICT' } }
+        })).toBeNull();
+        expect(services.getImportPreviewRowVersionConflict(new Error('network'))).toBeNull();
     });
 
     test('omits absent preview filters and includes false/zero values when they are explicit', async () => {

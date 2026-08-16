@@ -421,6 +421,7 @@ fn confirm_rollback_reason(error: &DbError) -> &'static str {
             "receipt_persistence"
         }
         DbError::InvalidOperation(_) => "invalid_operation",
+        DbError::PreviewVersionConflict { .. } => "preview_version_conflict",
         DbError::Postgres(_) => "postgres",
         DbError::Io(_) => "io",
         DbError::UnsafePath(_) => "unsafe_path",

@@ -12,8 +12,24 @@ pub enum DbError {
     UnsafePath(String),
     #[error("invalid database operation: {0}")]
     InvalidOperation(String),
+    #[error("preview row {preview_id} version conflict: expected {expected}, actual {actual}")]
+    PreviewVersionConflict {
+        preview_id: i64,
+        expected: i64,
+        actual: i64,
+    },
     #[error("postgres error: {0}")]
     Postgres(#[from] sqlx::Error),
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
+}
+
+impl DbError {
+    pub(crate) fn preview_version_conflict(preview_id: i64, expected: i64, actual: i64) -> Self {
+        Self::PreviewVersionConflict {
+            preview_id,
+            expected,
+            actual,
+        }
+    }
 }

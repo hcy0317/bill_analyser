@@ -50,12 +50,32 @@ async fn apply_preview_patch_on_tx(
         payload.to_string(),
         amount_cents,
         direction,
-        patch.preview_id,
-        session_db_id,
-        user_id,
+        PreviewRowUpdateTarget {
+            preview_id: patch.preview_id,
+            session_db_id,
+            user_id,
+            expected_row_version: patch.expected_row_version,
+        },
     );
     let changed = query.build().execute(&mut **tx).await?.rows_affected();
+    if changed == 0 {
+        if let Some(expected) = patch.expected_row_version {
+            return Err(DbError::preview_version_conflict(
+                patch.preview_id,
+                expected,
+                preview.version,
+            ));
+        }
+    }
     Ok(changed > 0)
+}
+
+#[derive(Debug, Clone, Copy)]
+struct PreviewRowUpdateTarget {
+    preview_id: i64,
+    session_db_id: i64,
+    user_id: i64,
+    expected_row_version: Option<i64>,
 }
 
 fn build_preview_row_update_query(
@@ -63,9 +83,7 @@ fn build_preview_row_update_query(
     preview_payload: String,
     amount_cents: i64,
     direction: &str,
-    preview_id: i64,
-    session_db_id: i64,
-    user_id: i64,
+    target: PreviewRowUpdateTarget,
 ) -> QueryBuilder<'static, Postgres> {
     let mut query = QueryBuilder::<Postgres>::new(
         r#"
@@ -106,11 +124,15 @@ fn build_preview_row_update_query(
         "#,
     );
     query.push(" WHERE id = ");
-    query.push_bind(preview_id);
+    query.push_bind(target.preview_id);
     query.push(" AND session_id = ");
-    query.push_bind(session_db_id);
+    query.push_bind(target.session_db_id);
     query.push(" AND user_id = ");
-    query.push_bind(user_id);
+    query.push_bind(target.user_id);
+    if let Some(expected_row_version) = target.expected_row_version {
+        query.push(" AND version = ");
+        query.push_bind(expected_row_version);
+    }
     query
 }
 

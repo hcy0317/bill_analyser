@@ -12,6 +12,7 @@ const mockLlmPreviewRecommendReject = jest.fn<(...args: Array<unknown>) => Promi
 const mockReviewImportTransferDecision = jest.fn<(...args: Array<unknown>) => Promise<any>>();
 const mockConfirmImportPreview = jest.fn<(...args: Array<unknown>) => Promise<any>>();
 const mockUpdateImportPreviewItem = jest.fn<(...args: Array<unknown>) => Promise<any>>();
+const mockGetImportPreviewRowVersionConflict = jest.fn<(...args: Array<unknown>) => any>();
 const mockLlmPreviewRecommend = jest.fn<(...args: Array<unknown>) => Promise<any>>();
 const mockAnalyzeLLMTransactions = jest.fn<(...args: Array<unknown>) => Promise<any>>();
 const mockGetImportLearningSuggestions = jest.fn<(...args: Array<unknown>) => Promise<any>>();
@@ -107,6 +108,7 @@ jest.mock('@/lib/services.ts', () => ({
         reviewImportTransferDecision: mockReviewImportTransferDecision,
         confirmImportPreview: mockConfirmImportPreview,
         updateImportPreviewItem: mockUpdateImportPreviewItem,
+        getImportPreviewRowVersionConflict: mockGetImportPreviewRowVersionConflict,
         llmPreviewRecommend: mockLlmPreviewRecommend,
         analyzeLLMTransactions: mockAnalyzeLLMTransactions,
         getImportLearningSuggestions: mockGetImportLearningSuggestions,
@@ -1590,6 +1592,24 @@ describe('P3 import lifecycle production SFC coverage', () => {
             failedTextSyncCandidate.comment = 'text sync must fail';
             mockUpdateImportPreviewItem.mockResolvedValueOnce({ data: { result: { updated: false } } });
             await bindings.reviewLearningSuggestion(failedTextSyncCandidate, 'accept');
+
+            const staleTextSyncCandidate = createRenderableDesktopTransaction(3, 43);
+            staleTextSyncCandidate._rowVersion = 2;
+            staleTextSyncCandidate.getLearningRecommendationInputFingerprint = () => staleTextSyncCandidate.comment;
+            bindings.syncLearningDecisionBaseline(staleTextSyncCandidate);
+            staleTextSyncCandidate.comment = 'stale local text';
+            mockUpdateImportPreviewItem.mockRejectedValueOnce(new Error('preview row conflict'));
+            mockGetImportPreviewRowVersionConflict.mockReturnValueOnce({
+                expected_row_version: 2,
+                actual_row_version: 4,
+                previewItem: previewFor(staleTextSyncCandidate, {
+                    row_version: 4,
+                    preview_description: 'latest server text'
+                })
+            });
+            await bindings.reviewLearningSuggestion(staleTextSyncCandidate, 'accept');
+            expect(staleTextSyncCandidate._rowVersion).toBe(4);
+            expect(staleTextSyncCandidate.comment).toBe('latest server text');
 
             const missingResultCandidate = createRenderableDesktopTransaction(3, 42);
             mockAcceptMatchingCandidate.mockResolvedValueOnce({ data: { result: undefined } });

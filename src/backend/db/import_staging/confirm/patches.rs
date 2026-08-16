@@ -332,9 +332,12 @@ async fn apply_confirm_preview_patch_on_tx(
         payload.to_string(),
         amount_cents,
         direction,
-        patch.preview_id,
-        session_db_id,
-        user_id,
+        PreviewRowUpdateTarget {
+            preview_id: patch.preview_id,
+            session_db_id,
+            user_id,
+            expected_row_version: None,
+        },
     );
     Ok(query
         .build()

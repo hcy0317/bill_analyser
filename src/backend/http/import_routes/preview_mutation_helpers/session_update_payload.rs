@@ -46,3 +46,15 @@ fn preview_id_from_payload(object: &Map<String, Value>) -> Result<i64, ImportV2R
         .filter(|value| *value > 0)
         .ok_or_else(|| import_v2_error_response(400, "Missing bill id"))
 }
+
+fn expected_row_version_from_payload(
+    object: &Map<String, Value>,
+) -> Result<Option<i64>, ImportV2RouteResponse> {
+    let Some(value) = first_value(object, &["expected_row_version", "expectedRowVersion"]) else {
+        return Ok(None);
+    };
+    value_to_i64(value)
+        .filter(|version| *version > 0)
+        .map(Some)
+        .ok_or_else(|| import_v2_error_response(400, "Invalid expected_row_version"))
+}

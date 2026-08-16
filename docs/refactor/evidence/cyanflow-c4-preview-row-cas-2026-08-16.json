@@ -1,0 +1,86 @@
+{
+  "schema_version": 1,
+  "date": "2026-08-16",
+  "cyanflow_slice": "C4 preview row CAS",
+  "status": "local_full_audit_passed",
+  "production_behavior_changed": true,
+  "breaking_change": false,
+  "contracts": {
+    "route": "PUT /api/bills/import/v2/preview/:session/update",
+    "expected_row_version_optional": true,
+    "expected_row_version_must_be_positive_integer": true,
+    "legacy_without_token_last_write_wins": true,
+    "repository_row_cas_enforced_when_token_present": true,
+    "success_returns_complete_latest_row": true,
+    "conflict_http_status": 409,
+    "conflict_code": "PREVIEW_ROW_VERSION_CONFLICT",
+    "conflict_returns_user_session_scoped_latest_row": true,
+    "stale_update_has_no_write_effect": true,
+    "schema_changed": false,
+    "money_contract_changed": false
+  },
+  "scope": {
+    "single_preview_update": "cas_enabled",
+    "reclassify": "unchanged",
+    "selection": "unchanged",
+    "decision_group": "unchanged",
+    "confirm": "unchanged",
+    "internal_repository_writers": "explicit_expected_row_version_none"
+  },
+  "frontend": {
+    "draft_token": "_rowVersion",
+    "wire_field": "expected_row_version",
+    "typed_conflict_parser": true,
+    "conflict_rebase_fields": [
+      "counterparty",
+      "paymentMethod",
+      "comment",
+      "selected",
+      "_rowVersion"
+    ]
+  },
+  "focused_verification": {
+    "real_postgres_cas": {
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0
+    },
+    "rust_http_runtime_contract": "passed",
+    "rust_payload_parser": "passed",
+    "frontend_conflict_suites": {
+      "suites_passed": 3,
+      "tests_passed": 52
+    }
+  },
+  "full_audit": {
+    "status": "passed",
+    "real_postgres_fail_closed": true,
+    "cargo_test_workspace": "passed",
+    "cargo_clippy_workspace_all_targets": "passed",
+    "rust_full_runtime_coverage_percent": 65.10,
+    "rust_changed_executable_lines": 83,
+    "rust_changed_covered_lines": 81,
+    "rust_changed_executable_line_coverage_percent": 97.59,
+    "frontend_test_suites_passed": 308,
+    "frontend_tests_passed": 41471,
+    "frontend_total_line_coverage_percent": 94.22,
+    "frontend_changed_executable_lines": 36,
+    "frontend_changed_covered_lines": 34,
+    "frontend_changed_executable_line_coverage_percent": 94.44,
+    "frontend_lint_errors": 0,
+    "frontend_existing_warnings": 141,
+    "rust_only_source_tree_tracked_paths": 1975,
+    "frontend_structure_scanned_files": 616,
+    "frontend_large_file_allowlist_entries": 39
+  },
+  "audit_recovery": {
+    "clippy_too_many_arguments_fixed_with_typed_target": true,
+    "weak_record_api_growth_removed": true,
+    "stale_text_conflict_rebase_added": true,
+    "missing_lcov_record_fixed_with_executable_error_constructor": true
+  },
+  "delivery": {
+    "authority": "Gitea pull request and exact-head Actions run",
+    "dynamic_ids_embedded_in_repository": false
+  }
+}
