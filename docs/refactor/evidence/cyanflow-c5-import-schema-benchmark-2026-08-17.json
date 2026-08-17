@@ -1,0 +1,257 @@
+{
+  "schema_version": 1,
+  "date": "2026-08-17",
+  "cyanflow_slice": "C5 import schema expand-contract ADR",
+  "status": "decision_ready",
+  "source": {
+    "repository_head": "a3994963b400f125064dd11a51fbc9ee82c21b0c",
+    "captured_at": "2026-08-17T01:03:28.553859Z",
+    "postgres_version": "16.14",
+    "database": "local Docker development database",
+    "database_size_bytes": 1015667735,
+    "test_pollution_caveat": "Full workspace PostgreSQL tests create local sessions; counts are a timestamped engineering corpus, not a production usage estimate."
+  },
+  "table_inventory": {
+    "import_sessions": {
+      "rows": 1242,
+      "total_bytes": 647168,
+      "heap_bytes": 335872,
+      "index_bytes": 270336
+    },
+    "import_preview_rows": {
+      "rows": 237870,
+      "total_bytes": 492290048,
+      "heap_bytes": 405553152,
+      "index_bytes": 60973056
+    },
+    "import_decision_groups": {
+      "rows": 5043,
+      "total_bytes": 6275072,
+      "heap_bytes": 4898816,
+      "index_bytes": 1335296
+    },
+    "import_decision_group_members": {
+      "rows": 9098,
+      "total_bytes": 4046848,
+      "heap_bytes": 1777664,
+      "index_bytes": 2228224
+    },
+    "import_history_materializations": {
+      "rows": 105,
+      "total_bytes": 401408,
+      "heap_bytes": 139264,
+      "index_bytes": 49152
+    },
+    "import_confirm_operations": {
+      "rows": 973,
+      "total_bytes": 1196032,
+      "heap_bytes": 507904,
+      "index_bytes": 180224
+    },
+    "import_learning_lifecycle": {
+      "rows": 105,
+      "total_bytes": 221184,
+      "heap_bytes": 81920,
+      "index_bytes": 98304
+    }
+  },
+  "session_inventory": {
+    "active_definition": [
+      "created",
+      "parsing",
+      "preview",
+      "confirming"
+    ],
+    "active_sessions": 1234,
+    "contract_version_metadata_rows": 0,
+    "active_sessions_created_before_c4_telemetry": 1234,
+    "states": {
+      "parsing": {
+        "sessions": 1205,
+        "preview_rows": 1272,
+        "oldest_created_at": "2026-06-07T09:45:02.694720Z",
+        "longest_lifecycle_days": 70.64,
+        "older_than_30d": 265
+      },
+      "preview": {
+        "sessions": 29,
+        "preview_rows": 236598,
+        "oldest_created_at": "2026-06-02T17:14:15.102167Z",
+        "longest_lifecycle_days": 75.33,
+        "older_than_30d": 27
+      },
+      "confirmed": {
+        "sessions": 8,
+        "preview_rows": 0,
+        "oldest_created_at": "2026-08-12T17:14:38.339075Z",
+        "longest_lifecycle_days": 4.33
+      }
+    }
+  },
+  "observed_values": {
+    "import_sessions.status": {
+      "confirmed": 8,
+      "parsing": 1205,
+      "preview": 29
+    },
+    "import_sessions.import_mode": {
+      "preview": 1242
+    },
+    "import_preview_rows.operation_kind": {
+      "insert": 237870
+    },
+    "import_preview_rows.transaction_type": {
+      "expense": 683,
+      "income": 341,
+      "\u6295\u8d44": 1135,
+      "\u652f\u51fa": 173253,
+      "\u6536\u5165": 59722,
+      "\u8f6c\u8d26": 2736
+    },
+    "import_decision_groups.group_type_and_status": {
+      "duplicate/merged": 1584,
+      "historical_duplicate/pending": 105,
+      "same_batch_transfer/accepted": 1,
+      "same_batch_transfer/matched": 2553,
+      "same_batch_transfer/pending": 693,
+      "same_batch_transfer/rejected": 107
+    },
+    "import_confirm_operations.operation_kind_and_status": {
+      "decision_group/completed": 860,
+      "decision_group/failed": 113
+    },
+    "import_learning_lifecycle.recommendation_type_and_status": {
+      "classification/green": 1,
+      "\u652f\u51fa/green": 104
+    }
+  },
+  "invariant_inventory": {
+    "session_user_ownership_violations": {
+      "import_sources": 0,
+      "import_standard_rows": 0,
+      "import_preview_rows": 0,
+      "import_decision_groups": 0,
+      "import_history_materializations": 0,
+      "import_confirm_operations": 0
+    },
+    "empty_decision_members": 0,
+    "multi_reference_decision_members": 4816,
+    "partial_unique_duplicate_rows": 0,
+    "current_session_id_user_unique": false,
+    "current_composite_session_user_foreign_keys": 0,
+    "current_member_partial_unique_indexes": 0,
+    "current_preview_signal_projection_columns": 0,
+    "current_independent_receipt_table": false
+  },
+  "signal_corpus": {
+    "preview_rows": 237870,
+    "materialized_memberships": 237322,
+    "counts": {
+      "parser": 210717,
+      "platform_duplicate": 22590,
+      "transfer": 2680,
+      "history": 105,
+      "learning": 206,
+      "llm": 1024
+    },
+    "largest_session_id": 621,
+    "largest_session_rows": 13084
+  },
+  "benchmark_method": {
+    "transactional": true,
+    "persistent_changes": false,
+    "jit": false,
+    "warmup_iterations": 1,
+    "measured_iterations": 5,
+    "timing_source": "PostgreSQL clock_timestamp around executed statements",
+    "query_scope": "session 621 with 13084 preview rows",
+    "write_scope": "13084 rows into equivalent temporary targets",
+    "projection_source": "current import_preview_signal_flags JSON function for schema-cost comparison only",
+    "limitation": "Schema shape and database execution cost benchmark only; canonical Rust-vs-SQL semantic parity remains a cutover gate."
+  },
+  "benchmark_results": {
+    "metadata_ms": {
+      "json": {
+        "p50": 439.635,
+        "p95": 448.283
+      },
+      "boolean_minimal": {
+        "p50": 1.935,
+        "p95": 2.039
+      },
+      "membership": {
+        "p50": 2.267,
+        "p95": 3.192
+      }
+    },
+    "learning_page_ms": {
+      "json": {
+        "p50": 444.248,
+        "p95": 449.283
+      },
+      "boolean_minimal": {
+        "p50": 1.426,
+        "p95": 1.466
+      },
+      "membership": {
+        "p50": 0.030,
+        "p95": 0.031
+      }
+    },
+    "write_13084_rows_ms": {
+      "base": {
+        "p50": 19.762,
+        "p95": 20.507
+      },
+      "boolean_minimal": {
+        "p50": 19.518,
+        "p95": 20.274,
+        "p50_change_percent": -1.23
+      },
+      "boolean_six_partial_indexes": {
+        "p50": 31.316,
+        "p95": 32.987,
+        "p50_change_percent": 58.46
+      },
+      "membership_base_and_children": {
+        "p50": 46.969,
+        "p95": 52.624,
+        "p50_change_percent": 137.67
+      }
+    },
+    "storage_bytes": {
+      "base_equivalent_total": 62775296,
+      "base_equivalent_heap": 23871488,
+      "base_equivalent_indexes": 38871040,
+      "boolean_minimal_total": 64249856,
+      "boolean_minimal_heap": 25346048,
+      "boolean_minimal_indexes": 38871040,
+      "boolean_minimal_total_change_percent": 2.35,
+      "boolean_six_partial_indexes_total": 94453760,
+      "boolean_six_partial_indexes_index_bytes": 69074944,
+      "membership_table_total": 73662464,
+      "membership_table_indexes": 47964160
+    }
+  },
+  "restore_rehearsal": {
+    "dump_format": "pg_dump custom",
+    "dump_bytes": 60209715,
+    "dump_sha256": "388cca87e6f13c9a98f3801e39595365a15382086aaa7e558d8b8cf56060c785",
+    "isolated_database": "bill_analyser_c5_restore_20260817",
+    "restore_exit_code": 0,
+    "verified_migrations": 24,
+    "verified_sessions": 1242,
+    "verified_preview_rows": 237870,
+    "verified_decision_groups": 5043,
+    "verified_confirm_operations": 973,
+    "verified_signal_function": "import_preview_signal_flags(jsonb)",
+    "temporary_database_removed": true,
+    "temporary_dump_removed": true
+  },
+  "decision": {
+    "signal_projection": "six boolean columns without signal-specific indexes",
+    "membership_table": "rejected for fixed signal families",
+    "json_authority": "retained only as compatibility evidence during expand-contract",
+    "public_contract_v2": "blocked until legacy telemetry and active-session drain gates are satisfied"
+  }
+}

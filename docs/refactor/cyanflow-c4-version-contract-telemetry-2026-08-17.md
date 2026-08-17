@@ -2,7 +2,7 @@
 
 日期：2026-08-17
 
-状态：本地实现、focused TDD 与完整门禁完成；exact-head CI 待关闭
+状态：已由 PR #315 交付并合并；本地门禁与 exact-head CI 全部完成
 
 范围：导入竞争 mutation 与 confirm 的 version 合同可观测性；不改变 REST、CAS、兼容或持久化行为
 
@@ -49,6 +49,7 @@ C4 保留缺少 version 的 legacy 兼容分支，但此前该分支静默执行
 - `cargo fmt --all -- --check`、`cargo clippy --workspace --all-targets -- -D warnings` 与 Rust-only source tree gate 均通过。
 - 使用真实 PostgreSQL 执行 `cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 35`，全工作区行覆盖率 `65.95%`，数据库场景零 skip、零失败。
 - 基于 staged backend diff 的改动行覆盖率为 `92.73%`，满足严格大于 `90%` 的门禁。
-- exact-head CI 在 PR 阶段关闭，未成功前不得合并。
+- exact-head Gitea Actions run `16140` 对提交 `850b7bf63bf904514280db9e4cc64ccc4e57e503` 执行；backend `19093`、frontend `19094`、governance `19095`、E2E `19096` 全部成功。
+- PR #315 以 squash 合并为 `a3994963b400f125064dd11a51fbc9ee82c21b0c`，来源分支已删除。
 
 完成上述完整门禁后，C4 满足“当前 web 发送 version、409 可重基、legacy 缺 version 显式可观测”的退出条件；强制 version 必填仍是另行批准的 breaking change，不属于 C4 退出要求。
