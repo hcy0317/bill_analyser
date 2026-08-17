@@ -1,3 +1,5 @@
+import type { ImportPreviewRecord } from './import_preview.ts';
+
 export type BillMatchingCandidateKind =
     'transfer'
     | 'investment'
@@ -65,6 +67,110 @@ export interface BillMatchingFeedbackEvent {
 export interface BillMatchingFeedbackResponse {
     billId: number;
     events: BillMatchingFeedbackEvent[];
+}
+
+export interface MatchingCandidateActionPairSummary {
+    id: number;
+    pairType: string;
+    source: string;
+    leftBillId: number;
+    rightBillId: number;
+    otherBillId?: number;
+}
+
+export interface MatchingCandidateActionResponse {
+    candidateId: string;
+    action: string;
+    previewId?: number;
+    sessionId?: string;
+    recurringId?: number;
+    keptBillId?: number;
+    mergedBillId?: number;
+    reviewStatus?: string;
+    effect?: string;
+    suppressed?: boolean;
+    previewItem?: ImportPreviewRecord;
+    preview?: ImportPreviewRecord[];
+    projection?: unknown;
+    pair?: MatchingCandidateActionPairSummary;
+    bill?: BillMatchingCandidateBillSummary;
+}
+
+export interface MatchingSessionCandidateDetails {
+    candidate_id?: string;
+    candidate_type?: string;
+    status?: string;
+    existing_bill_id?: number | null;
+    group_id?: number | null;
+    signal_label?: string;
+    source_chain?: unknown[];
+    id?: number | null;
+    name?: string;
+    candidate_count?: number;
+    match_score?: number;
+    match_reasons?: string;
+    matched_date?: string;
+    rule_id?: number | null;
+    score?: number;
+    level?: string;
+    reason?: string;
+    recommended_type?: string;
+    summary?: string;
+    review_status?: string;
+    reviewed_type?: string;
+    suppressed?: boolean;
+    source?: string;
+    mode?: string;
+    auto_apply?: boolean;
+    model_version?: string;
+    recommendation_key?: string;
+    lifecycle_status?: string;
+    signal_state?: string;
+    accepted_count?: number;
+    rejected_count?: number;
+    auto_applied_count?: number;
+}
+
+export interface MatchingSessionCandidateContext {
+    dedup: {
+        type: string;
+        source_ids: unknown[];
+    };
+    parser: {
+        id: string;
+        tags: unknown[];
+    };
+    annotation: {
+        is_manually_annotated: boolean;
+    };
+}
+
+export interface MatchingSessionCandidateItem {
+    candidate_id: string;
+    kind: string;
+    session_id: string;
+    preview_id: number;
+    score: number;
+    level: string;
+    reason: string;
+    status: string;
+    details: MatchingSessionCandidateDetails;
+    preview: Partial<ImportPreviewRecord>;
+    context: MatchingSessionCandidateContext;
+}
+
+export interface MatchingSessionCandidateCounts {
+    [kind: string]: number;
+}
+
+export interface MatchingSessionCandidatesResponse {
+    session_id: string;
+    summary: {
+        preview_count: number;
+        candidate_count: number;
+        counts_by_kind: MatchingSessionCandidateCounts;
+    };
+    candidates: MatchingSessionCandidateItem[];
 }
 
 export interface BillMatchingViewState {
@@ -388,6 +494,11 @@ export interface ReconcileHistoryBillResult {
 export interface ReconcileHistoryResponse {
     summary: ReconcileHistorySummary;
     results: ReconcileHistoryBillResult[];
+}
+
+export interface ReconcileHistoryRequest {
+    billIds: number[];
+    families?: string[];
 }
 
 export function normalizeMatchingPairsResponse(

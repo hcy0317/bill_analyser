@@ -149,7 +149,7 @@ import type { Router } from 'framework7/types';
 import { useI18n } from '@/locales/helpers.ts';
 import { hideLoading, showLoading, useI18nUIComponents } from '@/lib/ui/mobile.ts';
 import services from '@/lib/services.ts';
-import type { ImportPreviewPatchPayload } from '@/models/import_preview.ts';
+import type { ImportPreviewCandidateActionPayload, ImportPreviewPatchPayload } from '@/models/import_preview.ts';
 import {
     type ImportPreviewRecord
 } from '@/views/desktop/transactions/import/importPreview.ts';
@@ -413,7 +413,7 @@ async function reviewTransfer(row: MobileImportPreviewRow, decision: ImportPrevi
 async function reviewLearning(row: MobileImportPreviewRow, decision: ImportPreviewSignalDecision['decision']): Promise<void> {
     row.busy = true;
     const candidateId = `preview:${row.id}:learning`;
-    const payload = {
+    const payload: ImportPreviewCandidateActionPayload = {
         expectedState: withImportPreviewRowVersion(
             { sessionId },
             row.record.row_version

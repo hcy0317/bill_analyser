@@ -68,6 +68,49 @@ export interface ImportPreviewRecord {
     selected?: boolean;
 }
 
+export type ImportPreviewDecisionName = 'accept' | 'reject' | 'clear';
+
+export interface ImportPreviewExpectedState {
+    sessionId: string;
+    rowVersion?: number;
+    reviewStatus?: string;
+    previewType?: string;
+    categoryId?: number | null;
+    recurringId?: number | null;
+    sourceAccountId?: number | null;
+    destinationAccountId?: number | null;
+    matchingFeedback?: ImportPreviewMatchingPayload;
+}
+
+export interface ImportPreviewCandidateActionPayload {
+    expectedState?: ImportPreviewExpectedState;
+    responseMode?: 'preview-item';
+    modelVersion?: string;
+    ruleId?: number;
+}
+
+export interface ImportTransferDecisionPayload {
+    expectedState: ImportPreviewExpectedState;
+    responseMode: 'preview-item';
+}
+
+export interface ImportPreviewDecisionResponse {
+    previewId?: number;
+    preview_id?: number;
+    sessionId?: string;
+    session_id?: string;
+    decision?: ImportPreviewDecisionName;
+    effect?: string;
+    groupId?: number;
+    groupVersion?: number;
+    removed?: number[];
+    upserted?: number[];
+    removedPreviewIds?: number[];
+    upsertedPreviewItems?: ImportPreviewRecord[];
+    previewItem?: ImportPreviewRecord;
+    preview?: ImportPreviewRecord[];
+}
+
 export interface ImportPreviewPatchPayload {
     [field: string]: unknown;
     id?: number;

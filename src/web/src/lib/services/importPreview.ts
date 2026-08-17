@@ -19,10 +19,14 @@ import type {
     ImportTempFilePreviewRequest
 } from '@/models/import_config.ts';
 import type {
+    ImportPreviewCandidateActionPayload,
+    ImportPreviewDecisionName,
+    ImportPreviewDecisionResponse,
     ImportPreviewPageData,
     ImportPreviewPatchPayload,
     ImportPreviewRecord,
     ImportPreviewRowVersionConflict,
+    ImportTransferDecisionPayload,
 } from '@/models/import_preview.ts';
 import type {
     ImportLearningActionPayload,
@@ -35,7 +39,10 @@ import type {
     BillMatchingCandidatesResponse,
     BillMatchingFeedbackResponse,
     BillMatchingPairSummary,
+    MatchingCandidateActionResponse,
     MatchingPairsResponse,
+    MatchingSessionCandidatesResponse,
+    ReconcileHistoryRequest,
     ReconcileHistoryResponse
 } from '@/models/bill_matching.ts';
 
@@ -48,31 +55,6 @@ import {
 import importPreviewSelectionServices from './importPreviewSelection.ts';
 import importPreviewRecurringServices from './importPreviewRecurring.ts';
 import importSessionServices from './importSession.ts';
-
-type MatchingCandidateActionName = 'accept' | 'reject' | 'clear';
-
-interface MatchingCandidateActionResponse {
-    candidateId: string;
-    action: string;
-    previewId?: number;
-    sessionId?: string;
-    recurringId?: number;
-    keptBillId?: number;
-    mergedBillId?: number;
-    reviewStatus?: string;
-    effect?: string;
-    suppressed?: boolean;
-    previewItem?: ImportPreviewRecord;
-    preview?: ImportPreviewRecord[];
-    pair?: Record<string, unknown>;
-    bill?: Record<string, unknown>;
-}
-
-interface MatchingSessionCandidatesResponse {
-    session_id?: string;
-    summary?: Record<string, unknown>;
-    candidates?: Array<Record<string, unknown>>;
-}
 
 interface MatchingPairOperationResponse {
     pair?: BillMatchingPairSummary;
@@ -154,24 +136,13 @@ function getImportPreviewRowVersionConflict(
     };
 }
 
-interface ImportPreviewDecisionResponse {
-    previewId?: number;
-    preview_id?: number;
-    sessionId?: string;
-    session_id?: string;
-    decision?: string;
-    effect?: string;
-    previewItem?: ImportPreviewRecord;
-    preview?: ImportPreviewRecord[];
-}
-
 /**
  * 中文说明：统一提交匹配候选 accept/reject/clear 动作，并保持返回值仍映射成旧 ApiResponse.result 形态。
  */
 function postMatchingCandidateAction(
-    action: MatchingCandidateActionName,
+    action: ImportPreviewDecisionName,
     candidateId: string,
-    payload?: Record<string, unknown>
+    payload?: ImportPreviewCandidateActionPayload
 ): ApiResponsePromise<MatchingCandidateActionResponse> {
     return axios.post<ApiDataResponse<MatchingCandidateActionResponse>>(
         `matching/candidates/${encodeURIComponent(candidateId)}/${action}`,
@@ -342,8 +313,8 @@ const importPreviewServices = {
         payload
     }: {
         previewId: number,
-        decision: 'accept' | 'reject' | 'clear',
-        payload?: Record<string, unknown>
+        decision: ImportPreviewDecisionName,
+        payload: ImportTransferDecisionPayload
     }): ApiResponsePromise<ImportPreviewDecisionResponse> => {
         return axios.post<ApiDataResponse<ImportPreviewDecisionResponse>>(`bills/import/v2/preview-item/${encodeURIComponent(String(previewId))}/transfer-decision`, {
             decision,
@@ -387,7 +358,7 @@ const importPreviewServices = {
         payload
     }: {
         candidateId: string,
-        payload?: Record<string, unknown>
+        payload?: ImportPreviewCandidateActionPayload
     }): ApiResponsePromise<MatchingCandidateActionResponse> => {
         return postMatchingCandidateAction('accept', candidateId, payload);
     },
@@ -396,7 +367,7 @@ const importPreviewServices = {
         payload
     }: {
         candidateId: string,
-        payload?: Record<string, unknown>
+        payload?: ImportPreviewCandidateActionPayload
     }): ApiResponsePromise<MatchingCandidateActionResponse> => {
         return postMatchingCandidateAction('reject', candidateId, payload);
     },
@@ -405,7 +376,7 @@ const importPreviewServices = {
         payload
     }: {
         candidateId: string,
-        payload?: Record<string, unknown>
+        payload?: ImportPreviewCandidateActionPayload
     }): ApiResponsePromise<MatchingCandidateActionResponse> => {
         return postMatchingCandidateAction('clear', candidateId, payload);
     },
@@ -440,11 +411,8 @@ const importPreviewServices = {
     reconcileMatchingHistory: ({
         billIds,
         families
-    }: {
-        billIds: number[],
-        families?: string[]
-    }): ApiResponsePromise<ReconcileHistoryResponse> => {
-        const body: Record<string, unknown> = { billIds };
+    }: ReconcileHistoryRequest): ApiResponsePromise<ReconcileHistoryResponse> => {
+        const body: ReconcileHistoryRequest = { billIds };
         if (families && families.length > 0) {
             body['families'] = families;
         }

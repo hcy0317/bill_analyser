@@ -1,6 +1,9 @@
 import axios from 'axios';
 
-import type { ImportPreviewRecord } from '@/models/import_preview.ts';
+import type {
+    ImportPreviewExpectedState,
+    ImportPreviewRecord
+} from '@/models/import_preview.ts';
 
 import {
     buildApiResponse,
@@ -16,6 +19,12 @@ interface ImportPreviewRecurringDecisionResponse {
     preview?: ImportPreviewRecord[];
 }
 
+interface ImportPreviewRecurringDecisionPayload {
+    expectedState: ImportPreviewExpectedState;
+    responseMode: 'preview-item';
+    recurringId?: number;
+}
+
 const importPreviewRecurringServices = {
     updateImportPreviewRecurringMatch: ({
         previewId,
@@ -24,10 +33,10 @@ const importPreviewRecurringServices = {
     }: {
         previewId: number;
         recurringId: number | null;
-        expectedState: Record<string, string | number | null>;
+        expectedState: ImportPreviewExpectedState;
     }): ApiResponsePromise<ImportPreviewRecurringDecisionResponse> => {
         const endpoint = `bills/import/v2/preview-item/${encodeURIComponent(previewId)}/recurring-match`;
-        const payload: Record<string, unknown> = {
+        const payload: ImportPreviewRecurringDecisionPayload = {
             expectedState,
             responseMode: 'preview-item'
         };

@@ -1,4 +1,5 @@
 import { TransactionType } from '@/core/transaction.ts';
+import type { ImportPreviewExpectedState } from '@/models/import_preview.ts';
 
 function getImportCheckPreviewTypeText(type: number): string {
     if (type === TransactionType.Income) {
@@ -40,7 +41,7 @@ type ImportCheckLearningDecisionExpectedStateInput = ImportCheckDecisionExpected
     rowVersion?: number;
 };
 
-export function withImportPreviewRowVersion<T extends Record<string, string | number | null>>(
+export function withImportPreviewRowVersion<T extends ImportPreviewExpectedState>(
     expectedState: T,
     rowVersion: unknown
 ): T & { rowVersion?: number } {
@@ -52,7 +53,7 @@ export function withImportPreviewRowVersion<T extends Record<string, string | nu
 
 export function buildImportCheckDecisionExpectedState(
     input: ImportCheckDecisionExpectedStateInput
-): Record<string, string | number | null> {
+): ImportPreviewExpectedState {
     return {
         sessionId: input.sessionId,
         reviewStatus: input.reviewStatus,
@@ -66,7 +67,7 @@ export function buildImportCheckDecisionExpectedState(
 
 export function buildImportCheckLearningDecisionExpectedState(
     input: ImportCheckLearningDecisionExpectedStateInput
-): Record<string, string | number | null> {
+): ImportPreviewExpectedState {
     return withImportPreviewRowVersion(
         buildImportCheckDecisionExpectedState(input),
         input.rowVersion

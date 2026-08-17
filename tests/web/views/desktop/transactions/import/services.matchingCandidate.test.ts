@@ -33,6 +33,7 @@ jest.mock('@/lib/logger.ts', () => ({
 }));
 
 import services from '@/lib/services.ts';
+import type { ImportPreviewCandidateActionPayload } from '@/models/import_preview.ts';
 
 describe('import learning matching candidate service contract', () => {
     beforeEach(() => {
@@ -59,7 +60,7 @@ describe('import learning matching candidate service contract', () => {
                 }
             }
         });
-        const payload = {
+        const payload: ImportPreviewCandidateActionPayload = {
             expectedState: {
                 sessionId: 'session-1',
                 reviewStatus: 'pending'

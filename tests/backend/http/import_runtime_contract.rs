@@ -507,12 +507,8 @@ fn weak_import_api_adapters_are_discoverable_and_cannot_grow() {
         .filter(|token| *token == "any")
         .count();
     assert!(
-        weak_record_count > 0,
-        "focused weak-contract discovery must hit"
-    );
-    assert!(
-        weak_record_count <= 10,
-        "typed import work must ratchet Record<string, unknown> down from the C4 baseline"
+        weak_record_count == 0,
+        "migrated import service adapters must not use Record<string, unknown>"
     );
     assert!(
         any_count == 0,
@@ -536,6 +532,34 @@ fn weak_import_api_adapters_are_discoverable_and_cannot_grow() {
     let import_dialog_types =
         source("src/web/src/views/desktop/transactions/import/import-dialog/types.ts");
     assert!(import_dialog_types.contains("@/models/import_config.ts"));
+
+    let matching_model = source("src/web/src/models/bill_matching.ts");
+    for contract in [
+        "export interface MatchingCandidateActionResponse",
+        "export interface MatchingSessionCandidatesResponse",
+        "export interface MatchingSessionCandidateItem",
+        "export interface ReconcileHistoryRequest",
+    ] {
+        assert!(
+            matching_model.contains(contract),
+            "neutral bill matching model must own {contract}"
+        );
+    }
+    let check_data_types =
+        source("src/web/src/views/desktop/transactions/import/checkDataTypes.ts");
+    assert!(check_data_types.contains("@/models/bill_matching.ts"));
+    let import_preview_model = source("src/web/src/models/import_preview.ts");
+    for contract in [
+        "export interface ImportPreviewExpectedState",
+        "export interface ImportPreviewCandidateActionPayload",
+        "export interface ImportTransferDecisionPayload",
+        "export interface ImportPreviewDecisionResponse",
+    ] {
+        assert!(
+            import_preview_model.contains(contract),
+            "neutral import preview model must own {contract}"
+        );
+    }
 
     let dialog = source("src/web/src/views/desktop/transactions/import/ImportDialog.vue");
     let check_data = source(

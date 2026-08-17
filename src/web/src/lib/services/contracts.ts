@@ -1,3 +1,5 @@
+import type { ImportPreviewExpectedState } from '@/models/import_preview.ts';
+
 export interface AnalyzeLLMTransactionsRequest {
     billIds?: number[];
     limit?: number;
@@ -141,7 +143,7 @@ export interface LLMPreviewRecommendAcceptRequest {
     sessionId: string;
     previewId: number;
     suggestion: Record<string, any>;
-    expectedState?: Record<string, string | number | null>;
+    expectedState?: ImportPreviewExpectedState;
 }
 
 export interface LLMPreviewRecommendRejectRequest extends LLMPreviewRecommendAcceptRequest {

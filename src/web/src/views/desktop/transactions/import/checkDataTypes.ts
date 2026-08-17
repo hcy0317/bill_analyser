@@ -1,4 +1,5 @@
 import type { TransactionType } from '@/core/transaction.ts';
+import type { MatchingSessionCandidateItem as NeutralMatchingSessionCandidateItem } from '@/models/bill_matching.ts';
 import type { ImportTransaction } from '@/models/imported_transaction.ts';
 
 import type { ImportCheckAnnotationFilterValue } from './checkDataAnnotation.ts';
@@ -37,29 +38,7 @@ export interface RecurringCandidateItem {
     matchedOccurrenceDate?: string;
 }
 
-export interface MatchingSessionCandidateItem {
-    candidate_id?: string;
-    details?: {
-        rule_id?: number | null;
-        score?: number;
-        level?: string;
-        reason?: string;
-        recommended_type?: string;
-        summary?: string;
-        review_status?: string;
-        suppressed?: boolean;
-        source?: string;
-        mode?: string;
-        auto_apply?: boolean;
-        model_version?: string;
-        recommendation_key?: string;
-        lifecycle_status?: string;
-        signal_state?: string;
-        accepted_count?: number;
-        rejected_count?: number;
-        auto_applied_count?: number;
-    };
-}
+export type MatchingSessionCandidateItem = NeutralMatchingSessionCandidateItem;
 
 export interface TransferDecisionPreviewBaseline {
     type: number;

@@ -506,26 +506,33 @@ describe('import preview lifecycle service behavior', () => {
         }, expect.objectContaining({ timeout: 1_800_000 }));
     });
 
-    test('submits transfer review decisions with encoded ids and optional decision details', async () => {
+    test('submits transfer review decisions with encoded ids and typed expected state', async () => {
         await services.reviewImportTransferDecision({
             previewId: 12,
             decision: 'accept',
             payload: {
-                destination_account_id: 9,
                 expectedState: { sessionId: 'session-12', rowVersion: 4 },
                 responseMode: 'preview-item'
             }
         });
-        await services.reviewImportTransferDecision({ previewId: 13, decision: 'clear' });
+        await services.reviewImportTransferDecision({
+            previewId: 13,
+            decision: 'clear',
+            payload: {
+                expectedState: { sessionId: 'session-13', rowVersion: 5 },
+                responseMode: 'preview-item'
+            }
+        });
 
         expect(axiosPost).toHaveBeenNthCalledWith(1, 'bills/import/v2/preview-item/12/transfer-decision', {
             decision: 'accept',
-            destination_account_id: 9,
             expectedState: { sessionId: 'session-12', rowVersion: 4 },
             responseMode: 'preview-item'
         });
         expect(axiosPost).toHaveBeenNthCalledWith(2, 'bills/import/v2/preview-item/13/transfer-decision', {
-            decision: 'clear'
+            decision: 'clear',
+            expectedState: { sessionId: 'session-13', rowVersion: 5 },
+            responseMode: 'preview-item'
         });
     });
 
@@ -558,7 +565,13 @@ describe('matching and import configuration service behavior', () => {
         await services.getMatchingSessionCandidates({ sessionId: 'session/a b' });
         await services.getMatchingBillCandidates({ billId: 'bill/7' });
         await services.getMatchingBillFeedback({ billId: 'bill/7' });
-        await services.acceptMatchingCandidate({ candidateId: 'candidate/a', payload: { merge: true } });
+        await services.acceptMatchingCandidate({
+            candidateId: 'candidate/a',
+            payload: {
+                expectedState: { sessionId: 'session-1', rowVersion: 3 },
+                responseMode: 'preview-item'
+            }
+        });
         await services.rejectMatchingCandidate({ candidateId: 'candidate/b' });
         await services.clearMatchingCandidate({ candidateId: 'candidate/c' });
         await services.deleteMatchingPair({ pairId: 'pair/9' });
@@ -566,7 +579,10 @@ describe('matching and import configuration service behavior', () => {
         expect(axiosGet).toHaveBeenNthCalledWith(1, 'matching/candidates?sessionId=session%2Fa%20b');
         expect(axiosGet).toHaveBeenNthCalledWith(2, 'matching/candidates?billId=bill%2F7');
         expect(axiosGet).toHaveBeenNthCalledWith(3, 'matching/bills/bill%2F7/feedback');
-        expect(axiosPost).toHaveBeenNthCalledWith(1, 'matching/candidates/candidate%2Fa/accept', { merge: true });
+        expect(axiosPost).toHaveBeenNthCalledWith(1, 'matching/candidates/candidate%2Fa/accept', {
+            expectedState: { sessionId: 'session-1', rowVersion: 3 },
+            responseMode: 'preview-item'
+        });
         expect(axiosPost).toHaveBeenNthCalledWith(2, 'matching/candidates/candidate%2Fb/reject', {});
         expect(axiosPost).toHaveBeenNthCalledWith(3, 'matching/candidates/candidate%2Fc/clear', {});
         expect(axiosDelete).toHaveBeenCalledWith('matching/pairs/pair%2F9');

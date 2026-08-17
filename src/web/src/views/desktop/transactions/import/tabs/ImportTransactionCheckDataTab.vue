@@ -824,6 +824,10 @@ import BatchReplaceDialog from '../dialogs/BatchReplaceDialog.vue';
 import BatchReplaceAllTypesDialog from '../dialogs/BatchReplaceAllTypesDialog.vue';
 import BatchCreateDialog from '../dialogs/BatchCreateDialog.vue';
 import ImportLearningSuggestionDialog from '../dialogs/ImportLearningSuggestionDialog.vue';
+import type {
+    ImportPreviewCandidateActionPayload,
+    ImportPreviewExpectedState
+} from '@/models/import_preview.ts';
 import {
     type ImportPreviewLLMMatchingPayload,
     resolveImportPreviewCategoryPath,
@@ -2195,7 +2199,7 @@ function isLLMDecisionBusy(item: ImportTransaction): boolean {
     return previewId !== null && hasDecisionLoadingId(llmDecisionLoadingIds.value, previewId);
 }
 
-function getTransferDecisionExpectedState(item: ImportTransaction): Record<string, string | number | null> {
+function getTransferDecisionExpectedState(item: ImportTransaction): ImportPreviewExpectedState {
     return withImportPreviewRowVersion(
         buildImportCheckDecisionExpectedState({
             sessionId: props.sessionId || '',
@@ -2210,7 +2214,7 @@ function getTransferDecisionExpectedState(item: ImportTransaction): Record<strin
     );
 }
 
-function getLearningDecisionExpectedState(item: ImportTransaction): Record<string, string | number | null> {
+function getLearningDecisionExpectedState(item: ImportTransaction): ImportPreviewExpectedState {
     return buildImportCheckLearningDecisionExpectedState({
         sessionId: props.sessionId || '',
         rowVersion: getPreviewRowVersionFromImportTransaction(item),
@@ -2223,7 +2227,7 @@ function getLearningDecisionExpectedState(item: ImportTransaction): Record<strin
     });
 }
 
-function getLLMDecisionExpectedState(item: ImportTransaction): Record<string, string | number | null> {
+function getLLMDecisionExpectedState(item: ImportTransaction): ImportPreviewExpectedState {
     return withImportPreviewRowVersion(
         buildImportCheckDecisionExpectedState({
             sessionId: props.sessionId || '',
@@ -2570,7 +2574,7 @@ async function reviewLearningSuggestion(
         }
     }
 
-    const payload: Record<string, unknown> = {
+    const payload: ImportPreviewCandidateActionPayload = {
         expectedState: getLearningDecisionExpectedState(item),
         responseMode: 'preview-item'
     };
@@ -2716,9 +2720,7 @@ async function fetchMatchingSessionCandidate(candidateId: string): Promise<Match
     const response = await services.getMatchingSessionCandidates({
         sessionId: props.sessionId
     });
-    const candidates = Array.isArray(response.data?.result?.candidates)
-        ? response.data.result.candidates as MatchingSessionCandidateItem[]
-        : [];
+    const candidates = response.data?.result?.candidates || [];
     return candidates.find(candidate => candidate.candidate_id === candidateId) || null;
 }
 
