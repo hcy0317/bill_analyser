@@ -19,6 +19,12 @@ pub async fn import_confirm_runtime_handler(
         Ok(command) => command,
         Err(response) => return route_response(response),
     };
+    observe_import_version_contract(
+        "confirm",
+        "session_version",
+        1,
+        usize::from(command.expected_session_version.is_some()),
+    );
     let runtime = match open_runtime(&state) {
         Ok(runtime) => runtime,
         Err(response) => return route_response(response),

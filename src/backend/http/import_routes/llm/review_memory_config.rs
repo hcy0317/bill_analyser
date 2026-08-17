@@ -89,6 +89,17 @@ async fn llm_preview_recommend_review_response(
     } else {
         None
     };
+    observe_import_version_contract(
+        "llm_preview_decision",
+        "row_version",
+        1,
+        usize::from(
+            expected_state
+                .as_ref()
+                .and_then(|state| state.expected_row_version)
+                .is_some(),
+        ),
+    );
     let user_correction =
         first_value(object, &["user_correction", "userCorrection"]).and_then(Value::as_object);
     let user_correction_category = user_correction.and_then(|object| {

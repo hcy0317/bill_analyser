@@ -46,6 +46,12 @@ pub async fn import_preview_update_runtime_handler(
         Ok(expected_row_version) => expected_row_version,
         Err(response) => return route_response(response),
     };
+    observe_import_version_contract(
+        "preview_update",
+        "row_version",
+        1,
+        usize::from(expected_row_version.is_some()),
+    );
     let preview = match get_preview_bill_by_id(runtime.connection(), preview_id, user_id) {
         Ok(Some(preview)) if preview.session_id == session_id => preview,
         Ok(Some(_)) | Ok(None) => {
@@ -133,6 +139,8 @@ pub async fn import_reclassify_runtime_handler(
         Ok(update_items) => update_items,
         Err(response) => return route_response(response),
     };
+    let required_row_versions = update_items.len();
+    let mut present_row_versions = 0usize;
     let mut patches = Vec::with_capacity(update_items.len());
     let mut target_ids = Vec::with_capacity(update_items.len());
     for item in update_items {
@@ -144,6 +152,7 @@ pub async fn import_reclassify_runtime_handler(
             Ok(expected_row_version) => expected_row_version,
             Err(response) => return route_response(response),
         };
+        present_row_versions += usize::from(expected_row_version.is_some());
         match get_preview_bill_by_id(runtime.connection(), preview_id, user_id) {
             Ok(Some(preview)) if preview.session_id == session_id => {}
             Ok(Some(_)) | Ok(None) => {
@@ -166,6 +175,12 @@ pub async fn import_reclassify_runtime_handler(
         ));
         target_ids.push(preview_id);
     }
+    observe_import_version_contract(
+        "preview_reclassify",
+        "row_version",
+        required_row_versions,
+        present_row_versions,
+    );
     target_ids.sort_unstable();
     target_ids.dedup();
     let updated = match update_preview_bills_batch(

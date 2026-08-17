@@ -117,6 +117,7 @@ pub async fn import_preview_selection_runtime_handler(
     if update_by_preview_id.len() > 500 {
         return route_response(preview_selection_too_large_response());
     }
+    let required_row_versions = update_by_preview_id.len();
     let preview_ids = update_by_preview_id.keys().copied().collect::<Vec<_>>();
     let scoped_previews = match get_preview_by_ids(
         runtime.connection(),
@@ -150,11 +151,13 @@ pub async fn import_preview_selection_runtime_handler(
         Err(error) => return route_response(db_error_response(error)),
     };
     let mut patches = Vec::with_capacity(update_by_preview_id.len());
+    let mut present_row_versions = 0usize;
     for (preview_id, item) in update_by_preview_id {
         let expected_row_version = match expected_row_version_from_payload(item) {
             Ok(expected_row_version) => expected_row_version,
             Err(response) => return route_response(response),
         };
+        present_row_versions += usize::from(expected_row_version.is_some());
         let patch = match build_preview_patch_from_payload_with_loaded_categories(
             preview_id,
             item,
@@ -168,6 +171,12 @@ pub async fn import_preview_selection_runtime_handler(
             expected_row_version,
         ));
     }
+    observe_import_version_contract(
+        "preview_selection_patch",
+        "row_version",
+        required_row_versions,
+        present_row_versions,
+    );
     let filters = import_preview_query_filters_from_payload(object);
     let selection_request = ImportPreviewPageRequest {
         page: 1,

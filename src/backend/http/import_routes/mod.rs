@@ -132,6 +132,8 @@ use std::{
     },
     time::{Duration as StdDuration, Instant, SystemTime, UNIX_EPOCH},
 };
+
+use crate::import_contract_telemetry::observe_import_version_contract;
 use tokio::time::sleep;
 use url::Url;
 

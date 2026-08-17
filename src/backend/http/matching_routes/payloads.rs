@@ -73,6 +73,18 @@ fn matching_candidate_action_response(
         Ok(value) => value,
         Err(response) => return *response,
     };
+    observe_import_version_contract(
+        "matching_candidate_decision",
+        "row_version",
+        1,
+        usize::from(
+            request
+                .expected_state
+                .as_ref()
+                .and_then(|state| state.expected_row_version)
+                .is_some(),
+        ),
+    );
     let runtime = match open_postgres_runtime(state, "matching") {
         Ok(value) => value,
         Err(response) => return *response,

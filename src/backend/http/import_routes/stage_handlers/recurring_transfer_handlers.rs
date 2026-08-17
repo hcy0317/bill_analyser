@@ -101,6 +101,12 @@ pub async fn preview_recurring_match_put_runtime_handler(
         Ok(expected_state) => expected_state,
         Err(response) => return route_response(response),
     };
+    observe_import_version_contract(
+        "recurring_decision",
+        "row_version",
+        1,
+        usize::from(expected_state.expected_row_version.is_some()),
+    );
     let target_candidate = recurring_candidate_from_payload(object, recurring_id);
     let update = ImportPreviewRecurringMatchUpdate {
         recurring_id: Some(recurring_id),
@@ -157,6 +163,12 @@ pub async fn preview_recurring_match_delete_runtime_handler(
         Ok(expected_state) => expected_state,
         Err(response) => return route_response(response),
     };
+    observe_import_version_contract(
+        "recurring_decision",
+        "row_version",
+        1,
+        usize::from(expected_state.expected_row_version.is_some()),
+    );
     let update = ImportPreviewRecurringMatchUpdate {
         recurring_id: None,
         candidate_count: 0,
@@ -347,6 +359,12 @@ pub async fn preview_transfer_decision_runtime_handler(
         Err(response) => return route_response(response),
     };
     let expected_row_version = expected_state.expected_row_version;
+    observe_import_version_contract(
+        "transfer_decision",
+        "row_version",
+        1,
+        usize::from(expected_row_version.is_some()),
+    );
     let mut runtime = match open_runtime(&state) {
         Ok(runtime) => runtime,
         Err(response) => return route_response(response),

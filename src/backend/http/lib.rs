@@ -18,6 +18,7 @@ pub mod config_database;
 pub mod config_weaviate;
 pub mod database_runtime;
 pub mod import_config_handlers;
+mod import_contract_telemetry;
 pub mod import_routes;
 pub mod logging;
 pub mod matching_routes;

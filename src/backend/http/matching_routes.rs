@@ -35,7 +35,10 @@ use chrono::NaiveDate;
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
 
-use crate::{auth::resolve_user_id_from_headers, config::HttpShellConfig, state::HttpAppState};
+use crate::{
+    auth::resolve_user_id_from_headers, config::HttpShellConfig,
+    import_contract_telemetry::observe_import_version_contract, state::HttpAppState,
+};
 
 const TRUSTED_USER_SECRET_HEADER: &str = "x-bill-analyser-trusted-user-secret";
 

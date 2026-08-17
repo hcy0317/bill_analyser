@@ -68,6 +68,40 @@ fn position(haystack: &str, needle: &str) -> usize {
         .unwrap_or_else(|| panic!("missing marker {needle}"))
 }
 
+#[test]
+fn import_mutations_expose_structured_version_contract_telemetry() {
+    let telemetry = source("src/backend/http/import_contract_telemetry.rs");
+    assert!(telemetry.contains("domain = \"import_contract\""));
+    assert!(telemetry.contains("legacy_missing_version"));
+    assert!(telemetry.contains("versioned"));
+    assert!(telemetry.contains("required_tokens"));
+    assert!(telemetry.contains("present_tokens"));
+    assert!(!telemetry.contains("session_id"));
+    assert!(!telemetry.contains("user_id"));
+
+    let import_routes = source("src/backend/http/import_routes/mod.rs");
+    for operation in [
+        "preview_update",
+        "preview_reclassify",
+        "preview_selection_patch",
+        "recurring_decision",
+        "transfer_decision",
+        "llm_preview_decision",
+        "confirm",
+    ] {
+        assert!(
+            import_routes.contains(&format!(
+                "observe_import_version_contract(\n        \"{operation}\""
+            )),
+            "missing version-contract telemetry for {operation}"
+        );
+    }
+
+    let matching_routes = source("src/backend/http/matching_routes.rs");
+    assert!(matching_routes
+        .contains("observe_import_version_contract(\n        \"matching_candidate_decision\""));
+}
+
 #[tokio::test]
 async fn assembled_import_router_exposes_import_preview_config_and_learning_update_routes() {
     let state = HttpAppState::new(
