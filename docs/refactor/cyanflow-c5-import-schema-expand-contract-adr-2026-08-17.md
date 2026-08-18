@@ -134,8 +134,9 @@ flowchart LR
     G --> H["Target query and write performance audit"]
     H --> K["Read cutover"]
     K --> L["NOT NULL contract and legacy SQL read deletion"]
-    B --> I["Receipt table expand and backfill"]
-    I --> J["C6 typed receipt read cutover"]
+    B --> I["C6a receipt table expand"]
+    I --> M["Single-writer dual projection, backfill and shadow"]
+    M --> J["C6 typed receipt read cutover"]
 ```
 
 每一阶段都必须单独记录 writer、read、watermark、parity、rollback/forward-fix 和删除门禁：
@@ -148,7 +149,7 @@ flowchart LR
 6. C5f-b：目标数据库全量回填后，在一个只读可重复读快照中证明全量 row parity 与 API/filter/count/facet query parity 均为 0；该报告不测性能。
 7. C5f-c：在一个可重复读事务中对同一代表性 corpus 交替测量真实 legacy/typed 查询路径，并在只写临时表且最终回滚的条件下比较基础/typed 写入；query/write p95 退化均不得超过 15%，该报告不替代 C5f-b parity。
 8. C5g：只有同一目标状态对应的 C5f-b 与 C5f-c 报告分别合格后才可设计 read cutover；设置 NOT NULL、关闭旧 SQL read 仍须至少三次真实 64 文件验收。
-9. receipt 路径先 expand/backfill/shadow，再由 C6 切 typed read；同一真实 confirm 永不双执行。
+9. receipt 路径由 C6a 只做空表 expand；后续只允许现有 confirm transaction writer 同事务双投影，再完成 backfill/shadow，最后由 C6 切 typed read；同一真实 confirm 永不双执行。
 
 C5d 已按上述边界实现：所有新行和 evidence mutation 行由 `PreviewStateKernel` 写 version `1`；selection-only 写入不升级旧行。批量 writer 在一个事务内保留最多 64 个确定性样本并只执行一次 legacy SQL 比较，避免按 500 行 chunk 重复增加数据库往返；真实 PostgreSQL 验收另行逐行核对完整测试批次，不以运行时采样代替放行 parity。生产 read、历史 backfill、NOT NULL 和 API 合同保持不变。
 
@@ -160,6 +161,8 @@ C5f-b 已实现独立 Rust 运维命令 `bill_import_signal_read_audit`。它不
 
 C5f-c 已实现独立 Rust 运维命令 `bill_import_signal_performance_audit`。它要求完整 migration ledger 与全部 preview row 已物化为 version `1`，复用 C5f-b 最多 7 个 session、每个 7 个 query case 的 corpus，并直接调用实际 legacy/typed page 与 metadata 查询。默认 1 次预热、5 次有效测量，按迭代交替执行顺序，关闭 JIT，以 Rust `Instant` 和连续 p50/p95 报告查询退化；1 ms 以内差异视为计时噪声，query/write 阈值上限均为 15%。写入测量从最大 corpus session 按 id 取最多 50,000 行，只写事务级 source/base/typed 临时表并显式回滚，报告来源总行数、实测行数与截断状态。`performance_gate_passed` 只代表性能报告自身，不能授权 read cutover；本切片没有连接真实目标库，也没有改变 production read、API、session、mutation、confirm、schema 或索引。
 
+C6a 已通过 migration 27 增加空的 `import_confirm_receipts` typed table。数据库保证每 session 一行、session/user 复合归属、版本/fingerprint/status/envelope 合同和 terminal row 不可更新；普通 session cleanup 保留 receipt，账户级用户数据清理通过 session cascade 删除。该阶段没有 backfill，也没有修改现有 metadata writer、replay reader、HTTP DTO 或 confirm effect；下一阶段只能改造现有唯一 confirm transaction writer 做同事务双投影。
+
 ## 8. Restore 与放行门禁
 
 已完成一次 `pg_dump -Fc` 恢复演练：dump 为 60,209,715 bytes，SHA-256 `388cca87e6f13c9a98f3801e39595365a15382086aaa7e558d8b8cf56060c785`；恢复到独立 `bill_analyser_c5_restore_20260817` 后验证 24 条迁移、1,242 sessions、237,870 preview rows、5,043 decision groups、973 operations 和 signal 函数可读。临时数据库与 dump 已删除。
@@ -167,6 +170,8 @@ C5f-c 已实现独立 Rust 运维命令 `bill_import_signal_performance_audit`�
 C5b 另以最终 migration 内容重新生成 60,209,715-byte restore point（SHA-256 `c890db568ceee62f25baf21aa98b7fe3f2e3a05502f2636d59c397f95d242e09`），在独立恢复库应用 migration 25：15 个约束全部 validated、3 个 member partial unique index 存在、ownership mismatch 为 0，4,816 条合法 multi-ref member 保留。该临时数据库、dump 与 SQL 副本均已删除。
 
 C5c 使用 60,223,766-byte custom dump（SHA-256 `9b3fb40d46bf1551d631b12fb560f7e0a012e3bd620019909db592910b289a2b`）恢复 237,910 条 preview rows，并在独立恢复库应用 migration 26。迁移耗时 `489.302 ms`；六个 signal 列全部保持 `NULL`，全部行保持 `signal_projection_version=0`，未知版本为 0，signal 专用索引为 0，legacy signal SQL 函数仍可读；恢复前后表与索引尺寸未增长。独立恢复库、dump、容器内 SQL 副本和 coverage 临时库均已删除，原开发数据库未应用 migration 26。
+
+C6a 使用 60,223,766-byte custom dump（SHA-256 `27779d877672390c89d8a0f035a05eca22773ceb081da55fc7ae9c592c7f3ca5`）恢复 migration 25 的真实开发 corpus，再按 forward 顺序应用 migration 26 与 27。migration 27 耗时 `257.483 ms`；237,910 条 preview rows、9 个 metadata receipts 及 preview 表/索引尺寸保持不变，新表 0 行、9 列、8 个 validated constraints、1 个 immutable trigger。当前 binary 对该历史开发库仍会按既有事实报告 `VersionMismatch(25)`，因此演练没有改写原库或恢复库 ledger，而是显式记录后用最终 SQL 做 forward 验证；fresh database 的完整迁移链已独立验证为 27/27。恢复库、dump、临时 SQL 副本与 coverage 库均已删除。
 
 每个实际 migration PR 仍须在执行前重新生成对应 head/data snapshot 的 restore point；本次演练证明流程可用，不替代未来数据快照。
 

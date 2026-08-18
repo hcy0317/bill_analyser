@@ -1,0 +1,157 @@
+{
+  "schema_version": 1,
+  "date": "2026-08-18",
+  "cyanflow_slice": "C6a typed confirm receipt schema expand",
+  "status": "local_audit_green",
+  "source": {
+    "base_head": "b1904186d02fc218cdddd82de002a8b2122c1a2e",
+    "implementation_commit": "94fd0f5df96dafe3c8229e307cd06de6269be35d",
+    "postgres_version": "16.14",
+    "database_policy": "restore rehearsal and full coverage used isolated databases; the long-lived development database ledger was not modified"
+  },
+  "migration": {
+    "version": 27,
+    "file": "src/backend/db/postgres/migrations/0027_import_confirm_receipts.sql",
+    "sha256": "61ae6c0016ec62c5a37bb97d1c151294293779ab016f73d96d02cd19d5144e96",
+    "table": "import_confirm_receipts",
+    "column_count": 9,
+    "validated_constraint_count": 8,
+    "immutable_trigger_count": 1,
+    "contains_updated_at": false,
+    "contains_backfill": false,
+    "changes_active_reader": false,
+    "changes_active_writer": false,
+    "contract": {
+      "one_receipt_per_session": true,
+      "composite_session_user_ownership": true,
+      "receipt_schema_version": 1,
+      "response_schema_version": 1,
+      "fingerprint": "64 lowercase hexadecimal characters",
+      "request_session_version_positive": true,
+      "http_status": 200,
+      "success_envelope_type": "object",
+      "updates_rejected_sqlstate": "55000",
+      "duplicate_rejected_sqlstate": "23505",
+      "cross_user_rejected_sqlstate": "23503",
+      "invalid_contract_rejected_sqlstate": "23514"
+    }
+  },
+  "transition_ledger": {
+    "writer": "unchanged metadata writer in the existing confirm transaction",
+    "read": "unchanged metadata terminal replay reader",
+    "backfill": "none; typed table remains empty",
+    "rollback": "stop the new binary and forward-fix; do not drop the expanded table",
+    "next": "single-writer transactional dual projection, then backfill and shadow before typed read cutover"
+  },
+  "tdd": {
+    "red": [
+      {
+        "test": "postgres::tests::postgres_manifest_points_to_existing_initial_schema",
+        "failure": "manifest length was 26, expected 27"
+      },
+      {
+        "test": "confirm_receipt_schema_is_typed_owned_unique_and_cleanup_safe",
+        "failure": "target columns were empty before migration 27"
+      },
+      {
+        "test": "confirm_receipt_schema_rejects_unknown_or_malformed_contracts",
+        "failure": "relation import_confirm_receipts did not exist, SQLSTATE 42P01"
+      }
+    ],
+    "review_fix": {
+      "standards_axis": "passed",
+      "spec_axis_initial_finding": "account-level data clear lacked an explicit real PostgreSQL cascade assertion",
+      "resolution": "clear_postgres_user_data now proves the receipt is deleted through the session cascade",
+      "final_status": "passed"
+    },
+    "green": {
+      "receipt_schema_postgres": {
+        "passed": 2,
+        "failed": 0,
+        "skipped": 0
+      },
+      "import_staging_postgres": {
+        "passed": 36,
+        "failed": 0,
+        "skipped": 0
+      },
+      "signal_performance_audit_postgres": {
+        "passed": 4,
+        "failed": 0,
+        "skipped": 0
+      },
+      "signal_target_audit_postgres": {
+        "passed": 3,
+        "failed": 0,
+        "skipped": 0
+      },
+      "embedded_migration_contract": {
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0
+      },
+      "bill_analyser_db_all_targets": "pass",
+      "workspace_format": "pass",
+      "workspace_clippy_all_targets": "pass",
+      "rust_backend_structure_gate": "pass",
+      "rust_only_source_tree_gate": "pass",
+      "git_diff_check": "pass",
+      "workspace_line_coverage": {
+        "lines_found": 75144,
+        "lines_hit": 50332,
+        "percent": 66.9807
+      },
+      "changed_line_coverage": {
+        "executable_lines": 21,
+        "covered_lines": 20,
+        "percent": 95.24
+      },
+      "fresh_database_migration_ledger": {
+        "max_version": 27,
+        "migration_count": 27
+      }
+    }
+  },
+  "restore_point": {
+    "format": "pg_dump custom",
+    "bytes": 60223766,
+    "sha256": "27779d877672390c89d8a0f035a05eca22773ceb081da55fc7ae9c592c7f3ca5",
+    "dump_ms": 8000.093,
+    "restore_ms": 38750.122,
+    "migration_26_ms": 532.379,
+    "migration_27_ms": 257.483,
+    "removed_after_rehearsal": true
+  },
+  "rehearsal_corpus": {
+    "source_migration_count": 25,
+    "sessions": 1275,
+    "preview_rows": 237910,
+    "decision_groups": 5051,
+    "confirm_operations": 982,
+    "metadata_receipts": 9,
+    "preview_relation_bytes_before": 470540288,
+    "preview_index_bytes_before": 47276032,
+    "preview_relation_bytes_after": 470540288,
+    "preview_index_bytes_after": 47276032,
+    "rows_with_null_signals_and_version_zero": 237910,
+    "typed_receipt_rows": 0,
+    "typed_receipt_relation_bytes": 16384,
+    "typed_receipt_columns": 9,
+    "typed_receipt_validated_constraints": 8,
+    "typed_receipt_immutable_triggers": 1
+  },
+  "known_environment_gate": {
+    "error": "VersionMismatch(25)",
+    "applied_checksum_sha384": "340e09a58c1d97ec467e9bd0fd3932f6d3823e1c35f70185a793b4613feb0b2f0ee29af11bbe4398323cfc52cc8718c3",
+    "current_file_sha384": "e3dfe05ac0ef836ec1de7ea30df01404f2af85d1b76e0bc244bd90f0f929a4d34cb0e285aa59951e184059c1a87aedd1",
+    "source_database_ledger_modified": false,
+    "restore_database_ledger_modified": false,
+    "fresh_database_chain_verified": true
+  },
+  "cleanup": {
+    "restore_database_removed": true,
+    "coverage_database_removed": true,
+    "container_dump_removed": true,
+    "container_sql_copies_removed": true
+  }
+}

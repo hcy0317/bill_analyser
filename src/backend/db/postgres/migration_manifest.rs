@@ -216,6 +216,8 @@ const IMPORT_SCHEMA_INVARIANT_INDEXES: &[&str] = &[
 ];
 const IMPORT_SIGNAL_COLUMN_EXPAND_TABLES: &[&str] = &["import_preview_rows"];
 const IMPORT_SIGNAL_COLUMN_EXPAND_INDEXES: &[&str] = &[];
+const IMPORT_CONFIRM_RECEIPT_EXPAND_TABLES: &[&str] = &["import_confirm_receipts"];
+const IMPORT_CONFIRM_RECEIPT_EXPAND_INDEXES: &[&str] = &[];
 
 const POSTGRES_MIGRATION_MANIFEST: &[PostgresMigrationDescriptor] = &[
     PostgresMigrationDescriptor {
@@ -399,5 +401,12 @@ const POSTGRES_MIGRATION_MANIFEST: &[PostgresMigrationDescriptor] = &[
         description: "add nullable import signal projection columns without changing the active reader or writer",
         required_tables: IMPORT_SIGNAL_COLUMN_EXPAND_TABLES,
         required_indexes: IMPORT_SIGNAL_COLUMN_EXPAND_INDEXES,
+    },
+    PostgresMigrationDescriptor {
+        version: 27,
+        file_name: "0027_import_confirm_receipts.sql",
+        description: "add typed immutable import confirm receipt storage without changing the active reader or writer",
+        required_tables: IMPORT_CONFIRM_RECEIPT_EXPAND_TABLES,
+        required_indexes: IMPORT_CONFIRM_RECEIPT_EXPAND_INDEXES,
     },
 ];

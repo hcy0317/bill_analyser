@@ -446,6 +446,8 @@ server snapshot.issues + provisional delta -> visible issues / valid / actions
 - 固定工件：plan/write-set parity、真实 PostgreSQL concurrency/failure-injection、同/异 fingerprint replay/conflict、staging retry/cleanup、64-file browser SLA 和 receipt compatibility report。
 - Exit：任一步失败无部分 effect且 staging 可重试；成功后 receipt 先于 cleanup 持久化；同 fingerprint replay、异 fingerprint conflict；DB/core 的 HTTP response ownership 为 0；active legacy session 为 0 后删除旧 reader/oracle；连续三次真实 browser `<=60s` 且查询 p95/recognition quality 达标。任何 required PostgreSQL/Playwright case skip 或 executed=0 均失败。
 
+C6a 已完成独立 typed receipt 空表 expand：数据库拥有唯一性、复合归属、版本/fingerprint/envelope 与不可更新约束，但生产 writer/read 仍保持 metadata-only。该阶段不引入新 port 或第二 writer；C6b 只能从现有 confirm transaction seam 增加同事务双投影，并继续让 terminal metadata replay 优先，直到 backfill/shadow 与 typed read cutover 分别放行。
+
 ### C7：全域持续迁移
 
 Import pilot 完成后，按风险和 cross-layer debt 选择下一域，不允许宣布“项目架构重构完成”后停止：

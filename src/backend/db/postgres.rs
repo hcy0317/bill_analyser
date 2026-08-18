@@ -54,7 +54,7 @@ mod tests {
     #[test]
     fn postgres_manifest_points_to_existing_initial_schema() {
         let manifest = postgres_migration_manifest();
-        assert_eq!(manifest.len(), 26);
+        assert_eq!(manifest.len(), 27);
         assert_eq!(manifest[0].version, 1);
         assert_eq!(manifest[0].file_name, POSTGRES_INITIAL_SCHEMA_FILE);
         for (index, descriptor) in manifest.iter().enumerate() {
@@ -489,5 +489,32 @@ mod tests {
         assert!(!migration.contains("CREATE INDEX"));
         assert!(!migration.contains("UPDATE import_preview_rows"));
         assert!(!migration.contains("import_preview_signal_flags("));
+    }
+
+    #[test]
+    fn import_confirm_receipt_expand_migration_is_typed_immutable_and_runtime_neutral() {
+        let migration =
+            fs::read_to_string(postgres_migrations_dir().join("0027_import_confirm_receipts.sql"))
+                .unwrap();
+
+        assert!(migration.contains("CREATE TABLE IF NOT EXISTS import_confirm_receipts"));
+        for contract in [
+            "CONSTRAINT pk_import_confirm_receipts PRIMARY KEY (session_id)",
+            "CONSTRAINT fk_import_confirm_receipts_session_user",
+            "FOREIGN KEY (session_id, user_id)",
+            "REFERENCES import_sessions (id, user_id)",
+            "command_fingerprint ~ '^[0-9a-f]{64}$'",
+            "request_session_version > 0",
+            "jsonb_typeof(success_envelope) = 'object'",
+            "CREATE TRIGGER trg_import_confirm_receipts_immutable",
+        ] {
+            assert!(
+                migration.contains(contract),
+                "missing receipt contract {contract}"
+            );
+        }
+        assert!(!migration.contains("updated_at"));
+        assert!(!migration.contains("INSERT INTO import_confirm_receipts"));
+        assert!(!migration.contains("UPDATE import_sessions"));
     }
 }
