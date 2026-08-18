@@ -1,0 +1,143 @@
+{
+  "schema_version": 1,
+  "date": "2026-08-19",
+  "cyanflow_slice": "C6d confirm receipt read shadow audit",
+  "status": "local_audit_green",
+  "source": {
+    "base_head": "2bdfbb0d894640e3a3e3aff886b4eb901002a3f2",
+    "implementation_commit": "953144ed0434acd5fbd8370d4246e3339b8425a5",
+    "database_policy": "full coverage used a fresh isolated database; no production target corpus audit or long-lived development database mutation was executed"
+  },
+  "ownership": {
+    "production_writer": "confirm_import_command_in_transaction -> persist_confirm_receipt",
+    "operational_backfill_boundary": "backfill_import_confirm_receipt_batch",
+    "read_audit_boundary": "audit_import_confirm_receipt_target_snapshot",
+    "active_replay_reader": "metadata only",
+    "typed_replay_reader_enabled": false,
+    "business_confirm_double_execution": false,
+    "public_api_changed": false,
+    "schema_changed": false,
+    "writes_business_data": false,
+    "runs_migrations": false
+  },
+  "snapshot_contract": {
+    "transaction_isolation": "repeatable read",
+    "transaction_read_only": true,
+    "target_universe": "confirmed sessions containing metadata.confirm_receipt",
+    "ordering": "session_id ascending",
+    "default_batch_size": 1000,
+    "maximum_batch_size": 10000,
+    "checkpoint_or_resume": false,
+    "skip_locked_allowed": false,
+    "exact_migration_ledger_required": true,
+    "canonical_metadata_parser_reused": true,
+    "created_at_compared": false,
+    "drift_exit_code_nonzero": true
+  },
+  "parity_contract": {
+    "field_level_parity": [
+      "receipt_schema_version",
+      "command_fingerprint",
+      "request_session_version",
+      "response_schema_version",
+      "http_status",
+      "success_envelope"
+    ],
+    "reported_counts": [
+      "target_sessions",
+      "typed_receipts_total",
+      "materialized_target_sessions",
+      "missing_target_sessions",
+      "unexpected_typed_receipts",
+      "field_mismatches"
+    ],
+    "sensitive_receipt_values_reported": false,
+    "fingerprint_reported": false,
+    "success_envelope_reported": false,
+    "eligible_gate": "zero missing, zero unexpected typed and zero field mismatch"
+  },
+  "tdd": {
+    "red": [
+      "unresolved audit_import_confirm_receipt_target_snapshot",
+      "missing CARGO_BIN_EXE_bill_import_confirm_receipt_read_audit"
+    ],
+    "green": {
+      "read_audit_real_postgres": {
+        "passed": 5,
+        "failed": 0,
+        "skipped": 0
+      },
+      "cli_unit": {
+        "passed": 4,
+        "failed": 0
+      },
+      "backfill_real_postgres": {
+        "passed": 8,
+        "failed": 0,
+        "skipped": 0
+      },
+      "signal_target_audit_real_postgres": {
+        "passed": 3,
+        "failed": 0,
+        "skipped": 0
+      },
+      "signal_performance_audit_real_postgres": {
+        "passed": 4,
+        "failed": 0,
+        "skipped": 0
+      },
+      "workspace_format": "pass",
+      "workspace_clippy_all_targets": "pass",
+      "rust_backend_structure": {
+        "status": "pass",
+        "files_scanned": 615,
+        "baseline_entries": 3
+      },
+      "rust_only_source_tree": {
+        "status": "pass",
+        "tracked_paths": 2050
+      },
+      "git_diff_check": "pass",
+      "workspace_line_coverage": {
+        "lines_found": 80158,
+        "lines_hit": 53079,
+        "percent": 66.22
+      },
+      "changed_line_coverage": {
+        "executable_lines": 332,
+        "covered_lines": 316,
+        "percent": 95.18
+      },
+      "fresh_database_migration_ledger": {
+        "max_version": 27,
+        "migration_count": 27
+      }
+    }
+  },
+  "review": {
+    "base_ref": "2bdfbb0d894640e3a3e3aff886b4eb901002a3f2",
+    "standards_initial_findings": [
+      "generic migration ledger validation remained owned by signal_read_audit",
+      "the first read audit inferred migration count from contiguous versions"
+    ],
+    "resolution": "shared audit_support owns exact ledger and count helpers; signal audits and receipt audit reuse it and compare embedded manifest version/count directly",
+    "standards_axis_final": "passed",
+    "spec_axis_final": "passed",
+    "security_skilltree_selection": "skill_not_selected",
+    "security_fallback": "repository shared security-review checklist",
+    "parameterized_sql": true,
+    "database_url_redaction_tested": true,
+    "sensitive_report_fields_absent": true
+  },
+  "known_environment_gate": {
+    "long_lived_database_error": "VersionMismatch(25)",
+    "long_lived_database_ledger_modified": false,
+    "fresh_database_chain_verified": true
+  },
+  "cleanup": {
+    "coverage_database_removed": true,
+    "workspace_lcov_removed": true,
+    "preexisting_coverage_json_modified": false
+  },
+  "next": "C6e typed replay read cutover only after target backfill and a zero-drift C6d target report"
+}

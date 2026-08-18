@@ -29,7 +29,7 @@ pub async fn audit_import_preview_signal_performance(
         .bind(IMPORT_PREVIEW_SIGNAL_PERFORMANCE_LOCK_TIMEOUT_MS.to_string())
         .execute(&mut *tx)
         .await?;
-    let migration_ledger = validate_import_preview_signal_audit_migration_ledger(
+    let migration_ledger = validate_import_audit_migration_ledger(
         &mut tx,
         "import signal performance audit",
     )

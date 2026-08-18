@@ -13,7 +13,7 @@ pub struct ImportConfirmReceiptBackfillBatchReport {
     pub duration_ms: u64,
 }
 
-struct ImportConfirmReceiptBackfillRow {
+struct ImportConfirmReceiptProjectionRow {
     session_id: i64,
     user_id: i64,
     confirmed_at: DateTime<Utc>,
@@ -112,7 +112,7 @@ pub async fn backfill_import_confirm_receipt_batch(
 
     let mut batch = Vec::with_capacity(rows.len());
     for row in &rows {
-        batch.push(import_confirm_receipt_backfill_row(row)?);
+        batch.push(import_confirm_receipt_projection_row(row)?);
     }
     let mismatch_receipts = batch
         .iter()
@@ -178,7 +178,7 @@ pub async fn backfill_import_confirm_receipt_batch(
     }
     let persisted_mismatches = persisted_rows
         .iter()
-        .map(import_confirm_receipt_backfill_row)
+        .map(import_confirm_receipt_projection_row)
         .collect::<DbResult<Vec<_>>>()?
         .into_iter()
         .filter(|row| row.typed_receipt.as_ref() != Some(&row.metadata_receipt))
@@ -238,7 +238,7 @@ async fn validate_import_confirm_receipt_backfill_migration_ledger(
     Ok(())
 }
 
-fn import_confirm_receipt_backfill_row(row: &PgRow) -> DbResult<ImportConfirmReceiptBackfillRow> {
+fn import_confirm_receipt_projection_row(row: &PgRow) -> DbResult<ImportConfirmReceiptProjectionRow> {
     let metadata: Value = row.try_get("metadata")?;
     let metadata_receipt = stored_confirm_receipt(&metadata)?;
     let typed_receipt = row
@@ -254,7 +254,7 @@ fn import_confirm_receipt_backfill_row(row: &PgRow) -> DbResult<ImportConfirmRec
             })
         })
         .transpose()?;
-    Ok(ImportConfirmReceiptBackfillRow {
+    Ok(ImportConfirmReceiptProjectionRow {
         session_id: row.try_get("session_id")?,
         user_id: row.try_get("user_id")?,
         confirmed_at: row.try_get("confirmed_at")?,

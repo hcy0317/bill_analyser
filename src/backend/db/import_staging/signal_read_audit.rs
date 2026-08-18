@@ -85,38 +85,6 @@ struct ImportPreviewSignalAuditSession {
     families: [bool; 6],
 }
 
-struct ImportPreviewSignalAuditMigrationLedger {
-    expected_migration_version: i64,
-    actual_migration_version: i64,
-    migration_count: u64,
-}
-
-async fn validate_import_preview_signal_audit_migration_ledger(
-    connection: &mut sqlx::PgConnection,
-    audit_name: &str,
-) -> DbResult<ImportPreviewSignalAuditMigrationLedger> {
-    let expected_versions = crate::postgres_migration_manifest()
-        .iter()
-        .map(|migration| migration.version)
-        .collect::<Vec<_>>();
-    let actual_versions: Vec<i64> = sqlx::query_scalar(
-        "SELECT version FROM _sqlx_migrations WHERE success=true ORDER BY version",
-    )
-    .fetch_all(&mut *connection)
-    .await?;
-    if actual_versions != expected_versions {
-        return Err(DbError::InvalidOperation(format!(
-            "{audit_name} requires exact migration ledger {:?}; found {:?}",
-            expected_versions, actual_versions
-        )));
-    }
-    Ok(ImportPreviewSignalAuditMigrationLedger {
-        expected_migration_version: expected_versions.last().copied().unwrap_or_default(),
-        actual_migration_version: actual_versions.last().copied().unwrap_or_default(),
-        migration_count: u64::try_from(actual_versions.len()).unwrap_or(u64::MAX),
-    })
-}
-
 /// 在一个只读可重复读快照中完成目标库全量行 parity 与有界查询语义审计。
 pub async fn audit_import_preview_signal_target_snapshot(
     pool: &PostgresPool,
@@ -129,7 +97,7 @@ pub async fn audit_import_preview_signal_target_snapshot(
     sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
         .execute(&mut *tx)
         .await?;
-    let migration_ledger = validate_import_preview_signal_audit_migration_ledger(
+    let migration_ledger = validate_import_audit_migration_ledger(
         &mut tx,
         "import signal target audit",
     )
@@ -198,10 +166,14 @@ pub async fn audit_import_preview_signal_target_snapshot(
         let Some(next_after_row_id) = row.try_get::<Option<i64>, _>("next_after_row_id")? else {
             break;
         };
-        let observed = import_preview_signal_audit_count(&row, "observed_rows")?;
-        let unmaterialized =
-            import_preview_signal_audit_count(&row, "unmaterialized_rows")?;
-        let mismatches = import_preview_signal_audit_count(&row, "mismatch_rows")?;
+        let observed = import_audit_count(&row, "observed_rows", "import signal target audit")?;
+        let unmaterialized = import_audit_count(
+            &row,
+            "unmaterialized_rows",
+            "import signal target audit",
+        )?;
+        let mismatches =
+            import_audit_count(&row, "mismatch_rows", "import signal target audit")?;
         row_batches.push(ImportPreviewSignalTargetAuditBatchReport {
             start_after_row_id: after_row_id,
             next_after_row_id,
@@ -300,15 +272,6 @@ fn validate_import_preview_signal_target_audit_limits(
         )));
     }
     Ok(())
-}
-
-fn import_preview_signal_audit_count(row: &PgRow, column: &str) -> DbResult<u64> {
-    let value: i64 = row.try_get(column)?;
-    u64::try_from(value).map_err(|_| {
-        DbError::InvalidOperation(format!(
-            "invalid negative import signal target audit count {column}: {value}"
-        ))
-    })
 }
 
 async fn load_import_preview_signal_audit_sessions(
