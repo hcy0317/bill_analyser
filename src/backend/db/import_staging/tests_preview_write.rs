@@ -15,7 +15,7 @@ fn preview_bulk_insert_value_preserves_amount_and_category_identity() {
         ..ImportPreviewDraft::default()
     };
 
-    let value = preview_row_batch_value_from_draft(&draft);
+    let value = preview_row_batch_value_from_draft(&draft).expect("preview batch value");
     let payload: Value = serde_json::from_str(&value.preview_payload).expect("valid payload");
 
     assert_eq!(value.amount_cents, 1234);

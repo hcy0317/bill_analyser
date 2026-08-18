@@ -2,7 +2,7 @@
 
 日期：2026-08-18
 
-状态：本地实现、恢复演练与完整审计门禁完成；等待 exact-head CI
+状态：已由 Gitea PR #319 squash 合并到 `main`（`1843e9c006a0721a2c61ba17163af92686fc54dc`）；exact-head CI 全绿
 
 范围：为导入预览行扩展六个 nullable signal 投影列与行级投影版本；不启用新 writer、不回填、不切换读取、不增加 signal 专用索引，也不改变 API 或 confirm 合同
 

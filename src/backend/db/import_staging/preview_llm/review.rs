@@ -211,9 +211,11 @@ fn review_preview_llm_recommendation_with_expected_state(
             "expense"
         };
         let session_db_id: i64 = row.try_get("session_id")?;
+        let signal_projection = import_preview_signal_projection_from_payload(&payload)?;
         let mut update = build_preview_row_update_query(
             &preview,
             payload.to_string(),
+            signal_projection,
             amount_cents,
             direction,
             PreviewRowUpdateTarget {
@@ -226,6 +228,12 @@ fn review_preview_llm_recommendation_with_expected_state(
             },
         );
         update.build().execute(&mut *transaction).await?;
+        observe_import_preview_signal_projection_parity(
+            &mut transaction,
+            &[request.preview_id],
+            "llm_decision",
+        )
+        .await?;
         let event_id = insert_llm_review_event_in_transaction(
             &mut transaction,
             user_id,

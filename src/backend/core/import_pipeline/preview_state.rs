@@ -315,12 +315,18 @@ fn effective_identity(id: Option<i64>, valid: bool) -> Option<i64> {
 pub fn attach_import_preview_state_snapshot_to_canonical_row(
     preview_item: &mut Map<String, Value>,
 ) {
-    let identity = canonical_row_identity_input(preview_item);
-    let snapshot = derive_preview_state_from_legacy_row_with_identity(preview_item, identity);
+    let snapshot = derive_import_preview_state_snapshot_from_canonical_row(preview_item);
     preview_item.insert(
         "preview_state".to_string(),
         serde_json::to_value(snapshot).unwrap_or_else(|_| json!({})),
     );
+}
+
+pub fn derive_import_preview_state_snapshot_from_canonical_row(
+    preview_item: &Map<String, Value>,
+) -> PreviewState {
+    let identity = canonical_row_identity_input(preview_item);
+    derive_preview_state_from_legacy_row_with_identity(preview_item, identity)
 }
 
 fn derive_preview_state_from_legacy_row(

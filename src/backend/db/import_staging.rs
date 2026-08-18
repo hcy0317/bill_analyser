@@ -47,6 +47,7 @@ include!("import_staging/ledger_types.rs");
 include!("import_staging/session_lifecycle.rs");
 include!("import_staging/parser_templates.rs");
 include!("import_staging/sources_standard_rows.rs");
+include!("import_staging/signal_projection.rs");
 include!("import_staging/preview_write.rs");
 include!("import_staging/identity_validation.rs");
 include!("import_staging/preview_query.rs");

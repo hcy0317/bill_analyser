@@ -327,9 +327,11 @@ async fn apply_confirm_preview_patch_on_tx(
     } else {
         "expense"
     };
+    let signal_projection = import_preview_signal_projection_from_payload(&payload)?;
     let mut query = build_preview_row_update_query(
         &preview,
         payload.to_string(),
+        signal_projection,
         amount_cents,
         direction,
         PreviewRowUpdateTarget {
@@ -339,12 +341,16 @@ async fn apply_confirm_preview_patch_on_tx(
             expected_row_version: None,
         },
     );
-    Ok(query
-        .build()
-        .execute(&mut **tx)
-        .await?
-        .rows_affected()
-        == 1)
+    let changed = query.build().execute(&mut **tx).await?.rows_affected() == 1;
+    if changed {
+        observe_import_preview_signal_projection_parity(
+            tx,
+            &[patch.preview_id],
+            "confirm_preview_patch",
+        )
+        .await?;
+    }
+    Ok(changed)
 }
 
 fn confirm_command_fingerprint(

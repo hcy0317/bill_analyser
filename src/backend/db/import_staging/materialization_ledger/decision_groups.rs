@@ -308,7 +308,7 @@ pub fn apply_import_decision_group_command(
             });
         }
         let rows = sqlx::query(
-            r#"SELECT p.id, p.version
+            r#"SELECT p.id, p.version, p.preview_payload
                FROM import_preview_rows p
                WHERE p.session_id=$2 AND p.user_id=$3
                  AND EXISTS (
@@ -445,23 +445,44 @@ pub fn apply_import_decision_group_command(
             tx.commit().await?;
             return Ok(ImportDecisionGroupCommandResult::Applied(result));
         }
-        for row in &current {
-            sqlx::query(
-                r#"UPDATE import_preview_rows SET
-                   preview_payload = jsonb_set(jsonb_set(preview_payload,
-                     '{preview_matching_feedback,transfer,state}', to_jsonb($1::text), true),
-                     '{preview_matching_feedback,transfer,review_status}', to_jsonb($1::text), true),
-                   version = version + 1, updated_at = now()
-                   WHERE id = $2 AND version = $3 AND session_id=$4 AND user_id=$5"#,
-            )
-            .bind(target_status)
-            .bind(row.preview_row_id)
-            .bind(row.version)
-            .bind(session_db_id)
-            .bind(user_id)
-            .execute(&mut *tx)
-            .await?;
+        for (locked_row, row) in rows.iter().zip(&current) {
+            let mut preview_payload: Value = locked_row.try_get("preview_payload")?;
+            set_import_preview_signal_review_status(
+                &mut preview_payload,
+                "transfer",
+                target_status,
+            )?;
+            let signal_projection =
+                import_preview_signal_projection_from_payload(&preview_payload)?;
+            let mut update = QueryBuilder::<Postgres>::new(
+                "UPDATE import_preview_rows SET preview_payload = ",
+            );
+            update.push_bind(preview_payload.to_string());
+            update.push("::jsonb");
+            push_import_preview_signal_projection_assignments(&mut update, signal_projection);
+            update.push(", version = version + 1, updated_at = now() WHERE id = ");
+            update.push_bind(row.preview_row_id);
+            update.push(" AND version = ");
+            update.push_bind(row.version);
+            update.push(" AND session_id = ");
+            update.push_bind(session_db_id);
+            update.push(" AND user_id = ");
+            update.push_bind(user_id);
+            if update.build().execute(&mut *tx).await?.rows_affected() != 1 {
+                tx.rollback().await?;
+                return Ok(ImportDecisionGroupCommandResult::Conflict);
+            }
         }
+        let mutated_preview_ids = current
+            .iter()
+            .map(|row| row.preview_row_id)
+            .collect::<Vec<_>>();
+        observe_import_preview_signal_projection_parity(
+            &mut tx,
+            &mutated_preview_ids,
+            "decision_group_transfer",
+        )
+        .await?;
         let result = ImportDecisionGroupMutation {
             group_id: command.group_id,
             group_version: next_version,

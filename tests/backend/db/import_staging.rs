@@ -375,6 +375,7 @@ async fn real_postgres_import_six_signal_families_e2e() -> Result<(), Box<dyn Er
         .map(|index| id_for(&format!("non-actionable llm {index}")))
         .collect::<Vec<_>>();
     let all_ids = all_page.rows.iter().map(|row| row.id).collect::<Vec<_>>();
+    assert_signal_projection_matches_legacy(pool, user_id, &all_ids).await?;
     let mut expected_parser_ids = Vec::from([parser_id]);
     expected_parser_ids.extend(non_actionable_learning_ids);
     expected_parser_ids.extend(non_actionable_llm_ids);
@@ -485,6 +486,49 @@ async fn real_postgres_import_six_signal_families_e2e() -> Result<(), Box<dyn Er
     assert!(
         executed_case_count >= 6,
         "strict real PostgreSQL target executed only {executed_case_count} family cases"
+    );
+
+    assert!(update_preview_bill(
+        pool,
+        session_id,
+        scoped_user_id,
+        &ImportPreviewPatch::new(llm_id).with_change(
+            ImportPreviewPatchField::MatchingFeedback,
+            ImportPreviewPatchValue::Json(json!({})),
+        ),
+    )?);
+    assert_signal_projection_matches_legacy(pool, user_id, &[llm_id]).await?;
+
+    sqlx::query(
+        r#"UPDATE import_preview_rows SET
+           signal_parser=NULL, signal_platform_duplicate=NULL, signal_transfer=NULL,
+           signal_history=NULL, signal_learning=NULL, signal_llm=NULL,
+           signal_projection_version=0
+           WHERE id=$1 AND user_id=$2"#,
+    )
+    .bind(auxiliary_id)
+    .bind(user_id)
+    .execute(pool)
+    .await?;
+    assert_eq!(
+        update_preview_selection(pool, &[auxiliary_id], false, scoped_user_id)?,
+        1
+    );
+    let selection_only = sqlx::query(
+        "SELECT signal_parser, signal_projection_version FROM import_preview_rows WHERE id=$1 AND user_id=$2",
+    )
+    .bind(auxiliary_id)
+    .bind(user_id)
+    .fetch_one(pool)
+    .await?;
+    assert_eq!(
+        selection_only.try_get::<Option<bool>, _>("signal_parser")?,
+        None
+    );
+    assert_eq!(
+        selection_only.try_get::<i16, _>("signal_projection_version")?,
+        0,
+        "selection-only writes must not materialize legacy signal rows"
     );
 
     test_db.cleanup().await?;
@@ -5885,6 +5929,7 @@ async fn real_postgres_decision_group_commands_cover_scope_cas_replay_and_status
             Some(&json!("accepted"))
         );
     }
+    assert_signal_projection_matches_legacy(pool, user_id, &preview_ids).await?;
     assert_eq!(
         applied_decision_group_mutation(apply_import_decision_group_command(
             pool,
@@ -6243,6 +6288,7 @@ async fn real_postgres_decision_group_rejections_dematerialize_and_roll_back_inv
     assert_eq!(historical_result.upserted_preview_ids.len(), 1);
     assert_eq!(historical_result.upserted_preview_items.len(), 1);
     let historical_replacement_id = historical_result.upserted_preview_ids[0];
+    assert_signal_projection_matches_legacy(pool, user_id, &[historical_replacement_id]).await?;
     assert!(get_preview_bill_by_id(pool, historical_preview_id, user)?.is_none());
     let historical_replacement =
         get_preview_bill_by_id(pool, historical_replacement_id, user)?.expect("replacement");
@@ -6338,6 +6384,8 @@ async fn real_postgres_decision_group_rejections_dematerialize_and_roll_back_inv
     );
     assert_eq!(same_batch_result.upserted_preview_ids.len(), 2);
     assert_eq!(same_batch_result.upserted_preview_items.len(), 2);
+    assert_signal_projection_matches_legacy(pool, user_id, &same_batch_result.upserted_preview_ids)
+        .await?;
     assert!(get_preview_bill_by_id(pool, same_batch_preview_id, user)?.is_none());
     let outgoing_replacement =
         get_preview_bill_by_id(pool, same_batch_result.upserted_preview_ids[0], user)?
@@ -6614,6 +6662,47 @@ async fn import_decision_group_id(
     .bind(group_key)
     .fetch_one(pool)
     .await?)
+}
+
+async fn assert_signal_projection_matches_legacy(
+    pool: &PostgresPool,
+    user_id: i64,
+    preview_ids: &[i64],
+) -> Result<(), Box<dyn Error>> {
+    let rows = sqlx::query(
+        r#"SELECT p.*,
+                  import_preview_signal_flags(p.preview_payload) AS legacy_signal_flags
+           FROM import_preview_rows p
+           WHERE p.user_id=$1 AND p.id = ANY($2::bigint[])
+           ORDER BY p.id"#,
+    )
+    .bind(user_id)
+    .bind(preview_ids)
+    .fetch_all(pool)
+    .await?;
+    assert_eq!(rows.len(), preview_ids.len());
+    for row in rows {
+        assert_eq!(
+            row.try_get::<i16, _>("signal_projection_version")?,
+            1,
+            "evidence writers must materialize PreviewStateKernel v1"
+        );
+        let legacy: Value = row.try_get("legacy_signal_flags")?;
+        for family in bill_analyser_core::ImportPreviewSignalFamily::ORDER {
+            let column = format!("signal_{}", family.as_str());
+            let expected = legacy
+                .get(family.as_str())
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            assert_eq!(
+                row.try_get::<Option<bool>, _>(column.as_str())?,
+                Some(expected),
+                "materialized signal diverged from read-only legacy oracle for {}",
+                family.as_str()
+            );
+        }
+    }
+    Ok(())
 }
 
 fn preview_draft(

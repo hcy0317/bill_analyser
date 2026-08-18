@@ -57,12 +57,14 @@ async fn reject_historical_group_and_dematerialize(
         "dedup_source_ids": [standard_row_id],
         "preview_matching_feedback": {"annotation": {"status": "pending_reclassification"}}
     });
+    let signal_projection = import_preview_signal_projection_from_payload(&payload)?;
     let new_id: i64 = sqlx::query_scalar(
         r#"INSERT INTO import_preview_rows
            (session_id,user_id,base_standard_row_id,page_sort_key,operation_kind,selected,signal_summary,
             merged_source_ids,occurred_at,amount_cents,direction,transaction_type,merchant,payment_method,
-            description,preview_payload,created_at,updated_at)
-           VALUES($1,$2,$3,$4,'insert',$5,'[]',$6,$7,$8,$9,$10,$11,$12,$13,$14,now(),now()) RETURNING id"#,
+            description,preview_payload,signal_parser,signal_platform_duplicate,signal_transfer,
+            signal_history,signal_learning,signal_llm,signal_projection_version,created_at,updated_at)
+           VALUES($1,$2,$3,$4,'insert',$5,'[]',$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,now(),now()) RETURNING id"#,
     )
     .bind(session_db_id)
     .bind(user_id)
@@ -78,7 +80,20 @@ async fn reject_historical_group_and_dematerialize(
     .bind(member.try_get::<Option<String>, _>("payment_method")?)
     .bind(member.try_get::<Option<String>, _>("description")?)
     .bind(&payload)
+    .bind(signal_projection.parser)
+    .bind(signal_projection.platform_duplicate)
+    .bind(signal_projection.transfer)
+    .bind(signal_projection.history)
+    .bind(signal_projection.learning)
+    .bind(signal_projection.llm)
+    .bind(signal_projection.version)
     .fetch_one(&mut **tx)
+    .await?;
+    observe_import_preview_signal_projection_parity(
+        tx,
+        &[new_id],
+        "historical_rejection_rebuild",
+    )
     .await?;
     sqlx::query("UPDATE import_decision_group_members SET preview_row_id=CASE WHEN history_bill_id IS NULL THEN $1 ELSE NULL END WHERE group_id=$2")
         .bind(new_id).bind(group_id).execute(&mut **tx).await?;
@@ -246,13 +261,16 @@ async fn reject_same_batch_transfer_and_dematerialize(
                 "transfer": {"state": "rejected", "review_status": "rejected", "suppressed_group_id": group_id}
             }
         });
+        let signal_projection =
+            import_preview_signal_projection_from_payload(&preview_payload)?;
         let id: i64 = sqlx::query_scalar(
             r#"INSERT INTO import_preview_rows
                (session_id,user_id,page_sort_key,operation_kind,selected,signal_summary,
                 merged_source_ids,occurred_at,amount_cents,direction,transaction_type,
                 account_id,transfer_target_account_id,category_id,merchant,payment_method,
-                description,preview_payload,created_at,updated_at)
-               VALUES($1,$2,$3,'insert',$4,'[]'::jsonb,$5,$6,$7,$8,$9,$10,NULL,$11,$12,$13,$14,$15,now(),now())
+                description,preview_payload,signal_parser,signal_platform_duplicate,signal_transfer,
+                signal_history,signal_learning,signal_llm,signal_projection_version,created_at,updated_at)
+               VALUES($1,$2,$3,'insert',$4,'[]'::jsonb,$5,$6,$7,$8,$9,$10,NULL,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,now(),now())
                RETURNING id"#,
         )
         .bind(session_db_id)
@@ -270,6 +288,13 @@ async fn reject_same_batch_transfer_and_dematerialize(
         .bind(&payment_method)
         .bind(&description)
         .bind(&preview_payload)
+        .bind(signal_projection.parser)
+        .bind(signal_projection.platform_duplicate)
+        .bind(signal_projection.transfer)
+        .bind(signal_projection.history)
+        .bind(signal_projection.learning)
+        .bind(signal_projection.llm)
+        .bind(signal_projection.version)
         .fetch_one(&mut **tx)
         .await?;
         sqlx::query("UPDATE import_decision_group_members SET preview_row_id=$1 WHERE id=$2")
@@ -286,6 +311,12 @@ async fn reject_same_batch_transfer_and_dematerialize(
         }
         items.push(response_item);
     }
+    observe_import_preview_signal_projection_parity(
+        tx,
+        &new_ids,
+        "same_batch_transfer_rejection_rebuild",
+    )
+    .await?;
     sqlx::query("DELETE FROM import_preview_rows WHERE id=$1 AND session_id=$2 AND user_id=$3")
         .bind(old_preview_id)
         .bind(session_db_id)

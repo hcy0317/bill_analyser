@@ -1,0 +1,111 @@
+{
+  "schema_version": 1,
+  "date": "2026-08-18",
+  "cyanflow_slice": "C5d import signal writer shadow",
+  "status": "local_audit_green",
+  "source": {
+    "base_head": "1843e9c006a0721a2c61ba17163af92686fc54dc",
+    "implementation_commit": "f674f90a4c60b5522d5d1c75af3da6194cf94dd8",
+    "database_policy": "full workspace coverage used a fresh isolated database; the long-lived development database migration ledger was not modified"
+  },
+  "ownership": {
+    "semantic_writer": "Rust PreviewStateKernel",
+    "database_writer": "import staging repository transaction",
+    "legacy_sql_role": "read-only shadow oracle",
+    "legacy_sql_can_write": false,
+    "active_reader": "legacy import_preview_signal_flags aliases",
+    "api_changed": false
+  },
+  "writer_paths": [
+    "single preview insert",
+    "chunked preview batch insert",
+    "generic preview patch",
+    "confirm preview patch",
+    "transfer decision group",
+    "learning decision",
+    "llm decision",
+    "historical rejection rebuild",
+    "same-batch transfer rejection rebuild"
+  ],
+  "shadow": {
+    "query_kind": "SELECT only",
+    "families_compared": 6,
+    "batch_queries_per_transaction": 1,
+    "maximum_sample_rows": 64,
+    "mismatch_changes_business_result": false,
+    "log_fields": [
+      "operation",
+      "expected_rows",
+      "observed_rows",
+      "mismatch_rows"
+    ],
+    "sensitive_identifiers_logged": false
+  },
+  "transition_ledger": {
+    "writer": "new and evidence-mutated rows are materialized by one Rust kernel writer as projection version 1",
+    "read": "unchanged legacy SQL projection",
+    "backfill": "none; untouched legacy rows remain version 0 with nullable signal columns",
+    "selection_only": "does not materialize or upgrade legacy signal rows",
+    "rollback": "stop the new binary and forward-fix without dropping additive columns",
+    "next": "C5e resumable watermark backfill for projection version 0 rows"
+  },
+  "tdd": {
+    "red": [
+      {
+        "test": "bulk_insert_query_builders_preserve_insert_shapes",
+        "failure": "preview insert SQL did not contain signal_projection_version"
+      },
+      {
+        "test": "real_postgres_import_six_signal_families_e2e",
+        "failure": "newly written row had projection version 0 instead of 1"
+      }
+    ],
+    "green": {
+      "shadow_read_only_contract": {
+        "passed": 1,
+        "failed": 0
+      },
+      "six_signal_real_postgres": {
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0
+      },
+      "import_staging_real_postgres": {
+        "passed": 36,
+        "failed": 0,
+        "skipped": 0
+      },
+      "core_and_db_full_targets": "pass",
+      "workspace_format": "pass",
+      "workspace_clippy_all_targets": "pass",
+      "rust_only_source_tree": {
+        "status": "pass",
+        "tracked_paths": 2011
+      },
+      "rust_backend_structure": {
+        "status": "pass",
+        "files_scanned": 600,
+        "baseline_entries": 3
+      },
+      "workspace_line_coverage": {
+        "lines_found": 76479,
+        "lines_hit": 50519,
+        "percent": 66.056
+      },
+      "changed_line_coverage": {
+        "coverage_eligible_files": 9,
+        "matched_files": 9,
+        "executable_lines": 275,
+        "covered_lines": 252,
+        "percent": 91.64
+      }
+    }
+  },
+  "isolated_coverage_database": {
+    "name": "bill_analyser_c5d_cov_20260818_2",
+    "migration_count": 26,
+    "maximum_migration_version": 26,
+    "removed_after_test": true,
+    "verified_absent_after_cleanup": true
+  }
+}

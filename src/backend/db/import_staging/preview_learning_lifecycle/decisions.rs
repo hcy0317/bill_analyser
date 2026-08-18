@@ -255,9 +255,11 @@ pub fn apply_preview_learning_decision(
         } else {
             "expense"
         };
+        let signal_projection = import_preview_signal_projection_from_payload(&payload)?;
         let mut update = build_preview_row_update_query(
             &preview,
             payload.to_string(),
+            signal_projection,
             amount_cents,
             direction,
             PreviewRowUpdateTarget {
@@ -269,6 +271,12 @@ pub fn apply_preview_learning_decision(
             },
         );
         update.build().execute(&mut *transaction).await?;
+        observe_import_preview_signal_projection_parity(
+            &mut transaction,
+            &[preview_id],
+            "learning_decision",
+        )
+        .await?;
 
         if let (Some(input), Some(next)) = (lifecycle_input.as_ref(), lifecycle_transition.as_ref())
         {

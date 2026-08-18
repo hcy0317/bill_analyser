@@ -61,11 +61,13 @@ async fn insert_preview_row_async(
     } else {
         "expense"
     };
+    let signal_projection = import_preview_signal_projection_from_payload(&payload)?;
     let mut query = build_preview_row_insert_returning_query(
         session_db_id,
         user_id,
         &draft,
         payload.to_string(),
+        signal_projection,
         amount_cents,
         direction,
     );
@@ -74,6 +76,7 @@ async fn insert_preview_row_async(
         .fetch_one(&mut **tx)
         .await?
         .try_get("id")?;
+    observe_import_preview_signal_projection_parity(tx, &[id], "preview_insert_single").await?;
     Ok(id)
 }
 
@@ -82,6 +85,7 @@ fn build_preview_row_insert_returning_query(
     user_id: i64,
     draft: &ImportPreviewDraft,
     preview_payload: String,
+    signal_projection: ImportPreviewSignalProjection,
     amount_cents: i64,
     direction: &str,
 ) -> QueryBuilder<'static, Postgres> {
@@ -91,7 +95,9 @@ fn build_preview_row_insert_returning_query(
             session_id, user_id, page_sort_key, operation_kind, selected,
             signal_summary, merged_source_ids, occurred_at, amount_cents,
             direction, transaction_type, account_id, transfer_target_account_id, category_id,
-            merchant, payment_method, description, preview_payload, created_at, updated_at
+            merchant, payment_method, description, preview_payload,
+            signal_parser, signal_platform_duplicate, signal_transfer, signal_history,
+            signal_learning, signal_llm, signal_projection_version, created_at, updated_at
         ) VALUES (
         "#,
     );
@@ -130,7 +136,21 @@ fn build_preview_row_insert_returning_query(
     query.push_bind(draft.preview_description.clone());
     query.push(", ");
     query.push_bind(preview_payload);
-    query.push("::jsonb, now(), now()) RETURNING id");
+    query.push("::jsonb, ");
+    query.push_bind(signal_projection.parser);
+    query.push(", ");
+    query.push_bind(signal_projection.platform_duplicate);
+    query.push(", ");
+    query.push_bind(signal_projection.transfer);
+    query.push(", ");
+    query.push_bind(signal_projection.history);
+    query.push(", ");
+    query.push_bind(signal_projection.learning);
+    query.push(", ");
+    query.push_bind(signal_projection.llm);
+    query.push(", ");
+    query.push_bind(signal_projection.version);
+    query.push(", now(), now()) RETURNING id");
     query
 }
 
@@ -149,13 +169,17 @@ struct PreviewRowBatchValue {
     payment_method: String,
     description: String,
     preview_payload: String,
+    signal_projection: ImportPreviewSignalProjection,
 }
 
-fn preview_row_batch_value_from_draft(draft: &ImportPreviewDraft) -> PreviewRowBatchValue {
+fn preview_row_batch_value_from_draft(
+    draft: &ImportPreviewDraft,
+) -> DbResult<PreviewRowBatchValue> {
     let payload = preview_payload_from_draft(draft);
+    let signal_projection = import_preview_signal_projection_from_payload(&payload)?;
     let amount_cents = draft.preview_amount_cents.abs();
     let occurred_at = normalize_bill_date_text(&draft.preview_date);
-    PreviewRowBatchValue {
+    Ok(PreviewRowBatchValue {
         page_sort_key: format!("{}:{}", occurred_at, draft.preview_counterparty),
         selected: draft.preview_selected,
         merged_source_ids: draft.dedup_source_ids.clone(),
@@ -174,7 +198,8 @@ fn preview_row_batch_value_from_draft(draft: &ImportPreviewDraft) -> PreviewRowB
         payment_method: draft.preview_payment_method.clone(),
         description: draft.preview_description.clone(),
         preview_payload: payload.to_string(),
-    }
+        signal_projection,
+    })
 }
 
 #[derive(Debug, Clone, Default)]
@@ -197,11 +222,26 @@ async fn insert_preview_rows_batch_async(
     let rows = drafts
         .iter()
         .map(preview_row_batch_value_from_draft)
-        .collect::<Vec<_>>();
+        .collect::<DbResult<Vec<_>>>()?;
+    let mut shadow_sample_ids = Vec::with_capacity(
+        rows.len()
+            .min(IMPORT_PREVIEW_SIGNAL_SHADOW_SAMPLE_SIZE),
+    );
     for chunk in rows.chunks(IMPORT_STAGING_BULK_INSERT_CHUNK_SIZE) {
         let mut query = build_preview_rows_insert_query(session_db_id, user_id, chunk);
-        query.build().execute(&mut **tx).await?;
+        let inserted = query.build().fetch_all(&mut **tx).await?;
+        for row in inserted.iter().take(
+            IMPORT_PREVIEW_SIGNAL_SHADOW_SAMPLE_SIZE.saturating_sub(shadow_sample_ids.len()),
+        ) {
+            shadow_sample_ids.push(row.try_get::<i64, _>("id")?);
+        }
     }
+    observe_import_preview_signal_projection_parity(
+        tx,
+        &shadow_sample_ids,
+        "preview_insert_batch",
+    )
+    .await?;
     Ok(rows.len())
 }
 
@@ -216,7 +256,9 @@ fn build_preview_rows_insert_query<'a>(
             session_id, user_id, page_sort_key, operation_kind, selected,
             signal_summary, merged_source_ids, occurred_at, amount_cents,
             direction, transaction_type, account_id, transfer_target_account_id, category_id,
-            merchant, payment_method, description, preview_payload, created_at, updated_at
+            merchant, payment_method, description, preview_payload,
+            signal_parser, signal_platform_duplicate, signal_transfer, signal_history,
+            signal_learning, signal_llm, signal_projection_version, created_at, updated_at
         )
         "#,
     );
@@ -241,9 +283,17 @@ fn build_preview_rows_insert_query<'a>(
             .push_bind(&value.description)
             .push_bind(&value.preview_payload)
             .push_unseparated("::jsonb")
+            .push_bind(value.signal_projection.parser)
+            .push_bind(value.signal_projection.platform_duplicate)
+            .push_bind(value.signal_projection.transfer)
+            .push_bind(value.signal_projection.history)
+            .push_bind(value.signal_projection.learning)
+            .push_bind(value.signal_projection.llm)
+            .push_bind(value.signal_projection.version)
             .push("now()")
             .push("now()");
     });
+    query.push(" RETURNING id");
     query
 }
 

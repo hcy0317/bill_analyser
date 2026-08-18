@@ -45,9 +45,11 @@ async fn apply_preview_patch_on_tx(
     } else {
         "expense"
     };
+    let signal_projection = import_preview_signal_projection_from_payload(&payload)?;
     let mut query = build_preview_row_update_query(
         &preview,
         payload.to_string(),
+        signal_projection,
         amount_cents,
         direction,
         PreviewRowUpdateTarget {
@@ -66,6 +68,13 @@ async fn apply_preview_patch_on_tx(
                 preview.version,
             ));
         }
+    } else {
+        observe_import_preview_signal_projection_parity(
+            tx,
+            &[patch.preview_id],
+            "preview_patch",
+        )
+        .await?;
     }
     Ok(changed > 0)
 }
@@ -81,6 +90,7 @@ struct PreviewRowUpdateTarget {
 fn build_preview_row_update_query(
     preview: &ImportPreviewRow,
     preview_payload: String,
+    signal_projection: ImportPreviewSignalProjection,
     amount_cents: i64,
     direction: &str,
     target: PreviewRowUpdateTarget,
@@ -117,8 +127,10 @@ fn build_preview_row_update_query(
     }
     query.push(", preview_payload = ");
     query.push_bind(preview_payload);
+    query.push("::jsonb");
+    push_import_preview_signal_projection_assignments(&mut query, signal_projection);
     query.push(
-        r#"::jsonb,
+        r#",
             updated_at = now(),
             version = version + 1
         "#,

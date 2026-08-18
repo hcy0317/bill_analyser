@@ -257,6 +257,7 @@ fn preview_selection_update_query_covers_modes_filters_and_ids() {
     let select_sql = select_query.build().sql().to_string();
     assert!(select_sql.contains("UPDATE import_preview_rows p SET selected ="));
     assert!(select_sql.contains("jsonb_set"));
+    assert!(!select_sql.contains("signal_projection_version"));
     assert!(select_sql.contains("p.selected = true"));
     assert!(select_sql.contains("p.category_id = "));
     assert!(select_sql.contains("p.id IN"));
@@ -317,13 +318,17 @@ fn bulk_insert_query_builders_preserve_insert_shapes() {
         dedup_source_ids: vec![1, 2],
         ..ImportPreviewDraft::default()
     };
-    let preview_values = vec![preview_row_batch_value_from_draft(&preview_draft)];
+    let preview_values = vec![
+        preview_row_batch_value_from_draft(&preview_draft).expect("preview batch value")
+    ];
     let mut preview_builder = build_preview_rows_insert_query(1, 2, &preview_values);
     let preview_query = preview_builder.build();
     let preview_sql = preview_query.sql();
     assert!(preview_sql.contains("INSERT INTO import_preview_rows"));
     assert!(preview_sql.contains("category_id"));
     assert!(preview_sql.contains("preview_payload"));
+    assert!(preview_sql.contains("signal_projection_version"));
+    assert!(preview_sql.contains("signal_parser"));
 
     let parser_draft = ImportParserTemplateDraft {
         parser_date: "2026-01-01 09:00:00".to_string(),
@@ -348,12 +353,16 @@ fn bulk_insert_query_builders_preserve_insert_shapes() {
         2,
         &preview_draft,
         json!({"category_id": 42}).to_string(),
+        import_preview_signal_projection_from_payload(&json!({"category_id": 42}))
+            .expect("signal projection"),
         1000,
         "expense",
     );
     let single_insert_sql = single_insert_builder.build().sql().to_string();
     assert!(single_insert_sql.contains("INSERT INTO import_preview_rows"));
     assert!(single_insert_sql.contains("category_id"));
+    assert!(single_insert_sql.contains("signal_projection_version"));
+    assert!(single_insert_sql.contains("signal_llm"));
     assert!(single_insert_sql.contains("RETURNING id"));
 
     let mut preview = preview_row(7);
@@ -362,6 +371,8 @@ fn bulk_insert_query_builders_preserve_insert_shapes() {
     let mut update_builder = build_preview_row_update_query(
         &preview,
         json!({"category_id": 42}).to_string(),
+        import_preview_signal_projection_from_payload(&json!({"category_id": 42}))
+            .expect("signal projection"),
         1000,
         "expense",
         PreviewRowUpdateTarget {
@@ -374,6 +385,8 @@ fn bulk_insert_query_builders_preserve_insert_shapes() {
     let update_sql = update_builder.build().sql().to_string();
     assert!(update_sql.contains("UPDATE import_preview_rows"));
     assert!(update_sql.contains("category_id ="));
+    assert!(update_sql.contains("signal_projection_version ="));
+    assert!(update_sql.contains("signal_transfer ="));
     assert!(!update_sql.contains("hidden_transfer_payload = '{}'::jsonb"));
     assert!(update_sql.contains("WHERE id ="));
 
@@ -381,6 +394,8 @@ fn bulk_insert_query_builders_preserve_insert_shapes() {
     let mut demoted_update_builder = build_preview_row_update_query(
         &preview,
         json!({"preview_type": "支出"}).to_string(),
+        import_preview_signal_projection_from_payload(&json!({"preview_type": "支出"}))
+            .expect("signal projection"),
         1000,
         "expense",
         PreviewRowUpdateTarget {
@@ -393,6 +408,28 @@ fn bulk_insert_query_builders_preserve_insert_shapes() {
     let demoted_update_sql = demoted_update_builder.build().sql().to_string();
     assert!(demoted_update_sql.contains("hidden_transfer_payload = '{}'::jsonb"));
     assert!(demoted_update_sql.contains("AND version ="));
+}
+
+#[test]
+fn signal_projection_shadow_sql_is_read_only_and_covers_every_family() {
+    let normalized = IMPORT_PREVIEW_SIGNAL_PROJECTION_PARITY_SQL.to_ascii_lowercase();
+
+    assert_eq!(IMPORT_PREVIEW_SIGNAL_SHADOW_SAMPLE_SIZE, 64);
+    assert!(normalized.trim_start().starts_with("select "));
+    assert!(!normalized.contains(" update "));
+    assert!(!normalized.contains(" insert "));
+    assert!(!normalized.contains(" delete "));
+    assert!(normalized.contains("import_preview_signal_flags(p.preview_payload)"));
+    for column in [
+        "signal_parser",
+        "signal_platform_duplicate",
+        "signal_transfer",
+        "signal_history",
+        "signal_learning",
+        "signal_llm",
+    ] {
+        assert!(normalized.contains(column), "missing parity check for {column}");
+    }
 }
 
 #[test]
