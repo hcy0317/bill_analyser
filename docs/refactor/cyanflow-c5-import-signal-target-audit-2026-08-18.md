@@ -2,7 +2,7 @@
 
 日期：2026-08-18
 
-状态：本地实现与完整审计门禁完成；等待 exact-head CI
+状态：已通过 PR #323 合并到 `main`；exact-head Gitea CI 全绿
 
 范围：提供目标数据库单快照、只读、全量行 parity 与有界 query corpus 审计命令；不运行 migration，不执行 backfill，不切换生产 read，不改变 API/session/mutation/confirm 合同，不增加索引
 
@@ -39,5 +39,6 @@
 - 本切片业务改动行覆盖率 `95.82%`（459/479）；3 个 coverage-eligible 文件全部匹配 LCOV。
 - `cargo fmt --all -- --check`、`cargo clippy --workspace --all-targets -- -D warnings`、Rust-only source-tree gate、Rust backend structure gate 与 `git diff --check` 全部通过。
 - 实现 commit：`e8e742b0d`。
+- 交付：PR #323，exact head `050f48a078d79f8c693ac4ae5e12a0046ba1f883`，Gitea Actions run `16184` 的 backend/frontend/governance/E2E 四个 job 全部成功；squash 后 `main` 为 `c5dea65841ab436b60434a30caa8900142fb9152`，PR head tree 与 main tree 均为 `45491e427f3aeaca937f383b20054e75860c8fca`，来源分支已删除。
 
 完整 coverage 使用隔离数据库 `bill_analyser_c5fb_audit_cov_20260818_1`，测试后已按精确名称删除并复核不存在。机器可读证据位于 `docs/refactor/evidence/cyanflow-c5-import-signal-target-audit-2026-08-18.json`。

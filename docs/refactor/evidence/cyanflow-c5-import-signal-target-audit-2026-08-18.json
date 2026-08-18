@@ -2,7 +2,7 @@
   "schema_version": 1,
   "date": "2026-08-18",
   "cyanflow_slice": "C5f-b import signal target audit",
-  "status": "local_audit_green",
+  "status": "merged",
   "source": {
     "base_head": "60f106c1cdc6909d4274f945f3510f1bc4899bb1",
     "implementation_commit": "e8e742b0d",
@@ -130,5 +130,22 @@
     "target_audit": "command delivered but not executed against a real target database",
     "public_read_cutover": "blocked until target full backfill, eligible audit report, and performance gates",
     "next": "target operator execution and query/write p95 evidence before any public read cutover"
+  },
+  "delivery": {
+    "pull_request": 323,
+    "pull_request_url": "https://git.hehome.xyz/hcy0317/bill_analyser/pulls/323",
+    "exact_head": "050f48a078d79f8c693ac4ae5e12a0046ba1f883",
+    "actions_run": 16184,
+    "jobs": {
+      "backend": 19196,
+      "frontend": 19197,
+      "governance": 19198,
+      "e2e": 19199
+    },
+    "all_required_jobs_succeeded": true,
+    "main_after_squash": "c5dea65841ab436b60434a30caa8900142fb9152",
+    "pull_request_head_tree": "45491e427f3aeaca937f383b20054e75860c8fca",
+    "main_tree": "45491e427f3aeaca937f383b20054e75860c8fca",
+    "source_branch_deleted": true
   }
 }

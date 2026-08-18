@@ -18,6 +18,10 @@ path = "bin/bill_import_signal_backfill.rs"
 name = "bill_import_signal_read_audit"
 path = "bin/bill_import_signal_read_audit.rs"
 
+[[bin]]
+name = "bill_import_signal_performance_audit"
+path = "bin/bill_import_signal_performance_audit.rs"
+
 [dependencies]
 bill-analyser-core = { path = "../core" }
 bill-analyser-parsers = { path = "../parsers" }
@@ -117,6 +121,10 @@ path = "../../../tests/backend/db/import_signal_read_shadow_postgres.rs"
 [[test]]
 name = "import_signal_target_audit_postgres"
 path = "../../../tests/backend/db/import_signal_target_audit_postgres.rs"
+
+[[test]]
+name = "import_signal_performance_audit_postgres"
+path = "../../../tests/backend/db/import_signal_performance_audit_postgres.rs"
 
 [lints]
 workspace = true

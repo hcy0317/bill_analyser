@@ -54,6 +54,8 @@ include!("import_staging/identity_validation.rs");
 include!("import_staging/preview_query.rs");
 include!("import_staging/preview_metadata_query.rs");
 include!("import_staging/signal_read_audit.rs");
+include!("import_staging/signal_performance_audit.rs");
+include!("import_staging/signal_performance_write.rs");
 include!("import_staging/preview_predicates.rs");
 include!("import_staging/preview_selection.rs");
 include!("import_staging/preview_decisions.rs");

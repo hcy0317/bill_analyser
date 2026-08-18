@@ -197,6 +197,109 @@ impl ImportPreviewSignalReadParityReport {
     }
 }
 
+pub const IMPORT_PREVIEW_SIGNAL_PERFORMANCE_MAX_WARMUP_ITERATIONS: u32 = 3;
+pub const IMPORT_PREVIEW_SIGNAL_PERFORMANCE_MAX_MEASURED_ITERATIONS: u32 = 10;
+pub const IMPORT_PREVIEW_SIGNAL_PERFORMANCE_MAX_REGRESSION_PERCENT: f64 = 15.0;
+pub const IMPORT_PREVIEW_SIGNAL_PERFORMANCE_MAX_WRITE_ROWS: u32 = 50_000;
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ImportPreviewSignalPerformanceAuditConfig {
+    pub warmup_iterations: u32,
+    pub measured_iterations: u32,
+    pub query_page_size: u32,
+    pub maximum_query_regression_percent: f64,
+    pub maximum_write_regression_percent: f64,
+}
+
+impl Default for ImportPreviewSignalPerformanceAuditConfig {
+    fn default() -> Self {
+        Self {
+            warmup_iterations: 1,
+            measured_iterations: 5,
+            query_page_size: 100,
+            maximum_query_regression_percent: 15.0,
+            maximum_write_regression_percent: 15.0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ImportPreviewSignalDurationSummary {
+    pub samples: u32,
+    pub min_ms: f64,
+    pub p50_ms: f64,
+    pub p95_ms: f64,
+    pub max_ms: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImportPreviewSignalPerformanceTimingContract {
+    pub clock: String,
+    pub jit_disabled: bool,
+    pub warmup_excluded: bool,
+    pub legacy_typed_order: String,
+    pub percentile_method: String,
+    pub statement_timeout_ms: u64,
+    pub lock_timeout_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ImportPreviewSignalQueryPerformanceCase {
+    pub session_id: i64,
+    pub preview_rows: i64,
+    pub signal: String,
+    pub parity_match: bool,
+    pub legacy: ImportPreviewSignalDurationSummary,
+    pub typed: ImportPreviewSignalDurationSummary,
+    pub p95_regression_percent: f64,
+    pub regression_exceeded: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ImportPreviewSignalWritePerformanceReport {
+    pub source_session_id: i64,
+    pub source_session_rows: i64,
+    pub maximum_rows: u32,
+    pub rows: i64,
+    pub truncated: bool,
+    pub base: ImportPreviewSignalDurationSummary,
+    pub typed: ImportPreviewSignalDurationSummary,
+    pub p95_regression_percent: f64,
+    pub maximum_regression_percent: f64,
+    pub passed: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ImportPreviewSignalPerformanceAuditReport {
+    pub expected_migration_version: i64,
+    pub actual_migration_version: i64,
+    pub migration_count: u64,
+    pub snapshot_token: String,
+    pub config: ImportPreviewSignalPerformanceAuditConfig,
+    pub timing_contract: ImportPreviewSignalPerformanceTimingContract,
+    pub corpus_sessions: u64,
+    pub query_cases: Vec<ImportPreviewSignalQueryPerformanceCase>,
+    pub query_mismatch_cases: u64,
+    pub query_regression_cases: u64,
+    pub query_regression_tolerance_ms: f64,
+    pub write: ImportPreviewSignalWritePerformanceReport,
+    pub transaction_rolled_back: bool,
+    pub duration_ms: u64,
+}
+
+impl ImportPreviewSignalPerformanceAuditReport {
+    pub fn passes_performance_gate(&self) -> bool {
+        self.actual_migration_version == self.expected_migration_version
+            && self.migration_count
+                == u64::try_from(self.expected_migration_version).unwrap_or(u64::MAX)
+            && !self.query_cases.is_empty()
+            && self.query_mismatch_cases == 0
+            && self.query_regression_cases == 0
+            && self.write.passed
+            && self.transaction_rolled_back
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ImportPreviewMetadata {
     pub facets: ImportPreviewFacets,

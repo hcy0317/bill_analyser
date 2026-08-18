@@ -1,0 +1,138 @@
+{
+  "schema_version": 1,
+  "date": "2026-08-18",
+  "cyanflow_slice": "C5f-c import signal performance audit",
+  "status": "local_audit_green",
+  "source": {
+    "base_head": "c5dea65841ab436b60434a30caa8900142fb9152",
+    "implementation_commit": "9913da9408eeace5f9df4d9c13772301e72c8373",
+    "target_database_executed": false,
+    "database_policy": "full workspace coverage used a fresh isolated database; no target or long-lived database backfill, performance audit, or read cutover was performed"
+  },
+  "command": {
+    "name": "bill_import_signal_performance_audit",
+    "database_env": "BILL_ANALYSER_POSTGRES_URL",
+    "default_warmup_iterations": 1,
+    "maximum_warmup_iterations": 3,
+    "default_measured_iterations": 5,
+    "maximum_measured_iterations": 10,
+    "default_query_page_size": 100,
+    "maximum_query_page_size": 1000,
+    "maximum_query_regression_percent": 15.0,
+    "maximum_write_regression_percent": 15.0,
+    "maximum_write_rows": 50000,
+    "runs_migrations": false,
+    "writes_business_data": false,
+    "emits_one_report_after_rollback": true,
+    "database_url_redacted_from_errors": true,
+    "cutover_authority": "none; requires a separate eligible C5f-b target read audit"
+  },
+  "snapshot_contract": {
+    "transaction_isolation": "repeatable read",
+    "transaction_read_only": false,
+    "migration_ledger_must_exactly_match_binary": true,
+    "required_projection_version": 1,
+    "all_six_typed_columns_must_be_non_null": true,
+    "query_corpus_max_sessions": 7,
+    "query_cases_per_session": 7,
+    "query_paths": "actual legacy and typed page plus metadata repository paths",
+    "write_paths": "transaction-local source, base, and typed temporary tables",
+    "transaction_rolled_back": true
+  },
+  "timing_contract": {
+    "clock": "rust_std_instant",
+    "postgres_jit_disabled": true,
+    "warmup_excluded": true,
+    "legacy_typed_order": "alternating_by_iteration",
+    "percentile_method": "percentile_cont",
+    "query_noise_tolerance_ms": 1.0,
+    "statement_timeout_ms": 60000,
+    "lock_timeout_ms": 5000
+  },
+  "failure_policy": {
+    "migration_ledger_mismatch": "fail closed without running migrations",
+    "unmaterialized_row": "fail closed before measurement",
+    "query_parity_mismatch": "emit failing performance report",
+    "query_regression": "emit failing performance report",
+    "write_regression": "emit failing performance report",
+    "invalid_limits": "reject before database access",
+    "failed_gate_process_exit": 1
+  },
+  "tdd": {
+    "red": [
+      "performance audit repository API unresolved",
+      "performance audit CLI binary missing",
+      "review found unbounded temporary write corpus and missing timing report contract",
+      "instrumented micro-fixture performance assumption crossed the unchanged 15 percent threshold"
+    ],
+    "green": {
+      "performance_audit_real_postgres": {
+        "passed": 4,
+        "failed": 0,
+        "skipped": 0
+      },
+      "performance_audit_cli_unit": {
+        "passed": 4,
+        "failed": 0
+      },
+      "target_read_audit_real_postgres": {
+        "passed": 3,
+        "failed": 0,
+        "skipped": 0
+      },
+      "read_shadow_real_postgres": {
+        "passed": 2,
+        "failed": 0,
+        "skipped": 0
+      },
+      "db_lib": {
+        "passed": 153,
+        "failed": 0
+      },
+      "import_staging_real_postgres": {
+        "passed": 36,
+        "failed": 0,
+        "skipped": 0
+      },
+      "db_all_targets": "pass",
+      "workspace_format": "pass",
+      "workspace_clippy_all_targets": "pass",
+      "rust_only_source_tree": {
+        "status": "pass",
+        "tracked_paths": 2035
+      },
+      "rust_backend_structure": {
+        "status": "pass",
+        "files_scanned": 610,
+        "baseline_entries": 3
+      },
+      "workspace_line_coverage": {
+        "lines_found": 78994,
+        "lines_hit": 52261,
+        "percent": 66.1582
+      },
+      "changed_line_coverage": {
+        "coverage_eligible_files": 6,
+        "matched_files": 6,
+        "executable_lines": 750,
+        "covered_lines": 726,
+        "percent": 96.8
+      }
+    }
+  },
+  "isolated_coverage_database": {
+    "name": "bill_analyser_c5fc_perf_cov_20260818_1",
+    "migration_count": 26,
+    "maximum_migration_version": 26,
+    "removed_after_test": true,
+    "verified_absent_after_cleanup": true
+  },
+  "transition_ledger": {
+    "production_read": "unchanged legacy projection",
+    "target_backfill": "not executed",
+    "target_read_audit": "separate command delivered in C5f-b but not executed against a real target database",
+    "target_performance_audit": "command delivered but not executed against a real target database",
+    "public_read_cutover": "blocked until target full backfill plus eligible read audit and passing performance audit reports",
+    "next": "operator target execution evidence before any public read cutover"
+  }
+}

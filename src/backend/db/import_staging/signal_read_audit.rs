@@ -85,6 +85,38 @@ struct ImportPreviewSignalAuditSession {
     families: [bool; 6],
 }
 
+struct ImportPreviewSignalAuditMigrationLedger {
+    expected_migration_version: i64,
+    actual_migration_version: i64,
+    migration_count: u64,
+}
+
+async fn validate_import_preview_signal_audit_migration_ledger(
+    connection: &mut sqlx::PgConnection,
+    audit_name: &str,
+) -> DbResult<ImportPreviewSignalAuditMigrationLedger> {
+    let expected_versions = crate::postgres_migration_manifest()
+        .iter()
+        .map(|migration| migration.version)
+        .collect::<Vec<_>>();
+    let actual_versions: Vec<i64> = sqlx::query_scalar(
+        "SELECT version FROM _sqlx_migrations WHERE success=true ORDER BY version",
+    )
+    .fetch_all(&mut *connection)
+    .await?;
+    if actual_versions != expected_versions {
+        return Err(DbError::InvalidOperation(format!(
+            "{audit_name} requires exact migration ledger {:?}; found {:?}",
+            expected_versions, actual_versions
+        )));
+    }
+    Ok(ImportPreviewSignalAuditMigrationLedger {
+        expected_migration_version: expected_versions.last().copied().unwrap_or_default(),
+        actual_migration_version: actual_versions.last().copied().unwrap_or_default(),
+        migration_count: u64::try_from(actual_versions.len()).unwrap_or(u64::MAX),
+    })
+}
+
 /// 在一个只读可重复读快照中完成目标库全量行 parity 与有界查询语义审计。
 pub async fn audit_import_preview_signal_target_snapshot(
     pool: &PostgresPool,
@@ -93,27 +125,15 @@ pub async fn audit_import_preview_signal_target_snapshot(
 ) -> DbResult<ImportPreviewSignalTargetAuditReport> {
     validate_import_preview_signal_target_audit_limits(row_batch_size, query_page_size)?;
     let started_at = std::time::Instant::now();
-    let expected_versions = crate::postgres_migration_manifest()
-        .iter()
-        .map(|migration| migration.version)
-        .collect::<Vec<_>>();
-    let expected_migration_version = expected_versions.last().copied().unwrap_or_default();
-
     let mut tx = pool.begin().await?;
     sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
         .execute(&mut *tx)
         .await?;
-    let actual_versions: Vec<i64> = sqlx::query_scalar(
-        "SELECT version FROM _sqlx_migrations WHERE success=true ORDER BY version",
+    let migration_ledger = validate_import_preview_signal_audit_migration_ledger(
+        &mut tx,
+        "import signal target audit",
     )
-    .fetch_all(&mut *tx)
     .await?;
-    if actual_versions != expected_versions {
-        return Err(DbError::InvalidOperation(format!(
-            "import signal target audit requires exact migration ledger {:?}; found {:?}",
-            expected_versions, actual_versions
-        )));
-    }
     let snapshot_token: String =
         sqlx::query_scalar("SELECT txid_current_snapshot()::text")
             .fetch_one(&mut *tx)
@@ -241,9 +261,9 @@ pub async fn audit_import_preview_signal_target_snapshot(
     tx.commit().await?;
 
     Ok(ImportPreviewSignalTargetAuditReport {
-        expected_migration_version,
-        actual_migration_version: actual_versions.last().copied().unwrap_or_default(),
-        migration_count: u64::try_from(actual_versions.len()).unwrap_or(u64::MAX),
+        expected_migration_version: migration_ledger.expected_migration_version,
+        actual_migration_version: migration_ledger.actual_migration_version,
+        migration_count: migration_ledger.migration_count,
         snapshot_token,
         row_batch_size,
         query_page_size,

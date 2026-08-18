@@ -2,11 +2,11 @@
 
 日期：2026-08-17
 
-状态：`ACCEPTED`；C5b、C5c、C5d、C5e、C5f-a 已合并；C5f-b 目标库只读审计命令本地实现与完整审计门禁完成，等待 exact-head CI；公开 read cutover 尚未启动
+状态：`ACCEPTED`；C5b、C5c、C5d、C5e、C5f-a、C5f-b 已合并；C5f-c 目标库性能审计命令本地实现与完整审计门禁完成，等待 exact-head CI；公开 read cutover 尚未启动
 
 决策编号：`ADR-IMPORT-SCHEMA-001`
 
-机器可读证据：`docs/refactor/evidence/cyanflow-c5-import-schema-benchmark-2026-08-17.json`、`docs/refactor/evidence/cyanflow-c5-import-signal-schema-expand-2026-08-18.json`、`docs/refactor/evidence/cyanflow-c5-import-signal-writer-shadow-2026-08-18.json`、`docs/refactor/evidence/cyanflow-c5-import-signal-backfill-2026-08-18.json`、`docs/refactor/evidence/cyanflow-c5-import-signal-read-shadow-2026-08-18.json`、`docs/refactor/evidence/cyanflow-c5-import-signal-target-audit-2026-08-18.json`
+机器可读证据：`docs/refactor/evidence/cyanflow-c5-import-schema-benchmark-2026-08-17.json`、`docs/refactor/evidence/cyanflow-c5-import-signal-schema-expand-2026-08-18.json`、`docs/refactor/evidence/cyanflow-c5-import-signal-writer-shadow-2026-08-18.json`、`docs/refactor/evidence/cyanflow-c5-import-signal-backfill-2026-08-18.json`、`docs/refactor/evidence/cyanflow-c5-import-signal-read-shadow-2026-08-18.json`、`docs/refactor/evidence/cyanflow-c5-import-signal-target-audit-2026-08-18.json`、`docs/refactor/evidence/cyanflow-c5-import-signal-performance-audit-2026-08-18.json`
 
 可复跑基准：`Get-Content -Raw scripts/bench_import_signal_schema.sql | docker exec -i bill-analyser-postgres psql -X -U bill_analyser -d bill_analyser`
 
@@ -130,8 +130,10 @@ flowchart LR
     C --> D["Canonical Rust writer and shadow telemetry"]
     D --> E["Batched backfill with watermark"]
     E --> F["Parity zero and read shadow"]
-    F --> G["Read cutover"]
-    G --> H["NOT NULL contract and legacy SQL read deletion"]
+    F --> G["Target snapshot read audit"]
+    G --> H["Target query and write performance audit"]
+    H --> K["Read cutover"]
+    K --> L["NOT NULL contract and legacy SQL read deletion"]
     B --> I["Receipt table expand and backfill"]
     I --> J["C6 typed receipt read cutover"]
 ```
@@ -143,9 +145,10 @@ flowchart LR
 3. C5d：唯一 Rust writer 在原始 evidence mutation 的同一事务中写 columns；SQL 只 shadow 比较，不参与新写语义。
 4. C5e：Rust backfill command 按主键 watermark 选择 `signal_projection_version=0` 的行，通过同一个 kernel 小批写入；每批提交、限速、可续跑，且永不覆盖 version=`1` 的在线写入。记录 rows/duration/mismatch，不执行单次全表 UPDATE。
 5. C5f-a：先增加 repository 私有 typed read shadow；生产 read 不切换，审计在单个只读可重复读快照中比较 page/filter/count/facet 与旧读，并对未完整物化 session 失败关闭。
-6. C5f-b：目标数据库全量回填和累计 parity=0 后，query read 才可切到 columns；API/filter/count/facet 与旧读 parity=0，写 p95 退化不得超过 15%。
-7. C5g：设置 NOT NULL、关闭旧 SQL read；至少三次真实 64 文件验收后才能删除兼容逻辑。
-8. receipt 路径先 expand/backfill/shadow，再由 C6 切 typed read；同一真实 confirm 永不双执行。
+6. C5f-b：目标数据库全量回填后，在一个只读可重复读快照中证明全量 row parity 与 API/filter/count/facet query parity 均为 0；该报告不测性能。
+7. C5f-c：在一个可重复读事务中对同一代表性 corpus 交替测量真实 legacy/typed 查询路径，并在只写临时表且最终回滚的条件下比较基础/typed 写入；query/write p95 退化均不得超过 15%，该报告不替代 C5f-b parity。
+8. C5g：只有同一目标状态对应的 C5f-b 与 C5f-c 报告分别合格后才可设计 read cutover；设置 NOT NULL、关闭旧 SQL read 仍须至少三次真实 64 文件验收。
+9. receipt 路径先 expand/backfill/shadow，再由 C6 切 typed read；同一真实 confirm 永不双执行。
 
 C5d 已按上述边界实现：所有新行和 evidence mutation 行由 `PreviewStateKernel` 写 version `1`；selection-only 写入不升级旧行。批量 writer 在一个事务内保留最多 64 个确定性样本并只执行一次 legacy SQL 比较，避免按 500 行 chunk 重复增加数据库往返；真实 PostgreSQL 验收另行逐行核对完整测试批次，不以运行时采样代替放行 parity。生产 read、历史 backfill、NOT NULL 和 API 合同保持不变。
 
@@ -154,6 +157,8 @@ C5e 已实现独立 Rust 运维命令与 repository batch API。每批在固定 
 C5f-a 已实现 repository 私有 typed read shadow。公开 `query_preview_page_by_session` 继续硬编码 legacy source；迁移审计先验证当前 user/session 的每一行都是 `signal_projection_version=1`，随后在同一 `REPEATABLE READ, READ ONLY` 事务快照中分别读取 legacy 与 typed 结果，比较 rows、total、六类 signal counts、selection counts、facets 与 selection hash。typed 查询不调用 legacy signal 函数，只从六个 boolean 列读取 family membership；带 `preview_ids` 的旁路查询不进入该合同。该阶段没有执行目标库历史回填、公开 read cutover、API/session/mutation/confirm 改动或索引变更。
 
 C5f-b 已实现独立 Rust 运维命令 `bill_import_signal_read_audit`。它不运行 migration，先在只读可重复读事务内要求 `_sqlx_migrations` 与当前 binary 的完整版本序列相同，再按有界 row batch 全量比较 version、六列与 legacy oracle。只有逐行 parity 为零时，才从最大 session 及六个可见 family 的最大覆盖 session 组成最多 7 个去重 corpus，并对每个 session 执行无筛选与六类 family 筛选的 page/count/facet parity；报告在事务提交后一次性输出，避免跨进程 checkpoint 拼接不同快照。未物化、逐行漂移或查询差异会输出不合格报告并以非零状态退出。该阶段只交付审计能力，没有在真实目标库执行 backfill/audit，也没有开放 production read。
+
+C5f-c 已实现独立 Rust 运维命令 `bill_import_signal_performance_audit`。它要求完整 migration ledger 与全部 preview row 已物化为 version `1`，复用 C5f-b 最多 7 个 session、每个 7 个 query case 的 corpus，并直接调用实际 legacy/typed page 与 metadata 查询。默认 1 次预热、5 次有效测量，按迭代交替执行顺序，关闭 JIT，以 Rust `Instant` 和连续 p50/p95 报告查询退化；1 ms 以内差异视为计时噪声，query/write 阈值上限均为 15%。写入测量从最大 corpus session 按 id 取最多 50,000 行，只写事务级 source/base/typed 临时表并显式回滚，报告来源总行数、实测行数与截断状态。`performance_gate_passed` 只代表性能报告自身，不能授权 read cutover；本切片没有连接真实目标库，也没有改变 production read、API、session、mutation、confirm、schema 或索引。
 
 ## 8. Restore 与放行门禁
 
