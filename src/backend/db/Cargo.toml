@@ -90,5 +90,9 @@ path = "../../../tests/backend/db/bills_postgres.rs"
 name = "postgres_embedded_migrations"
 path = "../../../tests/backend/db/postgres_embedded_migrations.rs"
 
+[[test]]
+name = "import_schema_constraints_postgres"
+path = "../../../tests/backend/db/import_schema_constraints_postgres.rs"
+
 [lints]
 workspace = true

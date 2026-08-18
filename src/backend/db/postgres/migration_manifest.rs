@@ -198,6 +198,22 @@ const LLM_ACCOUNT_RULE_CANDIDATE_TABLES: &[&str] = &["llm_candidates"];
 const LLM_ACCOUNT_RULE_CANDIDATE_INDEXES: &[&str] = &[];
 const IMPORT_PREVIEW_SIGNAL_STATUS_TABLES: &[&str] = &["import_preview_rows"];
 const IMPORT_PREVIEW_SIGNAL_STATUS_INDEXES: &[&str] = &[];
+const IMPORT_SCHEMA_INVARIANT_TABLES: &[&str] = &[
+    "import_sessions",
+    "import_sources",
+    "import_standard_rows",
+    "import_preview_rows",
+    "import_decision_groups",
+    "import_decision_group_members",
+    "import_history_materializations",
+    "import_confirm_operations",
+    "import_learning_lifecycle",
+];
+const IMPORT_SCHEMA_INVARIANT_INDEXES: &[&str] = &[
+    "uq_import_decision_group_members_preview_role",
+    "uq_import_decision_group_members_standard_role",
+    "uq_import_decision_group_members_history_role",
+];
 
 const POSTGRES_MIGRATION_MANIFEST: &[PostgresMigrationDescriptor] = &[
     PostgresMigrationDescriptor {
@@ -367,5 +383,12 @@ const POSTGRES_MIGRATION_MANIFEST: &[PostgresMigrationDescriptor] = &[
         description: "fail closed unknown import preview signal statuses in database projections",
         required_tables: IMPORT_PREVIEW_SIGNAL_STATUS_TABLES,
         required_indexes: IMPORT_PREVIEW_SIGNAL_STATUS_INDEXES,
+    },
+    PostgresMigrationDescriptor {
+        version: 25,
+        file_name: "0025_import_schema_invariants.sql",
+        description: "enforce import lifecycle values, session ownership, and nullable member uniqueness",
+        required_tables: IMPORT_SCHEMA_INVARIANT_TABLES,
+        required_indexes: IMPORT_SCHEMA_INVARIANT_INDEXES,
     },
 ];

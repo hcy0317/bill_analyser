@@ -1,0 +1,96 @@
+{
+  "schema_version": 1,
+  "date": "2026-08-17",
+  "cyanflow_slice": "C5b import schema invariants",
+  "status": "local_audit_green",
+  "source": {
+    "base_head": "93cdff93183f73fe64a83c63b2294fd4940e4eab",
+    "implementation_commit": "b2e678fe1f60dcbddbeeb920f65d6c6018524d53",
+    "postgres_version": "16.14",
+    "database": "local Docker development database restored into an isolated rehearsal database"
+  },
+  "migration": {
+    "version": 25,
+    "file": "src/backend/db/postgres/migrations/0025_import_schema_invariants.sql",
+    "sha256": "bd4fd45f08d6a1ddc2322e3988c7052c904550b4d0a82fb789407ea988d26396",
+    "check_constraints": 8,
+    "session_user_foreign_keys": 6,
+    "session_user_unique_constraints": 1,
+    "member_partial_unique_indexes": 3,
+    "learning_lifecycle_statuses": [
+      "yellow",
+      "green",
+      "auto_applied",
+      "downgraded",
+      "suppressed",
+      "pending",
+      "accepted",
+      "disabled"
+    ]
+  },
+  "tdd": {
+    "red": [
+      {
+        "test": "postgres::tests::postgres_manifest_points_to_existing_initial_schema",
+        "failure": "manifest length was 24, expected 25"
+      },
+      {
+        "test": "real_postgres_import_schema_invariants_fail_closed_without_rejecting_legal_multi_refs",
+        "failure": "validated target constraints were 0, expected 14"
+      }
+    ],
+    "regression_red": {
+      "test_target": "import_stage2_context",
+      "passed": 0,
+      "failed": 2,
+      "cause": "accepted is an existing Stage 2 lifecycle compatibility status and was omitted from the first CHECK draft"
+    },
+    "green": {
+      "manifest_contract": "pass",
+      "migration_text_contract": "pass",
+      "embedded_migration_contract": "pass",
+      "real_postgres_contract": {
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "check_violation_sqlstate": "23514",
+        "foreign_key_violation_sqlstate": "23503",
+        "unique_violation_sqlstate": "23505",
+        "all_eight_learning_lifecycle_statuses_inserted": true
+      },
+      "bill_analyser_db_full_target": "pass",
+      "workspace_format": "pass",
+      "workspace_clippy_all_targets": "pass",
+      "workspace_line_coverage_percent": 65.96,
+      "changed_executable_lines": 34,
+      "changed_covered_lines": 32,
+      "changed_line_coverage_percent": 94.12
+    }
+  },
+  "restore_point": {
+    "format": "pg_dump custom",
+    "bytes": 60209715,
+    "sha256": "c890db568ceee62f25baf21aa98b7fe3f2e3a05502f2636d59c397f95d242e09",
+    "restore_ms": 21306.272,
+    "migration_ms": 613.908,
+    "removed_after_rehearsal": true
+  },
+  "rehearsal_corpus": {
+    "applied_migrations_before_manual_rehearsal": 24,
+    "users": 1235,
+    "sessions": 1242,
+    "preview_rows": 237870,
+    "decision_groups": 5043,
+    "decision_members": 9098,
+    "multi_ref_members": 4816,
+    "ownership_mismatches": 0
+  },
+  "rehearsal_result": {
+    "validated_constraints": 15,
+    "unvalidated_constraints": 0,
+    "member_partial_indexes": 3,
+    "legal_multi_ref_members_preserved": true,
+    "isolated_database_removed": true,
+    "container_sql_copy_removed": true
+  }
+}

@@ -2,7 +2,7 @@
 
 日期：2026-08-17
 
-状态：`ACCEPTED`；数据库实现尚未启动
+状态：`ACCEPTED`；C5b 本地实现与恢复演练完成，C5c 及后续阶段尚未启动
 
 决策编号：`ADR-IMPORT-SCHEMA-001`
 
@@ -45,7 +45,7 @@ C5 不重建 PostgreSQL，也不复制 issue/decision 状态。导入 schema 采
 | `import_decision_groups.decision_status` | `pending`, `matched`, `merged`, `accepted`, `rejected` | 再加 reject/dematerialize 可产出的 `suppressed` | 可加 CHECK |
 | `import_confirm_operations.operation_kind` | `decision_group` | `decision_group`, `history_rewrite` | 保留 migration 0018 已声明的 history idempotency 合同 |
 | `import_confirm_operations.status` | `completed`, `failed` | `pending`, `completed`, `failed` | 可加 CHECK |
-| `import_learning_lifecycle.status` | `green` | `yellow`, `green`, `auto_applied`, `downgraded`, `suppressed` | 直接对应 core 生命周期常量 |
+| `import_learning_lifecycle.status` | corpus 为 `green`；Stage 2 合同还使用 `pending`、`accepted`，规则中心会写 `disabled` | `yellow`, `green`, `auto_applied`, `downgraded`, `suppressed`, `pending`, `accepted`, `disabled` | 同表同时承载 core 阈值状态、Stage 2 兼容状态和规则启停状态；完整 DB 测试证明三类均是当前合同 |
 | preview `transaction_type` | 中英文六种值 | 未冻结 | 先形成 canonical type/backfill 决策，当前不加 CHECK |
 | learning `recommendation_type` | `classification` 与用户数据值 | 未冻结 | 属于用户/模型分类维度，当前不加 CHECK |
 
@@ -149,6 +149,8 @@ flowchart LR
 ## 8. Restore 与放行门禁
 
 已完成一次 `pg_dump -Fc` 恢复演练：dump 为 60,209,715 bytes，SHA-256 `388cca87e6f13c9a98f3801e39595365a15382086aaa7e558d8b8cf56060c785`；恢复到独立 `bill_analyser_c5_restore_20260817` 后验证 24 条迁移、1,242 sessions、237,870 preview rows、5,043 decision groups、973 operations 和 signal 函数可读。临时数据库与 dump 已删除。
+
+C5b 另以最终 migration 内容重新生成 60,209,715-byte restore point（SHA-256 `c890db568ceee62f25baf21aa98b7fe3f2e3a05502f2636d59c397f95d242e09`），在独立恢复库应用 migration 25：15 个约束全部 validated、3 个 member partial unique index 存在、ownership mismatch 为 0，4,816 条合法 multi-ref member 保留。该临时数据库、dump 与 SQL 副本均已删除。
 
 每个实际 migration PR 仍须在执行前重新生成对应 head/data snapshot 的 restore point；本次演练证明流程可用，不替代未来数据快照。
 

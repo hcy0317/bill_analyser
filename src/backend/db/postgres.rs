@@ -54,7 +54,7 @@ mod tests {
     #[test]
     fn postgres_manifest_points_to_existing_initial_schema() {
         let manifest = postgres_migration_manifest();
-        assert_eq!(manifest.len(), 24);
+        assert_eq!(manifest.len(), 25);
         assert_eq!(manifest[0].version, 1);
         assert_eq!(manifest[0].file_name, POSTGRES_INITIAL_SCHEMA_FILE);
         for (index, descriptor) in manifest.iter().enumerate() {
@@ -326,6 +326,52 @@ mod tests {
         assert!(migration.contains("reconciliation_status = ANY(canonical_statuses)"));
         assert!(migration.contains("transfer_status = ANY(canonical_statuses)"));
         assert!(migration.contains("PARALLEL SAFE"));
+    }
+
+    #[test]
+    fn import_schema_invariants_migration_declares_scoped_ownership_and_nullable_uniqueness() {
+        let migration =
+            fs::read_to_string(postgres_migrations_dir().join("0025_import_schema_invariants.sql"))
+                .unwrap();
+
+        for constraint in [
+            "uq_import_sessions_id_user",
+            "chk_import_sessions_status",
+            "chk_import_sessions_import_mode",
+            "chk_import_preview_rows_operation_kind",
+            "chk_import_decision_groups_group_type",
+            "chk_import_decision_groups_decision_status",
+            "chk_import_confirm_operations_operation_kind",
+            "chk_import_confirm_operations_status",
+            "chk_import_learning_lifecycle_status",
+            "fk_import_sources_session_user",
+            "fk_import_standard_rows_session_user",
+            "fk_import_preview_rows_session_user",
+            "fk_import_decision_groups_session_user",
+            "fk_import_history_materializations_session_user",
+            "fk_import_confirm_operations_session_user",
+        ] {
+            assert!(
+                migration.contains(constraint),
+                "missing import invariant {constraint}"
+            );
+        }
+
+        for index in [
+            "uq_import_decision_group_members_preview_role",
+            "uq_import_decision_group_members_standard_role",
+            "uq_import_decision_group_members_history_role",
+        ] {
+            assert!(migration.contains(index), "missing partial index {index}");
+        }
+        assert!(migration.contains("NOT VALID"));
+        assert!(migration.contains("VALIDATE CONSTRAINT"));
+        for lifecycle_status in ["'pending'", "'accepted'", "'disabled'"] {
+            assert!(
+                migration.contains(lifecycle_status),
+                "missing compatible learning lifecycle status {lifecycle_status}"
+            );
+        }
     }
 
     #[tokio::test]
