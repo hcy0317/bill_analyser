@@ -54,7 +54,7 @@ mod tests {
     #[test]
     fn postgres_manifest_points_to_existing_initial_schema() {
         let manifest = postgres_migration_manifest();
-        assert_eq!(manifest.len(), 25);
+        assert_eq!(manifest.len(), 26);
         assert_eq!(manifest[0].version, 1);
         assert_eq!(manifest[0].file_name, POSTGRES_INITIAL_SCHEMA_FILE);
         for (index, descriptor) in manifest.iter().enumerate() {
@@ -461,5 +461,33 @@ mod tests {
         let result = run_postgres_migrations(&pool).await;
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn import_signal_column_expand_migration_is_additive_and_unindexed() {
+        let migration = fs::read_to_string(
+            postgres_migrations_dir().join("0026_import_signal_projection_columns.sql"),
+        )
+        .unwrap();
+
+        for column in [
+            "signal_parser BOOLEAN",
+            "signal_platform_duplicate BOOLEAN",
+            "signal_transfer BOOLEAN",
+            "signal_history BOOLEAN",
+            "signal_learning BOOLEAN",
+            "signal_llm BOOLEAN",
+        ] {
+            assert!(
+                migration.contains(column),
+                "missing nullable column {column}"
+            );
+        }
+        assert!(migration.contains("signal_projection_version SMALLINT NOT NULL DEFAULT 0"));
+        assert!(migration.contains("chk_import_preview_rows_signal_projection_version"));
+        assert!(migration.contains("signal_projection_version IN (0, 1)"));
+        assert!(!migration.contains("CREATE INDEX"));
+        assert!(!migration.contains("UPDATE import_preview_rows"));
+        assert!(!migration.contains("import_preview_signal_flags("));
     }
 }

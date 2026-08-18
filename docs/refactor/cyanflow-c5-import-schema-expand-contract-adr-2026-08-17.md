@@ -2,11 +2,11 @@
 
 日期：2026-08-17
 
-状态：`ACCEPTED`；C5b 本地实现与恢复演练完成，C5c 及后续阶段尚未启动
+状态：`ACCEPTED`；C5b 已合并，C5c 本地实现、恢复演练与审计门禁完成，等待 exact-head CI；C5d 及后续阶段尚未启动
 
 决策编号：`ADR-IMPORT-SCHEMA-001`
 
-机器可读证据：`docs/refactor/evidence/cyanflow-c5-import-schema-benchmark-2026-08-17.json`
+机器可读证据：`docs/refactor/evidence/cyanflow-c5-import-schema-benchmark-2026-08-17.json`、`docs/refactor/evidence/cyanflow-c5-import-signal-schema-expand-2026-08-18.json`
 
 可复跑基准：`Get-Content -Raw scripts/bench_import_signal_schema.sql | docker exec -i bill-analyser-postgres psql -X -U bill_analyser -d bill_analyser`
 
@@ -151,6 +151,8 @@ flowchart LR
 已完成一次 `pg_dump -Fc` 恢复演练：dump 为 60,209,715 bytes，SHA-256 `388cca87e6f13c9a98f3801e39595365a15382086aaa7e558d8b8cf56060c785`；恢复到独立 `bill_analyser_c5_restore_20260817` 后验证 24 条迁移、1,242 sessions、237,870 preview rows、5,043 decision groups、973 operations 和 signal 函数可读。临时数据库与 dump 已删除。
 
 C5b 另以最终 migration 内容重新生成 60,209,715-byte restore point（SHA-256 `c890db568ceee62f25baf21aa98b7fe3f2e3a05502f2636d59c397f95d242e09`），在独立恢复库应用 migration 25：15 个约束全部 validated、3 个 member partial unique index 存在、ownership mismatch 为 0，4,816 条合法 multi-ref member 保留。该临时数据库、dump 与 SQL 副本均已删除。
+
+C5c 使用 60,223,766-byte custom dump（SHA-256 `9b3fb40d46bf1551d631b12fb560f7e0a012e3bd620019909db592910b289a2b`）恢复 237,910 条 preview rows，并在独立恢复库应用 migration 26。迁移耗时 `489.302 ms`；六个 signal 列全部保持 `NULL`，全部行保持 `signal_projection_version=0`，未知版本为 0，signal 专用索引为 0，legacy signal SQL 函数仍可读；恢复前后表与索引尺寸未增长。独立恢复库、dump、容器内 SQL 副本和 coverage 临时库均已删除，原开发数据库未应用 migration 26。
 
 每个实际 migration PR 仍须在执行前重新生成对应 head/data snapshot 的 restore point；本次演练证明流程可用，不替代未来数据快照。
 

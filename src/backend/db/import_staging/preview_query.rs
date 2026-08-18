@@ -382,12 +382,14 @@ fn push_preview_projected_signal_predicate(
         .map(|(family, status)| (family, Some(status)))
         .unwrap_or((filter.as_str(), None));
     let column = match ImportPreviewSignalFamily::parse(family) {
-        Some(ImportPreviewSignalFamily::Parser) => "signal_parser",
-        Some(ImportPreviewSignalFamily::PlatformDuplicate) => "signal_platform_duplicate",
-        Some(ImportPreviewSignalFamily::Transfer) => "signal_transfer",
-        Some(ImportPreviewSignalFamily::History) => "signal_history",
-        Some(ImportPreviewSignalFamily::Learning) => "signal_learning",
-        Some(ImportPreviewSignalFamily::Llm) => "signal_llm",
+        Some(ImportPreviewSignalFamily::Parser) => "legacy_signal_parser",
+        Some(ImportPreviewSignalFamily::PlatformDuplicate) => {
+            "legacy_signal_platform_duplicate"
+        }
+        Some(ImportPreviewSignalFamily::Transfer) => "legacy_signal_transfer",
+        Some(ImportPreviewSignalFamily::History) => "legacy_signal_history",
+        Some(ImportPreviewSignalFamily::Learning) => "legacy_signal_learning",
+        Some(ImportPreviewSignalFamily::Llm) => "legacy_signal_llm",
         None => {
             query.push("FALSE");
             return;
@@ -492,7 +494,7 @@ fn build_preview_metadata_aggregate_query_with_prefix(
     filters: &ImportPreviewQueryFilters,
 ) -> QueryBuilder<'static, Postgres> {
     let mut query = QueryBuilder::<Postgres>::new(prefix);
-    query.push("WITH preview_scope AS MATERIALIZED (SELECT p.*, signal_flags.parser AS signal_parser, signal_flags.platform_duplicate AS signal_platform_duplicate, signal_flags.transfer AS signal_transfer, signal_flags.history AS signal_history, signal_flags.learning AS signal_learning, signal_flags.llm AS signal_llm, ");
+    query.push("WITH preview_scope AS MATERIALIZED (SELECT p.*, signal_flags.parser AS legacy_signal_parser, signal_flags.platform_duplicate AS legacy_signal_platform_duplicate, signal_flags.transfer AS legacy_signal_transfer, signal_flags.history AS legacy_signal_history, signal_flags.learning AS legacy_signal_learning, signal_flags.llm AS legacy_signal_llm, ");
     push_preview_current_review_condition_with_joins(&mut query, "p");
     query.push(" AS needs_review FROM import_preview_rows p CROSS JOIN LATERAL jsonb_to_record(import_preview_signal_flags(p.preview_payload)) AS signal_flags(parser BOOLEAN, platform_duplicate BOOLEAN, transfer BOOLEAN, history BOOLEAN, learning BOOLEAN, llm BOOLEAN) LEFT JOIN categories c ON c.user_id = p.user_id AND c.id = p.category_id AND c.is_active = true LEFT JOIN accounts source_account ON source_account.user_id = p.user_id AND source_account.id = p.account_id AND source_account.is_active = true LEFT JOIN accounts target_account ON target_account.user_id = p.user_id AND target_account.id = p.transfer_target_account_id AND target_account.is_active = true WHERE p.session_id = ");
     query.push_bind(session_db_id);

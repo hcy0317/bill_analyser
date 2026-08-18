@@ -1,0 +1,137 @@
+{
+  "schema_version": 1,
+  "date": "2026-08-18",
+  "cyanflow_slice": "C5c import signal schema expand",
+  "status": "local_audit_green",
+  "source": {
+    "base_head": "5456e387c1acdcb1fe772c517b3c7ae36bcb89ae",
+    "implementation_commit": "71e46f1a78cca79d39265044a6b82a1d51511611",
+    "postgres_version": "16.14",
+    "database_policy": "restore rehearsal and final workspace coverage used isolated databases; the long-lived development database was not migrated"
+  },
+  "migration": {
+    "version": 26,
+    "file": "src/backend/db/postgres/migrations/0026_import_signal_projection_columns.sql",
+    "sha256": "d439f507ea29d4e5645c2c77ab69bf6cca1e5afac08e82706d105da0b4295166",
+    "nullable_boolean_columns": [
+      "signal_parser",
+      "signal_platform_duplicate",
+      "signal_transfer",
+      "signal_history",
+      "signal_learning",
+      "signal_llm"
+    ],
+    "projection_version": {
+      "type": "smallint",
+      "nullable": false,
+      "default": 0,
+      "allowed": [0, 1],
+      "constraint_validated": true,
+      "version_zero_atthasmissing": true,
+      "version_zero_missing_value": "{0}"
+    },
+    "signal_specific_indexes": 0,
+    "contains_backfill": false,
+    "changes_active_reader": false,
+    "changes_active_writer": false
+  },
+  "transition_ledger": {
+    "writer": "unchanged Rust repository writer; new columns remain unwritten",
+    "read": "legacy import_preview_signal_flags JSON projection aliased as legacy_signal_*",
+    "backfill": "none",
+    "rollback": "stop the new binary and forward-fix; do not drop expanded columns",
+    "next": "C5d single canonical Rust writer plus read-only shadow parity"
+  },
+  "tdd": {
+    "red": [
+      {
+        "test": "postgres::tests::postgres_manifest_points_to_existing_initial_schema",
+        "failure": "manifest length was 25, expected 26"
+      },
+      {
+        "test": "signal_projection_expand_is_nullable_unindexed_and_versioned",
+        "failure": "target PostgreSQL columns were 0, expected 7"
+      }
+    ],
+    "regression_red": {
+      "command": "cargo test -p bill-analyser-db -- --nocapture",
+      "failed": 7,
+      "sqlstate": "42702",
+      "cause": "p.* introduced physical signal columns while the legacy lateral projection retained the same aliases"
+    },
+    "green": {
+      "manifest_contract": "pass",
+      "migration_text_contract": "pass",
+      "embedded_migration_contract": "pass",
+      "real_postgres_contract": {
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "check_violation_sqlstate": "23514"
+      },
+      "import_staging_real_postgres": {
+        "passed": 36,
+        "failed": 0,
+        "skipped": 0
+      },
+      "bill_analyser_db_full_target": "pass",
+      "workspace_format": "pass",
+      "workspace_clippy_all_targets": "pass",
+      "rust_only_source_tree_gate": "pass",
+      "workspace_line_coverage": {
+        "lines_found": 76196,
+        "lines_hit": 50267,
+        "percent": 65.9707
+      },
+      "changed_line_coverage": {
+        "executable_lines": 28,
+        "covered_lines": 27,
+        "percent": 96.43
+      }
+    },
+    "environment_false_red": {
+      "failed_http_tests": 38,
+      "error": "VersionMismatch(25)",
+      "cause": "the long-lived development database carried an older migration 25 checksum",
+      "source_database_ledger_modified": false,
+      "resolution": "rerun the full workspace coverage against a fresh isolated database",
+      "isolated_database_final_migration_count": 26,
+      "isolated_database_removed": true
+    }
+  },
+  "restore_point": {
+    "format": "pg_dump custom",
+    "bytes": 60223766,
+    "sha256": "9b3fb40d46bf1551d631b12fb560f7e0a012e3bd620019909db592910b289a2b",
+    "restore_ms": 28539.660,
+    "migration_ms": 489.302,
+    "removed_after_rehearsal": true
+  },
+  "source_corpus": {
+    "applied_migrations": 25,
+    "preview_rows": 237910,
+    "table_total_bytes": 492306432,
+    "index_bytes": 60989440
+  },
+  "rehearsal_before_migration": {
+    "applied_migrations": 25,
+    "preview_rows": 237910,
+    "table_total_bytes": 470515712,
+    "index_bytes": 47276032
+  },
+  "rehearsal_after_migration": {
+    "preview_rows": 237910,
+    "rows_with_all_six_signals_null": 237910,
+    "rows_with_projection_version_zero": 237910,
+    "rows_with_unknown_projection_version": 0,
+    "table_total_bytes": 470515712,
+    "index_bytes": 47276032,
+    "signal_specific_indexes": 0,
+    "legacy_signal_function_count": 1,
+    "legacy_signal_function_readable": true,
+    "isolated_database_removed": true,
+    "container_dump_removed": true,
+    "container_sql_copy_removed": true,
+    "host_dump_removed": true
+  }
+}

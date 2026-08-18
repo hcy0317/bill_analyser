@@ -196,16 +196,17 @@ fn preview_metadata_materializes_expensive_signal_projection_once() {
         "metadata must decode the six signal families and review state from each session row only once"
     );
     for projected_column in [
-        "signal_parser",
-        "signal_platform_duplicate",
-        "signal_transfer",
-        "signal_history",
-        "signal_learning",
-        "signal_llm",
+        "legacy_signal_parser",
+        "legacy_signal_platform_duplicate",
+        "legacy_signal_transfer",
+        "legacy_signal_history",
+        "legacy_signal_learning",
+        "legacy_signal_llm",
         "needs_review",
     ] {
         assert!(sql.contains(projected_column), "missing {projected_column}");
     }
+    assert!(!sql.contains("signal_flags.parser AS signal_parser"));
 }
 
 #[test]

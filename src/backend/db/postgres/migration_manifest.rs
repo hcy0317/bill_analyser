@@ -214,6 +214,8 @@ const IMPORT_SCHEMA_INVARIANT_INDEXES: &[&str] = &[
     "uq_import_decision_group_members_standard_role",
     "uq_import_decision_group_members_history_role",
 ];
+const IMPORT_SIGNAL_COLUMN_EXPAND_TABLES: &[&str] = &["import_preview_rows"];
+const IMPORT_SIGNAL_COLUMN_EXPAND_INDEXES: &[&str] = &[];
 
 const POSTGRES_MIGRATION_MANIFEST: &[PostgresMigrationDescriptor] = &[
     PostgresMigrationDescriptor {
@@ -390,5 +392,12 @@ const POSTGRES_MIGRATION_MANIFEST: &[PostgresMigrationDescriptor] = &[
         description: "enforce import lifecycle values, session ownership, and nullable member uniqueness",
         required_tables: IMPORT_SCHEMA_INVARIANT_TABLES,
         required_indexes: IMPORT_SCHEMA_INVARIANT_INDEXES,
+    },
+    PostgresMigrationDescriptor {
+        version: 26,
+        file_name: "0026_import_signal_projection_columns.sql",
+        description: "add nullable import signal projection columns without changing the active reader or writer",
+        required_tables: IMPORT_SIGNAL_COLUMN_EXPAND_TABLES,
+        required_indexes: IMPORT_SIGNAL_COLUMN_EXPAND_INDEXES,
     },
 ];
