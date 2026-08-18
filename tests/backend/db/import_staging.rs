@@ -1835,6 +1835,48 @@ async fn real_postgres_confirm_receipt_replays_and_generic_paths_preserve_termin
             .len(),
         64
     );
+    let typed_receipt = sqlx::query(
+        r#"
+        SELECT
+            r.receipt_schema_version,
+            r.command_fingerprint,
+            r.request_session_version,
+            r.response_schema_version,
+            r.http_status,
+            r.success_envelope
+        FROM import_confirm_receipts r
+        JOIN import_sessions s ON s.id = r.session_id AND s.user_id = r.user_id
+        WHERE s.user_id = $1 AND s.session_key = $2
+        "#,
+    )
+    .bind(user_id)
+    .bind(session_id)
+    .fetch_one(pool)
+    .await?;
+    assert_eq!(
+        i64::from(typed_receipt.try_get::<i16, _>("receipt_schema_version")?),
+        receipt["receipt_schema_version"]
+    );
+    assert_eq!(
+        typed_receipt.try_get::<String, _>("command_fingerprint")?,
+        receipt["command_fingerprint"]
+    );
+    assert_eq!(
+        typed_receipt.try_get::<i64, _>("request_session_version")?,
+        receipt["request_session_version"]
+    );
+    assert_eq!(
+        i64::from(typed_receipt.try_get::<i16, _>("response_schema_version")?),
+        receipt["response_schema_version"]
+    );
+    assert_eq!(
+        i64::from(typed_receipt.try_get::<i16, _>("http_status")?),
+        receipt["http_status"]
+    );
+    assert_eq!(
+        typed_receipt.try_get::<Value, _>("success_envelope")?,
+        receipt["success_envelope"]
+    );
     let persisted_metadata = serde_json::to_string(&metadata)?;
     for forbidden in [
         "must-not-be-persisted",
@@ -1861,6 +1903,59 @@ async fn real_postgres_confirm_receipt_replays_and_generic_paths_preserve_termin
     assert_eq!(replay, first);
     assert_eq!(count_user_bills(pool, user_id).await?, 1);
     assert_eq!(count_session_children(pool, user_id, session_id).await?, 0);
+    let typed_receipt_count: i64 = sqlx::query_scalar(
+        r#"
+        SELECT COUNT(*)::BIGINT
+        FROM import_confirm_receipts r
+        JOIN import_sessions s ON s.id = r.session_id AND s.user_id = r.user_id
+        WHERE s.user_id = $1 AND s.session_key = $2
+        "#,
+    )
+    .bind(user_id)
+    .bind(session_id)
+    .fetch_one(pool)
+    .await?;
+    assert_eq!(
+        typed_receipt_count, 1,
+        "replay must not duplicate typed receipt"
+    );
+    sqlx::query(
+        r#"
+        DELETE FROM import_confirm_receipts r
+        USING import_sessions s
+        WHERE s.id = r.session_id
+          AND s.user_id = r.user_id
+          AND s.user_id = $1
+          AND s.session_key = $2
+        "#,
+    )
+    .bind(user_id)
+    .bind(session_id)
+    .execute(pool)
+    .await?;
+    let legacy_replay = confirm_preview_to_bills_with_ack(
+        pool,
+        session_id,
+        scoped_user_id,
+        Some(&acknowledgement),
+    )?;
+    assert_eq!(legacy_replay, first);
+    let typed_receipts_after_legacy_replay: i64 = sqlx::query_scalar(
+        r#"
+        SELECT COUNT(*)::BIGINT
+        FROM import_confirm_receipts r
+        JOIN import_sessions s ON s.id = r.session_id AND s.user_id = r.user_id
+        WHERE s.user_id = $1 AND s.session_key = $2
+        "#,
+    )
+    .bind(user_id)
+    .bind(session_id)
+    .fetch_one(pool)
+    .await?;
+    assert_eq!(
+        typed_receipts_after_legacy_replay, 0,
+        "legacy metadata replay must remain read-only until the backfill slice"
+    );
 
     let conflicting_acknowledgement = ImportHistoryRewriteAcknowledgement {
         selection_scope: json!({"mode": "all"}),
@@ -3366,6 +3461,7 @@ enum ConfirmFailureStage {
     BillCreation,
     NoEffectBoundary,
     ReceiptWrite,
+    TypedReceiptWrite,
     ChildCleanup,
 }
 
@@ -3381,6 +3477,7 @@ async fn real_postgres_confirm_failure_stage_matrix_restores_full_state_and_retr
         ConfirmFailureStage::BillCreation,
         ConfirmFailureStage::NoEffectBoundary,
         ConfirmFailureStage::ReceiptWrite,
+        ConfirmFailureStage::TypedReceiptWrite,
         ConfirmFailureStage::ChildCleanup,
     ];
     let test_db = strict_isolated_postgres_database("confirm_failure_stage_matrix").await?;
@@ -3573,6 +3670,7 @@ async fn real_postgres_confirm_failure_stage_matrix_restores_full_state_and_retr
             ConfirmFailureStage::BillCreation => "bill creation failure injection",
             ConfirmFailureStage::NoEffectBoundary => "no-effect boundary failure injection",
             ConfirmFailureStage::ReceiptWrite => "receipt write failure injection",
+            ConfirmFailureStage::TypedReceiptWrite => "typed receipt write failure injection",
             ConfirmFailureStage::ChildCleanup => "child cleanup failure injection",
         };
 
@@ -3613,6 +3711,7 @@ fn confirm_failure_stage_name(stage: ConfirmFailureStage) -> &'static str {
         ConfirmFailureStage::BillCreation => "bill_creation",
         ConfirmFailureStage::NoEffectBoundary => "no_effect_boundary",
         ConfirmFailureStage::ReceiptWrite => "receipt_write",
+        ConfirmFailureStage::TypedReceiptWrite => "typed_receipt_write",
         ConfirmFailureStage::ChildCleanup => "child_cleanup",
     }
 }
@@ -3645,6 +3744,10 @@ async fn install_confirm_failure_stage(
         ConfirmFailureStage::ReceiptWrite => Some((
             r#"CREATE FUNCTION p2_fail_receipt_write_matrix() RETURNS trigger AS $$ BEGIN IF NEW.status = 'confirmed' THEN RAISE EXCEPTION 'receipt write failure injection'; END IF; RETURN NEW; END; $$ LANGUAGE plpgsql"#,
             r#"CREATE TRIGGER p2_fail_receipt_write_matrix_trigger BEFORE UPDATE ON import_sessions FOR EACH ROW EXECUTE FUNCTION p2_fail_receipt_write_matrix()"#,
+        )),
+        ConfirmFailureStage::TypedReceiptWrite => Some((
+            r#"CREATE FUNCTION p2_fail_typed_receipt_write_matrix() RETURNS trigger AS $$ BEGIN RAISE EXCEPTION 'typed receipt write failure injection'; END; $$ LANGUAGE plpgsql"#,
+            r#"CREATE TRIGGER p2_fail_typed_receipt_write_matrix_trigger BEFORE INSERT ON import_confirm_receipts FOR EACH ROW EXECUTE FUNCTION p2_fail_typed_receipt_write_matrix()"#,
         )),
         ConfirmFailureStage::ChildCleanup => Some((
             r#"CREATE FUNCTION p2_fail_child_cleanup_matrix() RETURNS trigger AS $$ BEGIN RAISE EXCEPTION 'child cleanup failure injection'; END; $$ LANGUAGE plpgsql"#,
@@ -3687,6 +3790,10 @@ async fn uninstall_confirm_failure_stage(
         ConfirmFailureStage::ReceiptWrite => Some((
             "DROP TRIGGER p2_fail_receipt_write_matrix_trigger ON import_sessions",
             "DROP FUNCTION p2_fail_receipt_write_matrix()",
+        )),
+        ConfirmFailureStage::TypedReceiptWrite => Some((
+            "DROP TRIGGER p2_fail_typed_receipt_write_matrix_trigger ON import_confirm_receipts",
+            "DROP FUNCTION p2_fail_typed_receipt_write_matrix()",
         )),
         ConfirmFailureStage::ChildCleanup => Some((
             "DROP TRIGGER p2_fail_child_cleanup_matrix_trigger ON import_preview_rows",
@@ -3838,6 +3945,19 @@ async fn assert_failed_confirm_retryable(
     .await?;
     assert_eq!(preview_rows, expected_preview_rows);
     assert_eq!(count_user_bills(pool, user_id).await?, expected_bill_rows);
+    let typed_receipt_rows: i64 = sqlx::query_scalar(
+        r#"
+        SELECT COUNT(*)::BIGINT
+        FROM import_confirm_receipts r
+        JOIN import_sessions s ON s.id = r.session_id AND s.user_id = r.user_id
+        WHERE s.user_id = $1 AND s.session_key = $2
+        "#,
+    )
+    .bind(user_id)
+    .bind(session_id)
+    .fetch_one(pool)
+    .await?;
+    assert_eq!(typed_receipt_rows, 0);
     Ok(())
 }
 
@@ -3892,6 +4012,11 @@ async fn confirm_rollback_snapshot(
                 SELECT COALESCE(jsonb_agg(to_jsonb(operation) - 'created_at' ORDER BY operation.id), '[]'::jsonb)
                 FROM import_confirm_operations operation JOIN target_session session ON session.id = operation.session_id
                 WHERE operation.user_id = $1
+            ),
+            'typed_receipts', (
+                SELECT COALESCE(jsonb_agg(to_jsonb(receipt) - 'created_at' ORDER BY receipt.session_id), '[]'::jsonb)
+                FROM import_confirm_receipts receipt JOIN target_session session ON session.id = receipt.session_id
+                WHERE receipt.user_id = $1
             ),
             'learning_suggestions', (
                 SELECT COALESCE(jsonb_agg(to_jsonb(suggestion) - 'created_at' - 'updated_at' ORDER BY suggestion.id), '[]'::jsonb)

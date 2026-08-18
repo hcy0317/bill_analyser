@@ -1,8 +1,8 @@
 use sha2::{Digest as _, Sha256};
 
-const CONFIRM_RECEIPT_SCHEMA_VERSION: i64 = 1;
-const CONFIRM_RESPONSE_SCHEMA_VERSION: i64 = 1;
-const CONFIRM_HTTP_SUCCESS_STATUS: i64 = 200;
+const CONFIRM_RECEIPT_SCHEMA_VERSION: i16 = 1;
+const CONFIRM_RESPONSE_SCHEMA_VERSION: i16 = 1;
+const CONFIRM_HTTP_SUCCESS_STATUS: i16 = 200;
 
 #[derive(Debug)]
 struct LockedImportSession {
@@ -24,11 +24,11 @@ struct HistoryConfirmPlan {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct StoredConfirmReceipt {
-    receipt_schema_version: i64,
+    receipt_schema_version: i16,
     command_fingerprint: String,
     request_session_version: i64,
-    response_schema_version: i64,
-    http_status: i64,
+    response_schema_version: i16,
+    http_status: i16,
     success_envelope: Value,
 }
 
@@ -177,7 +177,7 @@ fn confirm_import_command_in_transaction(
                 "terminal import confirmation replayed stored receipt"
             );
             return Ok(ConfirmReceiptResponse {
-                http_status: u16::try_from(receipt.http_status).unwrap_or(200),
+                http_status: receipt.http_status as u16,
                 success_envelope: receipt.success_envelope,
                 replayed: true,
             });
@@ -353,14 +353,13 @@ fn confirm_import_command_in_transaction(
             command_fingerprint,
             request_session_version: session.version,
             response_schema_version: CONFIRM_RESPONSE_SCHEMA_VERSION,
-            http_status: i64::from(response.status_code),
+            http_status: CONFIRM_HTTP_SUCCESS_STATUS,
             success_envelope: response.body.clone(),
         };
         persist_confirm_receipt(
             &mut tx,
             session.id,
             user_id,
-            session.version,
             &receipt,
             result.confirmed_count,
         )

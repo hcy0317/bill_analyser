@@ -92,11 +92,10 @@ async fn persist_confirm_receipt(
     tx: &mut sqlx::Transaction<'_, Postgres>,
     session_db_id: i64,
     user_id: i64,
-    request_session_version: i64,
     receipt: &StoredConfirmReceipt,
     confirmed_count: usize,
 ) -> DbResult<()> {
-    let receipt = serde_json::to_value(receipt).map_err(|error| {
+    let receipt_json = serde_json::to_value(receipt).map_err(|error| {
         DbError::InvalidOperation(format!("failed to serialize confirm receipt: {error}"))
     })?;
     let changed = sqlx::query(
@@ -112,9 +111,9 @@ async fn persist_confirm_receipt(
     )
     .bind(session_db_id)
     .bind(user_id)
-    .bind(request_session_version)
+    .bind(receipt.request_session_version)
     .bind(i64::try_from(confirmed_count).unwrap_or(i64::MAX))
-    .bind(receipt.to_string())
+    .bind(receipt_json.to_string())
     .execute(&mut **tx)
     .await?
     .rows_affected();
@@ -123,6 +122,31 @@ async fn persist_confirm_receipt(
             "import session confirm CAS mismatch".to_string(),
         ));
     }
+    sqlx::query(
+        r#"
+        INSERT INTO import_confirm_receipts (
+            session_id,
+            user_id,
+            receipt_schema_version,
+            command_fingerprint,
+            request_session_version,
+            response_schema_version,
+            http_status,
+            success_envelope
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        "#,
+    )
+    .bind(session_db_id)
+    .bind(user_id)
+    .bind(receipt.receipt_schema_version)
+    .bind(&receipt.command_fingerprint)
+    .bind(receipt.request_session_version)
+    .bind(receipt.response_schema_version)
+    .bind(receipt.http_status)
+    .bind(&receipt.success_envelope)
+    .execute(&mut **tx)
+    .await?;
     Ok(())
 }
 

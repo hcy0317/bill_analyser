@@ -1,0 +1,108 @@
+{
+  "schema_version": 1,
+  "date": "2026-08-18",
+  "cyanflow_slice": "C6b typed confirm receipt dual projection",
+  "status": "local_audit_green",
+  "source": {
+    "base_head": "c8b7405b6264eb7fc1d5c300ca91fc31cde45273",
+    "implementation_commit": "9b1ed88277b25e0ebafe724dba79c8cd5553f8ac",
+    "database_policy": "full coverage used an isolated fresh database; the long-lived development database ledger was not modified"
+  },
+  "runtime_contract": {
+    "writer_entry": "confirm_import_command_in_transaction -> persist_confirm_receipt",
+    "writer_count": 1,
+    "metadata_projection": "import_sessions.metadata.confirm_receipt",
+    "typed_projection": "import_confirm_receipts",
+    "same_sqlx_transaction": true,
+    "business_confirm_double_execution": false,
+    "active_replay_reader": "metadata only",
+    "legacy_metadata_only_replay_supported": true,
+    "replay_auto_backfill": false,
+    "public_api_changed": false,
+    "raw_command_persisted": false,
+    "acknowledgement_secret_persisted": false
+  },
+  "transaction_order": [
+    "bill and history effects",
+    "terminal session metadata receipt",
+    "typed receipt insert",
+    "staging child cleanup",
+    "commit"
+  ],
+  "tdd": {
+    "red": {
+      "test": "real_postgres_confirm_receipt_replays_and_generic_paths_preserve_terminal_state",
+      "configured_postgres": true,
+      "failure": "RowNotFound for import_confirm_receipts",
+      "passed": 0,
+      "failed": 1,
+      "skipped": 0
+    },
+    "review_fix": {
+      "standards_axis_initial_finding": "request_session_version was accepted both as a function argument and inside StoredConfirmReceipt",
+      "resolution": "metadata, typed projection and session CAS now read the receipt field as one source",
+      "standards_axis_final": "passed",
+      "spec_axis_final": "passed"
+    },
+    "green": {
+      "receipt_replay_focused": {
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0
+      },
+      "failure_matrix_focused": {
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0
+      },
+      "import_staging_postgres": {
+        "passed": 36,
+        "failed": 0,
+        "skipped": 0
+      },
+      "receipt_schema_postgres": {
+        "passed": 2,
+        "failed": 0,
+        "skipped": 0
+      },
+      "bill_analyser_db_all_targets": "pass",
+      "workspace_format": "pass",
+      "workspace_clippy_all_targets": "pass",
+      "rust_backend_structure_gate": "pass",
+      "rust_only_source_tree_gate": "pass",
+      "git_diff_check": "pass",
+      "workspace_line_coverage": {
+        "records": 545,
+        "lines_found": 79037,
+        "lines_hit": 52338,
+        "percent": 66.22
+      },
+      "changed_line_coverage": {
+        "executable_lines": 30,
+        "covered_lines": 30,
+        "percent": 100.0
+      },
+      "fresh_database_migration_ledger": {
+        "max_version": 27,
+        "migration_count": 27
+      }
+    }
+  },
+  "failure_injection": {
+    "typed_receipt_before_insert": "full transaction rollback and retry pass",
+    "child_cleanup_after_typed_insert": "typed receipt and all prior effects roll back",
+    "typed_receipt_included_in_state_snapshot": true
+  },
+  "known_environment_gate": {
+    "long_lived_database_error": "VersionMismatch(25)",
+    "long_lived_database_ledger_modified": false,
+    "fresh_database_chain_verified": true
+  },
+  "cleanup": {
+    "red_isolated_databases_removed": 2,
+    "coverage_database_removed": true,
+    "workspace_lcov_removed": true,
+    "preexisting_coverage_json_modified": false
+  },
+  "next": "bounded historical metadata receipt backfill and shadow parity before typed read cutover"
+}

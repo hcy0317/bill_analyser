@@ -2,7 +2,7 @@
 
 日期：2026-08-18
 
-状态：本地实现、双轴审查、恢复演练与完整审计门禁完成
+状态：已通过 PR #325 squash 合并到 `main`（`c8b7405b6264eb7fc1d5c300ca91fc31cde45273`）
 
 范围：只增加独立 typed confirm receipt 存储及数据库合同；不改变现有 confirm writer/read、公开 API、session 合同、账单/history effect、backfill 或 read cutover
 
@@ -26,6 +26,8 @@ C6a 通过 forward-only migration `0027_import_confirm_receipts.sql` 增加 `imp
 - backfill：无；真实恢复 corpus 的 9 个 metadata receipts 保持原位，新表保持 0 行。
 - rollback：migration 未提交时由 SQLx 事务整体回滚；已部署后停止新 binary 并 forward-fix，不删除新表或篡改 terminal receipt。
 - next：C6b 只能修改现有唯一 confirm transaction writer，使 typed row 与 metadata 旧投影同事务提交；read cutover 必须等待 backfill、shadow parity 与 replay compatibility 独立通过。
+
+C6b 已按上述边界完成同事务双投影；本节保留 C6a 合并时的 transition ledger。当前 writer/read 边界以 `cyanflow-c6-confirm-receipt-dual-write-2026-08-18.md` 为准。
 
 ## TDD 与双轴审查
 
