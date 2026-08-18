@@ -106,5 +106,9 @@ path = "../../../tests/backend/db/import_signal_columns_postgres.rs"
 name = "import_signal_backfill_postgres"
 path = "../../../tests/backend/db/import_signal_backfill_postgres.rs"
 
+[[test]]
+name = "import_signal_read_shadow_postgres"
+path = "../../../tests/backend/db/import_signal_read_shadow_postgres.rs"
+
 [lints]
 workspace = true

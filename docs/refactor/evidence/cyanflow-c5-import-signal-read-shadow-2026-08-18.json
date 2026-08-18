@@ -1,0 +1,103 @@
+{
+  "schema_version": 1,
+  "date": "2026-08-18",
+  "cyanflow_slice": "C5f-a import signal read shadow",
+  "status": "local_audit_green",
+  "source": {
+    "base_head": "aca34e7e864d89e04190017256960c22ced1b65c",
+    "implementation_commit": "789a019a3",
+    "database_policy": "full workspace coverage used a fresh isolated database; no target or long-lived database backfill or read cutover was performed"
+  },
+  "ownership": {
+    "semantic_writer": "Rust PreviewStateKernel",
+    "production_reader": "legacy import_preview_signal_flags projection",
+    "shadow_reader": "typed signal columns restricted to repository migration audit",
+    "legacy_sql_role": "production compatibility read and parity oracle",
+    "api_changed": false,
+    "session_contract_changed": false,
+    "mutation_contract_changed": false,
+    "confirm_contract_changed": false
+  },
+  "read_shadow_contract": {
+    "required_projection_version": 1,
+    "transaction_isolation": "repeatable read",
+    "transaction_read_only": true,
+    "same_snapshot": true,
+    "preview_ids_bypass_allowed": false,
+    "legacy_signal_function_used_by_typed_query": false,
+    "compared_fields": [
+      "rows",
+      "total",
+      "six_signal_counts",
+      "selection_counts",
+      "facets",
+      "selection_hash"
+    ]
+  },
+  "failure_policy": {
+    "unmaterialized_row": "fail closed",
+    "unknown_projection_version": "fail closed",
+    "preview_ids_bypass": "reject",
+    "parity_mismatch": "report without changing production read or canonical projection"
+  },
+  "tdd": {
+    "red": {
+      "test": "import_signal_read_shadow_postgres",
+      "failure": "typed signal read source and query builders were unresolved"
+    },
+    "green": {
+      "read_shadow_real_postgres": {
+        "passed": 2,
+        "failed": 0,
+        "skipped": 0
+      },
+      "db_lib": {
+        "passed": 149,
+        "failed": 0
+      },
+      "import_staging_real_postgres": {
+        "passed": 36,
+        "failed": 0,
+        "skipped": 0
+      },
+      "db_all_targets": "pass",
+      "workspace_format": "pass",
+      "workspace_clippy_all_targets": "pass",
+      "rust_only_source_tree": {
+        "status": "pass",
+        "tracked_paths": 2021
+      },
+      "rust_backend_structure": {
+        "status": "pass",
+        "files_scanned": 604,
+        "baseline_entries": 3
+      },
+      "workspace_line_coverage": {
+        "lines_found": 73412,
+        "lines_hit": 49191,
+        "percent": 67.0068
+      },
+      "changed_line_coverage": {
+        "coverage_eligible_files": 3,
+        "matched_files": 3,
+        "executable_lines": 487,
+        "covered_lines": 474,
+        "percent": 97.33
+      }
+    }
+  },
+  "isolated_coverage_database": {
+    "name": "bill_analyser_c5f_shadow_cov_20260818_2",
+    "migration_count": 26,
+    "maximum_migration_version": 26,
+    "removed_after_test": true,
+    "verified_absent_after_cleanup": true
+  },
+  "transition_ledger": {
+    "production_read": "unchanged legacy projection",
+    "shadow_read": "typed v1 repository audit only",
+    "target_backfill": "not executed",
+    "public_read_cutover": "blocked until target full backfill, cumulative parity zero, and performance gates",
+    "next": "C5f-b target batch orchestration and cumulative parity evidence"
+  }
+}

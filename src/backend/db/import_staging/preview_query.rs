@@ -1,3 +1,25 @@
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PreviewSignalReadSource {
+    LegacyPayload,
+    TypedV1,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PreviewSignalPredicateSource {
+    LegacyPayload,
+    TypedV1,
+    ScopeProjection,
+}
+
+struct PreviewPageQuerySpec<'a> {
+    filters: &'a ImportPreviewQueryFilters,
+    sort_by: &'a str,
+    sort_direction: &'a str,
+    page_size: usize,
+    offset: usize,
+    signal_read_source: PreviewSignalReadSource,
+}
+
 /// 读取 session 下的 preview rows；selected_only 必须只作为服务端筛选，不能依赖前端当前页状态。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn get_preview_by_session(
@@ -90,7 +112,29 @@ pub fn query_preview_page_by_session(
     user_id: UserId,
     request: &ImportPreviewPageRequest,
 ) -> DbResult<ImportPreviewPageResult> {
+    query_preview_page_by_session_with_signal_read_source(
+        pool,
+        session_id,
+        user_id,
+        request,
+        PreviewSignalReadSource::LegacyPayload,
+    )
+}
+
+fn query_preview_page_by_session_with_signal_read_source(
+    pool: &PostgresPool,
+    session_id: &str,
+    user_id: UserId,
+    request: &ImportPreviewPageRequest,
+    signal_read_source: PreviewSignalReadSource,
+) -> DbResult<ImportPreviewPageResult> {
     if !request.preview_ids.is_empty() {
+        if signal_read_source == PreviewSignalReadSource::TypedV1 {
+            return Err(DbError::InvalidOperation(
+                "typed import signal read shadow does not accept preview_ids bypass queries"
+                    .to_string(),
+            ));
+        }
         let rows = get_preview_by_ids(pool, session_id, &request.preview_ids, user_id)?;
         return Ok(build_preview_page_result_from_rows(rows, request));
     }
@@ -98,39 +142,161 @@ pub fn query_preview_page_by_session(
     block_on_db(async move {
         let session_db_id = session_db_id(pool, session_id, user_id).await?;
         let user_id_i64 = user_id_i64(user_id)?;
-        let page = request.page.max(1);
-        let page_size = request.page_size.max(1);
-        let offset = page.saturating_sub(1).saturating_mul(page_size);
-        let mut query = build_preview_page_query(
+        let mut connection = pool.acquire().await?;
+        if signal_read_source == PreviewSignalReadSource::TypedV1 {
+            ensure_preview_signal_projection_v1(&mut connection, session_db_id, user_id_i64)
+                .await?;
+        }
+        query_preview_page_from_connection(
+            &mut connection,
             session_db_id,
             user_id_i64,
-            &request.filters,
-            &request.sort_by,
-            &request.sort_direction,
+            request,
+            signal_read_source,
+        )
+        .await
+    })
+}
+
+async fn query_preview_page_from_connection(
+    connection: &mut sqlx::PgConnection,
+    session_db_id: i64,
+    user_id: i64,
+    request: &ImportPreviewPageRequest,
+    signal_read_source: PreviewSignalReadSource,
+) -> DbResult<ImportPreviewPageResult> {
+    let page = request.page.max(1);
+    let page_size = request.page_size.max(1);
+    let offset = page.saturating_sub(1).saturating_mul(page_size);
+    let mut query = build_preview_page_query_with_signal_read_source(
+        session_db_id,
+        user_id,
+        PreviewPageQuerySpec {
+            filters: &request.filters,
+            sort_by: &request.sort_by,
+            sort_direction: &request.sort_direction,
             page_size,
             offset,
-        );
-        let rows = query.build().fetch_all(pool).await?;
-        let page_rows = rows
-            .iter()
-            .map(preview_from_pg_row)
-            .collect::<DbResult<Vec<_>>>()?;
-        let metadata = build_preview_metadata_for_query(
-            pool,
+            signal_read_source,
+        },
+    );
+    let rows = query.build().fetch_all(&mut *connection).await?;
+    let page_rows = rows
+        .iter()
+        .map(preview_from_pg_row)
+        .collect::<DbResult<Vec<_>>>()?;
+    let metadata = build_preview_metadata_for_query(
+        connection,
+        session_db_id,
+        user_id,
+        &request.filters,
+        signal_read_source,
+    )
+    .await?;
+    let total = metadata.counts.total;
+    Ok(ImportPreviewPageResult {
+        rows: page_rows,
+        total,
+        page,
+        page_size,
+        metadata,
+    })
+}
+
+/// 迁移期只读 shadow：同一请求分别走 legacy payload 与 typed v1 columns，生产入口不调用它。
+#[tracing::instrument(level = "debug", skip_all)]
+pub fn audit_import_preview_signal_read_parity(
+    pool: &PostgresPool,
+    session_id: &str,
+    user_id: UserId,
+    request: &ImportPreviewPageRequest,
+) -> DbResult<ImportPreviewSignalReadParityReport> {
+    if !request.preview_ids.is_empty() {
+        return Err(DbError::InvalidOperation(
+            "import signal read parity audit requires a server-side query without preview_ids"
+                .to_string(),
+        ));
+    }
+    block_on_db(async move {
+        let user_id_i64 = user_id_i64(user_id)?;
+        let mut tx = pool.begin().await?;
+        sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
+            .execute(&mut *tx)
+            .await?;
+        let session_db_id = sqlx::query_scalar::<_, Option<i64>>(
+            "SELECT id FROM import_sessions WHERE session_key=$1 AND user_id=$2",
+        )
+        .bind(session_id)
+        .bind(user_id_i64)
+        .fetch_one(&mut *tx)
+        .await?
+        .ok_or_else(|| DbError::InvalidOperation("import session not found".to_string()))?;
+        ensure_preview_signal_projection_v1(&mut tx, session_db_id, user_id_i64).await?;
+        let legacy = query_preview_page_from_connection(
+            &mut tx,
             session_db_id,
             user_id_i64,
-            &request.filters,
+            request,
+            PreviewSignalReadSource::LegacyPayload,
         )
         .await?;
-        let total = metadata.counts.total;
-        Ok(ImportPreviewPageResult {
-            rows: page_rows,
-            total,
-            page,
-            page_size,
-            metadata,
-        })
+        let typed = query_preview_page_from_connection(
+            &mut tx,
+            session_db_id,
+            user_id_i64,
+            request,
+            PreviewSignalReadSource::TypedV1,
+        )
+        .await?;
+        tx.commit().await?;
+        Ok(build_import_preview_signal_read_parity_report(
+            legacy, typed,
+        ))
     })
+}
+
+fn build_import_preview_signal_read_parity_report(
+    legacy: ImportPreviewPageResult,
+    typed: ImportPreviewPageResult,
+) -> ImportPreviewSignalReadParityReport {
+    ImportPreviewSignalReadParityReport {
+        observed_rows: legacy.total,
+        legacy_total: legacy.total,
+        typed_total: typed.total,
+        rows_mismatch: legacy.rows != typed.rows,
+        total_mismatch: legacy.total != typed.total,
+        signal_counts_mismatch: legacy.metadata.counts.signals
+            != typed.metadata.counts.signals,
+        selection_counts_mismatch: legacy.metadata.counts.annotations
+            != typed.metadata.counts.annotations
+            || legacy.metadata.counts.selected != typed.metadata.counts.selected
+            || legacy.metadata.counts.selected_total != typed.metadata.counts.selected_total
+            || legacy.metadata.counts.selected_invalid
+                != typed.metadata.counts.selected_invalid,
+        facets_mismatch: legacy.metadata.facets != typed.metadata.facets,
+        selection_hash_mismatch: legacy.metadata.selection_hash
+            != typed.metadata.selection_hash,
+    }
+}
+
+async fn ensure_preview_signal_projection_v1(
+    connection: &mut sqlx::PgConnection,
+    session_db_id: i64,
+    user_id: i64,
+) -> DbResult<()> {
+    let unmaterialized_rows: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*)::BIGINT FROM import_preview_rows WHERE session_id=$1 AND user_id=$2 AND signal_projection_version<>1",
+    )
+    .bind(session_db_id)
+    .bind(user_id)
+    .fetch_one(&mut *connection)
+    .await?;
+    if unmaterialized_rows > 0 {
+        return Err(DbError::InvalidOperation(format!(
+            "typed import signal read requires signal_projection_version=1 for every session row; found {unmaterialized_rows} unmaterialized rows"
+        )));
+    }
+    Ok(())
 }
 
 pub fn preview_id_snapshot_hash(ids: &[i64]) -> String {
@@ -207,6 +373,7 @@ fn build_preview_count_query(
     query
 }
 
+#[cfg(test)]
 fn build_preview_page_query(
     session_db_id: i64,
     user_id: i64,
@@ -216,18 +383,47 @@ fn build_preview_page_query(
     page_size: usize,
     offset: usize,
 ) -> QueryBuilder<'static, Postgres> {
+    build_preview_page_query_with_signal_read_source(
+        session_db_id,
+        user_id,
+        PreviewPageQuerySpec {
+            filters,
+            sort_by,
+            sort_direction,
+            page_size,
+            offset,
+            signal_read_source: PreviewSignalReadSource::LegacyPayload,
+        },
+    )
+}
+
+fn build_preview_page_query_with_signal_read_source(
+    session_db_id: i64,
+    user_id: i64,
+    spec: PreviewPageQuerySpec<'_>,
+) -> QueryBuilder<'static, Postgres> {
     let mut query = QueryBuilder::<Postgres>::new(
         "SELECT p.*, s.session_key FROM import_preview_rows p JOIN import_sessions s ON s.id = p.session_id WHERE p.session_id = ",
     );
     query.push_bind(session_db_id);
     query.push(" AND p.user_id = ");
     query.push_bind(user_id);
-    push_preview_query_predicates(&mut query, filters, "p");
-    push_preview_order_by(&mut query, sort_by, sort_direction);
+    push_preview_query_predicates_with_signal_source(
+        &mut query,
+        spec.filters,
+        "p",
+        match spec.signal_read_source {
+            PreviewSignalReadSource::LegacyPayload => {
+                PreviewSignalPredicateSource::LegacyPayload
+            }
+            PreviewSignalReadSource::TypedV1 => PreviewSignalPredicateSource::TypedV1,
+        },
+    );
+    push_preview_order_by(&mut query, spec.sort_by, spec.sort_direction);
     query.push(" LIMIT ");
-    query.push_bind(i64::try_from(page_size).unwrap_or(i64::MAX).max(1));
+    query.push_bind(i64::try_from(spec.page_size).unwrap_or(i64::MAX).max(1));
     query.push(" OFFSET ");
-    query.push_bind(i64::try_from(offset).unwrap_or(i64::MAX));
+    query.push_bind(i64::try_from(spec.offset).unwrap_or(i64::MAX));
     query
 }
 
@@ -236,7 +432,12 @@ fn push_preview_query_predicates(
     filters: &ImportPreviewQueryFilters,
     alias: &str,
 ) {
-    push_preview_query_predicates_with_projection(query, filters, alias, false);
+    push_preview_query_predicates_with_signal_source(
+        query,
+        filters,
+        alias,
+        PreviewSignalPredicateSource::LegacyPayload,
+    );
 }
 
 fn push_preview_metadata_query_predicates(
@@ -244,16 +445,27 @@ fn push_preview_metadata_query_predicates(
     filters: &ImportPreviewQueryFilters,
     alias: &str,
 ) {
-    push_preview_query_predicates_with_projection(query, filters, alias, true);
+    push_preview_query_predicates_with_signal_source(
+        query,
+        filters,
+        alias,
+        PreviewSignalPredicateSource::ScopeProjection,
+    );
 }
 
-fn push_preview_query_predicates_with_projection(
+fn push_preview_query_predicates_with_signal_source(
     query: &mut QueryBuilder<'_, Postgres>,
     filters: &ImportPreviewQueryFilters,
     alias: &str,
-    projected_signals: bool,
+    signal_source: PreviewSignalPredicateSource,
 ) {
     let column = |name: &str| format!("{alias}.{name}");
+    if signal_source == PreviewSignalPredicateSource::TypedV1 {
+        query.push(" AND ");
+        query.push(column("signal_projection_version"));
+        query.push(" = ");
+        query.push_bind(1_i16);
+    }
     if filters.selected_only {
         query.push(" AND ");
         query.push(column("selected"));
@@ -286,14 +498,32 @@ fn push_preview_query_predicates_with_projection(
         push_tag_predicate(query, alias, &value);
     }
     if let Some(value) = normalized_filter(filters.signal.as_deref()) {
-        if projected_signals {
-            push_preview_projected_signal_predicate(query, alias, &value);
-        } else {
-            push_preview_signal_predicate(query, alias, &value);
+        match signal_source {
+            PreviewSignalPredicateSource::LegacyPayload => {
+                push_preview_signal_predicate(query, alias, &value)
+            }
+            PreviewSignalPredicateSource::TypedV1 => {
+                push_preview_materialized_signal_predicate(
+                    query,
+                    alias,
+                    &value,
+                    "signal_",
+                )
+            }
+            PreviewSignalPredicateSource::ScopeProjection => {
+                push_preview_materialized_signal_predicate(
+                    query,
+                    alias,
+                    &value,
+                    "read_signal_",
+                )
+            }
         }
     }
     if let Some(value) = normalized_filter(filters.annotation.as_deref()) {
-        if projected_signals && matches!(value.as_str(), "needs-review" | "no-issues") {
+        if signal_source == PreviewSignalPredicateSource::ScopeProjection
+            && matches!(value.as_str(), "needs-review" | "no-issues")
+        {
             query.push(" AND ");
             if value == "no-issues" {
                 query.push("NOT ");
@@ -356,255 +586,4 @@ fn normalized_filter(value: Option<&str>) -> Option<String> {
 
 fn like_pattern(value: &str) -> String {
     format!("%{value}%")
-}
-
-fn build_preview_metadata(total: usize) -> ImportPreviewMetadata {
-    let counts = ImportPreviewCounts {
-        signals: empty_visible_signal_counts(),
-        total,
-        ..ImportPreviewCounts::default()
-    };
-    ImportPreviewMetadata {
-        counts,
-        facets: ImportPreviewFacets::default(),
-        selection_hash: preview_id_snapshot_hash(&[]),
-    }
-}
-
-fn push_preview_projected_signal_predicate(
-    query: &mut QueryBuilder<'_, Postgres>,
-    alias: &str,
-    value: &str,
-) {
-    query.push(" AND ");
-    let filter = normalize_visible_signal_filter(value);
-    let (family, status) = signal_filter_family_status(&filter)
-        .map(|(family, status)| (family, Some(status)))
-        .unwrap_or((filter.as_str(), None));
-    let column = match ImportPreviewSignalFamily::parse(family) {
-        Some(ImportPreviewSignalFamily::Parser) => "legacy_signal_parser",
-        Some(ImportPreviewSignalFamily::PlatformDuplicate) => {
-            "legacy_signal_platform_duplicate"
-        }
-        Some(ImportPreviewSignalFamily::Transfer) => "legacy_signal_transfer",
-        Some(ImportPreviewSignalFamily::History) => "legacy_signal_history",
-        Some(ImportPreviewSignalFamily::Learning) => "legacy_signal_learning",
-        Some(ImportPreviewSignalFamily::Llm) => "legacy_signal_llm",
-        None => {
-            query.push("FALSE");
-            return;
-        }
-    };
-    query.push(alias);
-    query.push(".");
-    query.push(column);
-    if let Some(status) = status {
-        query.push(" AND ");
-        push_preview_feedback_family_text_search(query, alias, family, status);
-    }
-}
-
-fn build_preview_metadata_from_rows(
-    total: usize,
-    signal_count_rows: &[ImportPreviewRow],
-    selected_ids: &[i64],
-    selected_count: usize,
-    selected_invalid_count: usize,
-) -> ImportPreviewMetadata {
-    let mut metadata = build_preview_metadata(total);
-    metadata.counts.selected = selected_count;
-    metadata.counts.selected_total = selected_ids.len();
-    metadata.counts.selected_invalid = selected_invalid_count;
-    metadata.selection_hash = preview_id_snapshot_hash(selected_ids);
-    for family in IMPORT_PREVIEW_VISIBLE_SIGNAL_FAMILIES {
-        let count = signal_count_rows
-            .iter()
-            .filter(|row| preview_signal_family_matches(family, row))
-            .count();
-        metadata
-            .counts
-            .signals
-            .insert((*family).to_string(), count);
-    }
-    metadata
-}
-
-fn empty_visible_signal_counts() -> BTreeMap<String, usize> {
-    IMPORT_PREVIEW_VISIBLE_SIGNAL_FAMILIES
-        .iter()
-        .map(|family| ((*family).to_string(), 0usize))
-        .collect()
-}
-
-async fn build_preview_metadata_for_query(
-    pool: &PostgresPool,
-    session_db_id: i64,
-    user_id: i64,
-    filters: &ImportPreviewQueryFilters,
-) -> DbResult<ImportPreviewMetadata> {
-    query_preview_metadata_aggregate(pool, session_db_id, user_id, filters).await
-}
-
-async fn query_preview_metadata_aggregate(
-    pool: &PostgresPool,
-    session_db_id: i64,
-    user_id: i64,
-    filters: &ImportPreviewQueryFilters,
-) -> DbResult<ImportPreviewMetadata> {
-    let mut query = build_preview_metadata_aggregate_query(session_db_id, user_id, filters);
-    let row = query.build().fetch_one(pool).await?;
-    let selected_ids = row.try_get::<Vec<i64>, _>("selected_ids")?;
-    let total = preview_metadata_database_count(row.try_get("total_count")?, "total_count")?;
-    let mut metadata = build_preview_metadata(total);
-    metadata.counts.selected =
-        preview_metadata_database_count(row.try_get("selected_count")?, "selected_count")?;
-    metadata.counts.selected_total = selected_ids.len();
-    metadata.counts.selected_invalid = preview_metadata_database_count(
-        row.try_get("selected_invalid")?,
-        "selected_invalid",
-    )?;
-    metadata.counts.signals = query_preview_signal_counts(&row)?;
-    metadata.facets.categories = query_preview_facets(&row, "category_facets")?;
-    metadata.facets.accounts = query_preview_facets(&row, "account_facets")?;
-    metadata.facets.tags = query_preview_facets(&row, "tag_facets")?;
-    metadata.selection_hash = preview_id_snapshot_hash(&selected_ids);
-    Ok(metadata)
-}
-
-fn preview_metadata_database_count(count: i64, column: &str) -> DbResult<usize> {
-    usize::try_from(count).map_err(|_| {
-        DbError::InvalidOperation(format!(
-            "invalid preview metadata {column} returned by PostgreSQL: {count}"
-        ))
-    })
-}
-
-fn build_preview_metadata_aggregate_query(
-    session_db_id: i64,
-    user_id: i64,
-    filters: &ImportPreviewQueryFilters,
-) -> QueryBuilder<'static, Postgres> {
-    build_preview_metadata_aggregate_query_with_prefix("", session_db_id, user_id, filters)
-}
-
-fn build_preview_metadata_aggregate_query_with_prefix(
-    prefix: &'static str,
-    session_db_id: i64,
-    user_id: i64,
-    filters: &ImportPreviewQueryFilters,
-) -> QueryBuilder<'static, Postgres> {
-    let mut query = QueryBuilder::<Postgres>::new(prefix);
-    query.push("WITH preview_scope AS MATERIALIZED (SELECT p.*, signal_flags.parser AS legacy_signal_parser, signal_flags.platform_duplicate AS legacy_signal_platform_duplicate, signal_flags.transfer AS legacy_signal_transfer, signal_flags.history AS legacy_signal_history, signal_flags.learning AS legacy_signal_learning, signal_flags.llm AS legacy_signal_llm, ");
-    push_preview_current_review_condition_with_joins(&mut query, "p");
-    query.push(" AS needs_review FROM import_preview_rows p CROSS JOIN LATERAL jsonb_to_record(import_preview_signal_flags(p.preview_payload)) AS signal_flags(parser BOOLEAN, platform_duplicate BOOLEAN, transfer BOOLEAN, history BOOLEAN, learning BOOLEAN, llm BOOLEAN) LEFT JOIN categories c ON c.user_id = p.user_id AND c.id = p.category_id AND c.is_active = true LEFT JOIN accounts source_account ON source_account.user_id = p.user_id AND source_account.id = p.account_id AND source_account.is_active = true LEFT JOIN accounts target_account ON target_account.user_id = p.user_id AND target_account.id = p.transfer_target_account_id AND target_account.is_active = true WHERE p.session_id = ");
-    query.push_bind(session_db_id);
-    query.push(" AND p.user_id = ");
-    query.push_bind(user_id);
-    query.push("), core_aggregates AS (SELECT ");
-    query.push("COUNT(*) FILTER (WHERE TRUE");
-    push_preview_metadata_query_predicates(&mut query, filters, "p");
-    query.push(")::BIGINT AS total_count, ");
-
-    let mut selected_filters = filters.clone();
-    selected_filters.selected_only = true;
-    query.push("COUNT(*) FILTER (WHERE TRUE");
-    push_preview_metadata_query_predicates(&mut query, &selected_filters, "p");
-    query.push(")::BIGINT AS selected_count, ");
-
-    let mut selected_invalid_filters = selected_filters;
-    selected_invalid_filters.annotation = Some("needs-review".to_string());
-    query.push("COUNT(*) FILTER (WHERE TRUE");
-    push_preview_metadata_query_predicates(&mut query, &selected_invalid_filters, "p");
-    query.push(")::BIGINT AS selected_invalid, ");
-
-    query.push("COALESCE(array_agg(p.id ORDER BY p.id) FILTER (WHERE p.selected = true), ARRAY[]::BIGINT[]) AS selected_ids, ");
-    push_preview_signal_counts_aggregate(&mut query, filters);
-    query.push(" AS signal_counts FROM preview_scope p) SELECT core_aggregates.total_count, core_aggregates.selected_count, core_aggregates.selected_invalid, core_aggregates.selected_ids, core_aggregates.signal_counts, ");
-    push_preview_category_facets_aggregate(&mut query, session_db_id, user_id, filters);
-    query.push(" AS category_facets, ");
-    push_preview_account_facets_aggregate(&mut query, session_db_id, user_id, filters);
-    query.push(" AS account_facets, ");
-    push_preview_tag_facets_aggregate(&mut query, session_db_id, user_id, filters);
-    query.push(" AS tag_facets FROM core_aggregates");
-    query
-}
-
-fn push_preview_signal_counts_aggregate(
-    query: &mut QueryBuilder<'_, Postgres>,
-    filters: &ImportPreviewQueryFilters,
-) {
-    query.push("jsonb_build_object(");
-    for (index, family) in IMPORT_PREVIEW_VISIBLE_SIGNAL_FAMILIES.iter().enumerate() {
-        if index > 0 {
-            query.push(", ");
-        }
-        let mut signal_filters = filters.clone();
-        signal_filters.signal = Some((*family).to_string());
-        query.push_bind((*family).to_string());
-        query.push(", COUNT(*) FILTER (WHERE TRUE");
-        push_preview_metadata_query_predicates(query, &signal_filters, "p");
-        query.push(")::BIGINT");
-    }
-    query.push(")");
-}
-
-fn push_preview_category_facets_aggregate(
-    query: &mut QueryBuilder<'_, Postgres>,
-    _session_db_id: i64,
-    _user_id: i64,
-    filters: &ImportPreviewQueryFilters,
-) {
-    let mut facet_filters = filters.clone();
-    facet_filters.category = None;
-    query.push("COALESCE((SELECT jsonb_agg(jsonb_build_object('value', facet_rows.value, 'label', facet_rows.label, 'count', facet_rows.count) ORDER BY facet_rows.count DESC, facet_rows.label ASC) FROM (SELECT p.category_id::text AS value, COALESCE(NULLIF(c.path, ''), c.name, p.category_id::text) AS label, COUNT(*)::BIGINT AS count FROM preview_scope p JOIN categories c ON c.user_id = p.user_id AND c.id = p.category_id AND c.is_active = true WHERE p.category_id IS NOT NULL");
-    push_preview_metadata_query_predicates(query, &facet_filters, "p");
-    query.push(" GROUP BY p.category_id, c.path, c.name ORDER BY count DESC, label ASC LIMIT ");
-    query.push_bind(IMPORT_PREVIEW_FACET_LIMIT);
-    query.push(") facet_rows), '[]'::jsonb)");
-}
-
-fn push_preview_account_facets_aggregate(
-    query: &mut QueryBuilder<'_, Postgres>,
-    _session_db_id: i64,
-    _user_id: i64,
-    filters: &ImportPreviewQueryFilters,
-) {
-    let mut facet_filters = filters.clone();
-    facet_filters.account = None;
-    query.push("COALESCE((SELECT jsonb_agg(jsonb_build_object('value', facet_rows.value, 'label', facet_rows.label, 'count', facet_rows.count) ORDER BY facet_rows.count DESC, facet_rows.label ASC) FROM (SELECT account_values.account_id::text AS value, COALESCE(a.name, account_values.account_id::text) AS label, COUNT(*)::BIGINT AS count FROM preview_scope p CROSS JOIN LATERAL (VALUES (p.account_id), (p.transfer_target_account_id)) AS account_values(account_id) JOIN accounts a ON a.user_id = p.user_id AND a.id = account_values.account_id AND a.is_active = true WHERE account_values.account_id IS NOT NULL");
-    push_preview_metadata_query_predicates(query, &facet_filters, "p");
-    query.push(" GROUP BY account_values.account_id, a.name ORDER BY count DESC, label ASC LIMIT ");
-    query.push_bind(IMPORT_PREVIEW_FACET_LIMIT);
-    query.push(") facet_rows), '[]'::jsonb)");
-}
-
-fn push_preview_tag_facets_aggregate(
-    query: &mut QueryBuilder<'_, Postgres>,
-    _session_db_id: i64,
-    _user_id: i64,
-    filters: &ImportPreviewQueryFilters,
-) {
-    let mut facet_filters = filters.clone();
-    facet_filters.tag = None;
-    query.push("COALESCE((SELECT jsonb_agg(jsonb_build_object('value', facet_rows.value, 'label', facet_rows.label, 'count', facet_rows.count) ORDER BY facet_rows.count DESC, facet_rows.label ASC) FROM (SELECT tag_values.tag AS value, tag_values.tag AS label, COUNT(*)::BIGINT AS count FROM preview_scope p CROSS JOIN LATERAL jsonb_array_elements_text(CASE WHEN jsonb_typeof(p.preview_payload->'preview_parser_tags') = 'array' THEN p.preview_payload->'preview_parser_tags' ELSE '[]'::jsonb END) AS tag_values(tag) WHERE btrim(tag_values.tag, ");
-    query.push_bind(IMPORT_PREVIEW_SIGNAL_TRIM_CHARS);
-    query.push(") <> ''");
-    push_preview_metadata_query_predicates(query, &facet_filters, "p");
-    query.push(" GROUP BY tag_values.tag ORDER BY count DESC, label ASC LIMIT ");
-    query.push_bind(IMPORT_PREVIEW_FACET_LIMIT);
-    query.push(") facet_rows), '[]'::jsonb)");
-}
-
-fn query_preview_signal_counts(row: &PgRow) -> DbResult<BTreeMap<String, usize>> {
-    let value = row.try_get::<Value, _>("signal_counts")?;
-    serde_json::from_value(value).map_err(|error| {
-        DbError::InvalidOperation(format!("invalid preview signal count aggregate: {error}"))
-    })
-}
-
-fn query_preview_facets(row: &PgRow, column: &str) -> DbResult<Vec<ImportPreviewFacetEntry>> {
-    let value = row.try_get::<Value, _>(column)?;
-    serde_json::from_value(value).map_err(|error| {
-        DbError::InvalidOperation(format!("invalid preview facet aggregate {column}: {error}"))
-    })
 }

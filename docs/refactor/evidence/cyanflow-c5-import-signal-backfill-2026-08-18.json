@@ -2,7 +2,7 @@
   "schema_version": 1,
   "date": "2026-08-18",
   "cyanflow_slice": "C5e import signal backfill",
-  "status": "local_audit_green",
+  "status": "merged",
   "source": {
     "base_head": "0baf76ec9c3af1a68ebe088b922873aafed5dc56",
     "implementation_commit": "635589b11b2eab7c4dafaa4b9c63fb1d6e93012a",
@@ -98,5 +98,18 @@
     "maximum_migration_version": 26,
     "removed_after_test": true,
     "verified_absent_after_cleanup": true
+  },
+  "delivery": {
+    "pull_request": 321,
+    "ci_run": 16174,
+    "ci_jobs": {
+      "backend": 19174,
+      "frontend": 19175,
+      "governance": 19176,
+      "e2e": 19177
+    },
+    "all_required_jobs_succeeded": true,
+    "merged_main_head": "aca34e7e864d89e04190017256960c22ced1b65c",
+    "source_branch_deleted": true
   }
 }

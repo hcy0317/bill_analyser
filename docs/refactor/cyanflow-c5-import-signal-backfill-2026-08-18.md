@@ -2,7 +2,7 @@
 
 日期：2026-08-18
 
-状态：本地实现与完整审计门禁完成；等待 exact-head CI
+状态：已由 PR #321 合并；exact-head CI run `16174` 的 backend、frontend、governance、E2E 全部通过，main 为 `aca34e7e864d89e04190017256960c22ced1b65c`
 
 范围：提供可续跑、限速、并发安全的 Rust 信号投影回填命令；不切换生产 read、不改变 API/session/confirm 合同、不增加索引、不对长期开发数据库执行历史回填
 
@@ -22,9 +22,9 @@ legacy `import_preview_signal_flags` 仍只作为只读 oracle。本切片对每
 - read：生产 page/filter/count/facet 继续读取 legacy SQL aliases；typed columns 尚未成为查询权威。
 - concurrency：backfill 批次用固定事务锁串行；在线 writer 通过行锁与 version `0` CAS 获得优先保护。
 - checkpoint：只在事务 commit 后输出；错误水位、毒数据和 CAS 异常不产生已提交的半批结果。
-- parity：每个回填批次全量比较六类 signal；目标数据库的完整累计 mismatch 必须为 0 才能进入 C5f。
+- parity：每个回填批次全量比较六类 signal；目标数据库的完整累计 mismatch 必须为 0 才能进入 C5f-b 公开 read cutover。
 - rollback：停止命令并从最后一次已持久化 checkpoint 续跑；已经写入的 version `1` projection 保留，不删除 additive columns。
-- next slice：C5f 在真实目标库完成回填、累计 parity=0 后，才允许把 query read 切到 typed columns 并测量写入退化与查询 p95。
+- next slice：C5f-a 只建立私有 read shadow；C5f-b 必须在真实目标库完成回填、累计 parity=0 后，才允许把 query read 切到 typed columns 并测量写入退化与查询 p95。
 
 ## TDD 与审计证据
 
@@ -36,6 +36,7 @@ legacy `import_preview_signal_flags` 仍只作为只读 oracle。本切片对每
 - 本切片业务改动行覆盖率 `95.98%`（310/323）；3 个 coverage-eligible 文件全部匹配 LCOV。
 - `cargo fmt --all -- --check`、`cargo clippy --workspace --all-targets -- -D warnings`、Rust-only source-tree gate、Rust backend structure gate 与 `git diff --check` 全部通过。
 - 实现 commit：`635589b11b2eab7c4dafaa4b9c63fb1d6e93012a`。
+- Gitea：PR #321 已 squash merge；exact-head CI run `16174`，backend job `19174`、frontend job `19175`、governance job `19176`、E2E job `19177` 全部成功。
 
 完整 coverage 使用隔离数据库 `bill_analyser_c5e_cov_20260818_3`，测试后已精确删除并复核不存在；长期开发数据库的 migration ledger 与历史 preview rows 未被修改。
 

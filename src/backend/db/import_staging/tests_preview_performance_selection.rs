@@ -131,7 +131,7 @@ fn performance_function_slice<'a>(source: &'a str, start: &str, end: &str) -> &'
 
 #[test]
 fn preview_page_metadata_uses_one_bounded_database_round_trip() {
-    let source = include_str!("preview_query.rs");
+    let source = include_str!("preview_metadata_query.rs");
     let metadata_builder = performance_function_slice(
         source,
         "async fn build_preview_metadata_for_query",
@@ -142,7 +142,9 @@ fn preview_page_metadata_uses_one_bounded_database_round_trip() {
         "async fn query_preview_metadata_aggregate",
         "fn build_preview_metadata_aggregate_query",
     );
-    let estimated_metadata_round_trips = aggregate_query.matches("fetch_one(pool).await").count();
+    let estimated_metadata_round_trips = aggregate_query
+        .matches("fetch_one(&mut *connection).await")
+        .count();
 
     assert_eq!(
         metadata_builder.matches(".await").count(),
@@ -196,12 +198,12 @@ fn preview_metadata_materializes_expensive_signal_projection_once() {
         "metadata must decode the six signal families and review state from each session row only once"
     );
     for projected_column in [
-        "legacy_signal_parser",
-        "legacy_signal_platform_duplicate",
-        "legacy_signal_transfer",
-        "legacy_signal_history",
-        "legacy_signal_learning",
-        "legacy_signal_llm",
+        "read_signal_parser",
+        "read_signal_platform_duplicate",
+        "read_signal_transfer",
+        "read_signal_history",
+        "read_signal_learning",
+        "read_signal_llm",
         "needs_review",
     ] {
         assert!(sql.contains(projected_column), "missing {projected_column}");

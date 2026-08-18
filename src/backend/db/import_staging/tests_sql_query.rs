@@ -515,3 +515,52 @@ fn database_counts_reject_negative_values_instead_of_returning_sentinels() {
     );
     assert!(decision_group_database_count(-1, "preview member").is_err());
 }
+
+#[test]
+fn typed_signal_read_queries_use_versioned_columns_without_legacy_projection() {
+    let filters = ImportPreviewQueryFilters {
+        signal: Some("learning:pending".to_string()),
+        ..ImportPreviewQueryFilters::default()
+    };
+    let mut page_query = build_preview_page_query_with_signal_read_source(
+        1,
+        2,
+        PreviewPageQuerySpec {
+            filters: &filters,
+            sort_by: "time",
+            sort_direction: "asc",
+            page_size: 50,
+            offset: 0,
+            signal_read_source: PreviewSignalReadSource::TypedV1,
+        },
+    );
+    let page_sql = page_query.build().sql().to_string();
+    assert!(page_sql.contains("p.signal_projection_version ="));
+    assert!(page_sql.contains("p.signal_learning = true"));
+    assert!(page_sql.contains("preview_matching_feedback,learning,review_status"));
+    assert!(!page_sql.contains("import_preview_signal_flags"));
+
+    let mut metadata_query = build_preview_metadata_aggregate_query_with_signal_read_source(
+        1,
+        2,
+        &filters,
+        PreviewSignalReadSource::TypedV1,
+    );
+    let metadata_sql = metadata_query.build().sql().to_string();
+    for family in [
+        "parser",
+        "platform_duplicate",
+        "transfer",
+        "history",
+        "learning",
+        "llm",
+    ] {
+        assert!(metadata_sql.contains(&format!(
+            "p.signal_{family} AS read_signal_{family}"
+        )));
+    }
+    assert!(metadata_sql.contains("p.signal_projection_version ="));
+    assert!(metadata_sql.contains("p.read_signal_learning"));
+    assert!(!metadata_sql.contains("import_preview_signal_flags"));
+    assert!(!metadata_sql.contains("legacy_signal_"));
+}

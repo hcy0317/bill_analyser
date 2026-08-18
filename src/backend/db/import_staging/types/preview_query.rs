@@ -164,6 +164,39 @@ pub struct ImportPreviewPageResult {
     pub metadata: ImportPreviewMetadata,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImportPreviewSignalReadParityReport {
+    pub observed_rows: usize,
+    pub legacy_total: usize,
+    pub typed_total: usize,
+    pub rows_mismatch: bool,
+    pub total_mismatch: bool,
+    pub signal_counts_mismatch: bool,
+    pub selection_counts_mismatch: bool,
+    pub facets_mismatch: bool,
+    pub selection_hash_mismatch: bool,
+}
+
+impl ImportPreviewSignalReadParityReport {
+    pub fn mismatch_count(&self) -> usize {
+        [
+            self.rows_mismatch,
+            self.total_mismatch,
+            self.signal_counts_mismatch,
+            self.selection_counts_mismatch,
+            self.facets_mismatch,
+            self.selection_hash_mismatch,
+        ]
+        .into_iter()
+        .filter(|mismatch| *mismatch)
+        .count()
+    }
+
+    pub fn is_match(&self) -> bool {
+        self.mismatch_count() == 0
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ImportPreviewMetadata {
     pub facets: ImportPreviewFacets,
