@@ -1,0 +1,126 @@
+{
+  "schema_version": 1,
+  "date": "2026-08-19",
+  "cyanflow_slice": "C6c historical confirm receipt backfill",
+  "status": "local_audit_green",
+  "source": {
+    "base_head": "377c463439d44f65385b0edac765bb4226d21449",
+    "implementation_commit": "dc517c006171a8cb98919297af07f5d769643b18",
+    "database_policy": "full coverage used a fresh isolated database; no production or long-lived development database backfill was executed"
+  },
+  "ownership": {
+    "production_writer": "confirm_import_command_in_transaction -> persist_confirm_receipt",
+    "operational_backfill_boundary": "backfill_import_confirm_receipt_batch",
+    "shared_typed_projection_mapping": "insert_confirm_receipt_projection",
+    "business_confirm_double_execution": false,
+    "active_replay_reader": "metadata only",
+    "replay_auto_backfill": false,
+    "public_api_changed": false,
+    "schema_changed": false
+  },
+  "batch_contract": {
+    "selection": "confirmed sessions containing metadata.confirm_receipt",
+    "ordering": "session_id ascending",
+    "watermark": "after_session_id",
+    "default_batch_size": 200,
+    "maximum_batch_size": 1000,
+    "default_sleep_ms": 50,
+    "fixed_transaction_advisory_lock": true,
+    "skip_locked_allowed": false,
+    "low_watermark_gap_allowed": false,
+    "exact_migration_ledger_required": true,
+    "runs_migrations": false,
+    "checkpoint_emitted_after_commit": true,
+    "historical_created_at_source": "terminal import_sessions.updated_at"
+  },
+  "parity_contract": {
+    "canonical_metadata_parser_reused": true,
+    "existing_typed_rows_checked_before_writes": true,
+    "all_batch_rows_reread_after_inserts": true,
+    "field_level_parity": [
+      "receipt_schema_version",
+      "command_fingerprint",
+      "request_session_version",
+      "response_schema_version",
+      "http_status",
+      "success_envelope"
+    ],
+    "mismatch_policy": "rollback whole batch and do not advance checkpoint"
+  },
+  "tdd": {
+    "red": [
+      "unresolved backfill_import_confirm_receipt_batch",
+      "missing CARGO_BIN_EXE_bill_import_confirm_receipt_backfill"
+    ],
+    "green": {
+      "backfill_real_postgres": {
+        "passed": 8,
+        "failed": 0,
+        "skipped": 0
+      },
+      "cli_unit": {
+        "passed": 4,
+        "failed": 0
+      },
+      "receipt_replay_focused": {
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0
+      },
+      "confirm_failure_matrix_focused": {
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0
+      },
+      "receipt_schema_postgres": {
+        "passed": 2,
+        "failed": 0,
+        "skipped": 0
+      },
+      "bill_analyser_db_all_targets": "pass",
+      "workspace_format": "pass",
+      "workspace_clippy_all_targets": "pass",
+      "rust_backend_structure": {
+        "status": "pass",
+        "files_scanned": 610,
+        "baseline_entries": 3
+      },
+      "rust_only_source_tree": {
+        "status": "pass",
+        "tracked_paths": 2041
+      },
+      "git_diff_check": "pass",
+      "workspace_line_coverage": {
+        "lines_found": 79713,
+        "lines_hit": 52784,
+        "percent": 66.22
+      },
+      "changed_line_coverage": {
+        "executable_lines": 444,
+        "covered_lines": 424,
+        "percent": 95.5
+      },
+      "fresh_database_migration_ledger": {
+        "max_version": 27,
+        "migration_count": 27
+      }
+    }
+  },
+  "review": {
+    "base_ref": "377c463439d44f65385b0edac765bb4226d21449",
+    "standards_initial_finding": "production and backfill paths duplicated the typed receipt insert mapping",
+    "resolution": "both paths reuse insert_confirm_receipt_projection while production confirm ownership remains unchanged",
+    "standards_axis_final": "passed",
+    "spec_axis_final": "passed",
+    "security_skilltree_selection": "skill_not_selected",
+    "security_fallback": "repository shared security-review checklist",
+    "parameterized_sql": true,
+    "database_url_redaction_tested": true
+  },
+  "cleanup": {
+    "coverage_database_removed": true,
+    "workspace_lcov_removed": true,
+    "preexisting_coverage_json_modified": false
+  },
+  "next": "C6d full read-only target snapshot shadow audit before C6e typed replay read cutover"
+}

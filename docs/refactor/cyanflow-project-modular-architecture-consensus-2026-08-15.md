@@ -446,7 +446,7 @@ server snapshot.issues + provisional delta -> visible issues / valid / actions
 - 固定工件：plan/write-set parity、真实 PostgreSQL concurrency/failure-injection、同/异 fingerprint replay/conflict、staging retry/cleanup、64-file browser SLA 和 receipt compatibility report。
 - Exit：任一步失败无部分 effect且 staging 可重试；成功后 receipt 先于 cleanup 持久化；同 fingerprint replay、异 fingerprint conflict；DB/core 的 HTTP response ownership 为 0；active legacy session 为 0 后删除旧 reader/oracle；连续三次真实 browser `<=60s` 且查询 p95/recognition quality 达标。任何 required PostgreSQL/Playwright case skip 或 executed=0 均失败。
 
-C6a 已完成独立 typed receipt 空表 expand；C6b 已从现有唯一 confirm transaction seam 增加 metadata + typed receipt 同事务双投影，并以真实 PostgreSQL 故障注入证明 typed insert 或后续 cleanup 失败时全部 effect 整体回滚。terminal replay 继续 metadata-first，历史 metadata-only session 不会在 replay 时隐式 backfill；当前仍没有 typed reader、新 port、第二 writer 或真实 confirm 双执行。历史 backfill/shadow 与 typed read cutover 必须作为后续独立切片分别放行。
+C6a 已完成独立 typed receipt 空表 expand；C6b 已从现有唯一 confirm transaction seam 增加 metadata + typed receipt 同事务双投影，并以真实 PostgreSQL 故障注入证明 typed insert 或后续 cleanup 失败时全部 effect 整体回滚。C6c 已提供只面向历史 confirmed metadata receipt 的有界运维回填：严格 migration ledger、普通行锁与 advisory lock、低水位缺口拒绝、提交后 JSON checkpoint、逐批全量字段 parity 和历史确认时间保留共同构成恢复边界；回填写入复用生产 writer 的唯一 typed insert 映射，但不参与 confirm 业务 effect。terminal replay 继续 metadata-first，回填不会由 replay/HTTP 隐式触发；当前仍没有 typed reader、新 port、第二个生产 writer 或真实 confirm 双执行，也没有对生产数据库执行回填。C6d 必须独立完成目标库全量只读 shadow snapshot audit，C6e 才可考虑 typed read cutover。
 
 ### C7：全域持续迁移
 

@@ -63,6 +63,7 @@ include!("import_staging/preview_learning_lifecycle.rs");
 include!("import_staging/preview_llm.rs");
 include!("import_staging/llm_memory_annotations.rs");
 include!("import_staging/confirm.rs");
+include!("import_staging/confirm_receipt_backfill.rs");
 include!("import_staging/materialization_ledger.rs");
 include!("import_staging/row_mapping.rs");
 include!("import_staging/patch_payload_helpers.rs");

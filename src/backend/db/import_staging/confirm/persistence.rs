@@ -122,6 +122,16 @@ async fn persist_confirm_receipt(
             "import session confirm CAS mismatch".to_string(),
         ));
     }
+    insert_confirm_receipt_projection(tx, session_db_id, user_id, receipt, None).await
+}
+
+async fn insert_confirm_receipt_projection(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    session_db_id: i64,
+    user_id: i64,
+    receipt: &StoredConfirmReceipt,
+    created_at: Option<DateTime<Utc>>,
+) -> DbResult<()> {
     sqlx::query(
         r#"
         INSERT INTO import_confirm_receipts (
@@ -132,9 +142,10 @@ async fn persist_confirm_receipt(
             request_session_version,
             response_schema_version,
             http_status,
-            success_envelope
+            success_envelope,
+            created_at
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9, now()))
         "#,
     )
     .bind(session_db_id)
@@ -145,6 +156,7 @@ async fn persist_confirm_receipt(
     .bind(receipt.response_schema_version)
     .bind(receipt.http_status)
     .bind(&receipt.success_envelope)
+    .bind(created_at)
     .execute(&mut **tx)
     .await?;
     Ok(())

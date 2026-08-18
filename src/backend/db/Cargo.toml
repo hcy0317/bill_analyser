@@ -22,6 +22,10 @@ path = "bin/bill_import_signal_read_audit.rs"
 name = "bill_import_signal_performance_audit"
 path = "bin/bill_import_signal_performance_audit.rs"
 
+[[bin]]
+name = "bill_import_confirm_receipt_backfill"
+path = "bin/bill_import_confirm_receipt_backfill.rs"
+
 [dependencies]
 bill-analyser-core = { path = "../core" }
 bill-analyser-parsers = { path = "../parsers" }
@@ -129,6 +133,10 @@ path = "../../../tests/backend/db/import_signal_performance_audit_postgres.rs"
 [[test]]
 name = "import_confirm_receipt_schema_postgres"
 path = "../../../tests/backend/db/import_confirm_receipt_schema_postgres.rs"
+
+[[test]]
+name = "import_confirm_receipt_backfill_postgres"
+path = "../../../tests/backend/db/import_confirm_receipt_backfill_postgres.rs"
 
 [lints]
 workspace = true

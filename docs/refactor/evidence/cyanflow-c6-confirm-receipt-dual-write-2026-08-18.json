@@ -2,7 +2,7 @@
   "schema_version": 1,
   "date": "2026-08-18",
   "cyanflow_slice": "C6b typed confirm receipt dual projection",
-  "status": "local_audit_green",
+  "status": "merged",
   "source": {
     "base_head": "c8b7405b6264eb7fc1d5c300ca91fc31cde45273",
     "implementation_commit": "9b1ed88277b25e0ebafe724dba79c8cd5553f8ac",
@@ -103,6 +103,19 @@
     "coverage_database_removed": true,
     "workspace_lcov_removed": true,
     "preexisting_coverage_json_modified": false
+  },
+  "delivery": {
+    "pull_request": 326,
+    "ci_run": 16206,
+    "ci_jobs": {
+      "backend": 19240,
+      "frontend": 19241,
+      "governance": 19242,
+      "e2e": 19243
+    },
+    "all_required_jobs_succeeded": true,
+    "merged_main_head": "377c463439d44f65385b0edac765bb4226d21449",
+    "source_branch_deleted": true
   },
   "next": "bounded historical metadata receipt backfill and shadow parity before typed read cutover"
 }

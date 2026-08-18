@@ -2,7 +2,7 @@
 
 日期：2026-08-18
 
-状态：本地实现、TDD、双轴审查与完整审计门禁完成
+状态：已由 PR #326 squash merge；exact-head CI run `16206` 的 backend、frontend、governance、E2E 全部通过，main 为 `377c463439d44f65385b0edac765bb4226d21449`
 
 范围：只让现有唯一 confirm transaction writer 同步持久化 metadata 与 typed receipt；不切换 replay reader、不 backfill 历史 session、不改变公开 API、账单/history effect 或 session version 合同
 
@@ -41,6 +41,7 @@ Cyaness `code-review` 使用固定比较点 `c8b7405b6264eb7fc1d5c300ca91fc31cde
 - 变更业务代码覆盖率：30/30 个可执行变更行，`100%`；
 - `cargo fmt --all -- --check`、`cargo clippy --workspace --all-targets -- -D warnings`、Rust backend structure、Rust-only source tree 与 `git diff --check` 全部通过；
 - 实现 commit：`9b1ed88277b25e0ebafe724dba79c8cd5553f8ac`。
+- Gitea：PR #326 已 squash merge；exact-head CI run `16206`，backend job `19240`、frontend job `19241`、governance job `19242`、E2E job `19243` 全部成功；来源分支已删除。
 
 长期开发库仍按既有合同报告历史 migration 25 `VersionMismatch(25)`；C6b 没有修改其 ledger。完整 coverage 改用 fresh 27/27 database 并通过。RED 阶段遗留的 2 个隔离 test database 与最终 coverage database 均按精确名称删除，`workspace.lcov` 已清理，既有 `coverage.json` 未修改。
 

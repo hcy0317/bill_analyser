@@ -22,7 +22,7 @@ struct HistoryConfirmPlan {
     acknowledgement_token: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct StoredConfirmReceipt {
     receipt_schema_version: i16,
     command_fingerprint: String,
