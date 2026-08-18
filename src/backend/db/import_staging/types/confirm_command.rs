@@ -36,11 +36,10 @@ impl ConfirmReceiptReadSource {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConfirmTimeEffect {}
 
-/// Durable response returned by both the first confirm and same-command replay.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ConfirmReceiptResponse {
-    pub http_status: u16,
-    pub success_envelope: Value,
+/// Transport-neutral result returned by the confirm repository boundary.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfirmOutcome {
+    pub result: ConfirmPreviewResult,
     pub replayed: bool,
 }
 

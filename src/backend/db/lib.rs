@@ -151,7 +151,7 @@ pub use import_staging::{
     update_import_session_status, update_parser_template_status, update_preview_bill,
     update_preview_bills_batch, update_preview_recurring_match_decision, update_preview_selection,
     update_session_preview_selection_by_query, ClearSessionDataResult, ConfirmCommand,
-    ConfirmPreviewResult, ConfirmReceiptReadSource, ConfirmReceiptResponse, ConfirmTimeEffect,
+    ConfirmOutcome, ConfirmPreviewResult, ConfirmReceiptReadSource, ConfirmTimeEffect,
     ImportAnnotationSampleDraft, ImportAnnotationSampleRow,
     ImportConfirmReceiptBackfillBatchReport, ImportConfirmReceiptReadAuditBatchReport,
     ImportConfirmReceiptReadAuditReport, ImportDecisionGroupCommand,

@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "date": "2026-08-19",
+  "cyanflow_slice": "C6f-a typed ConfirmOutcome boundary",
+  "status": "local_audit_green_public_contract_unchanged",
+  "source": {
+    "base_head": "f3bd6d88093512d14c1e6217729bbf0666998347",
+    "implementation_commit": "8dd6fca8b4d7197c34e45fc803c463270520bf38",
+    "database_policy": "full coverage used a fresh exact-name database; no production target backfill, target audit, read-source switch or long-lived database mutation was executed"
+  },
+  "ownership": {
+    "production_writer": "confirm_import_command_in_transaction -> persist_confirm_receipt",
+    "repository_outcome": "ConfirmOutcome",
+    "public_success_envelope_owner": "HTTP import_confirm_runtime_handler",
+    "durable_v1_codec": "db/import_staging/confirm/receipt_compat.rs",
+    "default_replay_reader": "metadata",
+    "typed_replay_reader_default_enabled": false,
+    "business_confirm_double_execution": false,
+    "public_http_payload_changed": false,
+    "schema_changed": false,
+    "production_config_changed": false
+  },
+  "compatibility_contract": {
+    "durable_receipt_schema_version": 1,
+    "durable_success_envelope_changed": false,
+    "http_status_changed": false,
+    "metadata_reader_changed": false,
+    "typed_v1_reader_changed": false,
+    "invalid_receipt_behavior": "fail closed",
+    "fallback_added": false,
+    "adapter_delete_gate": "target C6c and C6d complete, public typed rollout proven, and legacy receipt/session cleanup gate satisfied"
+  },
+  "tdd": {
+    "red": [
+      "unresolved public ConfirmOutcome import",
+      "real PostgreSQL contracts referenced outcome.result while repository still returned ConfirmReceiptResponse"
+    ],
+    "green": {
+      "typed_reader_real_postgres": {"passed": 2, "failed": 0, "skipped": 0},
+      "confirm_command_real_postgres": {"passed": 1, "failed": 0, "skipped": 0},
+      "confirm_failure_injection_real_postgres": {"passed": 1, "failed": 0, "skipped": 0},
+      "http_legacy_confirm_compatibility": {"passed": 1, "failed": 0},
+      "http_stale_session_version": {"passed": 1, "failed": 0},
+      "invalid_durable_receipt_unit_tests": {"passed": 2, "failed": 0},
+      "db_all_targets_compile": "pass",
+      "workspace_format": "pass",
+      "workspace_clippy_all_targets": "pass",
+      "rust_backend_structure": {"status": "pass", "files_scanned": 615, "baseline_entries": 3},
+      "rust_only_source_tree": {"status": "pass", "tracked_paths": 2055},
+      "backend_doc_map": "pass",
+      "git_diff_check": "pass",
+      "workspace_line_coverage": {"lines_found": 80280, "lines_hit": 53203, "percent": 66.27},
+      "changed_line_coverage": {"executable_lines": 61, "covered_lines": 60, "percent": 98.36}
+    }
+  },
+  "review": {
+    "base_ref": "f3bd6d88093512d14c1e6217729bbf0666998347",
+    "standards_axis_final": "passed_no_findings",
+    "spec_axis_final": "passed_no_findings",
+    "security_review": "passed",
+    "parameterized_sql_changed": false,
+    "user_scope_changed": false,
+    "sensitive_log_fields_absent": true
+  },
+  "known_environment_gate": {
+    "long_lived_database_error": "VersionMismatch(25)",
+    "long_lived_database_ledger_modified": false,
+    "fresh_database_chain_verified": true,
+    "production_target_evidence_present": false
+  },
+  "cleanup": {
+    "coverage_database": "bill_analyser_c6f_cov_20260819_03",
+    "coverage_database_removed": true,
+    "workspace_lcov_removed": true
+  },
+  "next": "select the next Cyanflow slice independently; do not remove durable v1 compatibility or activate typed_v1 before the frozen rollout and delete gates"
+}

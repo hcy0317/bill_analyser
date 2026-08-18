@@ -36,10 +36,11 @@ pub async fn import_confirm_runtime_handler(
         &command,
         state.config.confirm_receipt_read_source,
     ) {
-        Ok(receipt) => route_response(ImportV2RouteResponse {
-            status_code: receipt.http_status,
-            body: receipt.success_envelope,
-        }),
+        Ok(outcome) => route_response(import_stage_confirm_success(ImportStageConfirmData {
+            imported_count: outcome.result.confirmed_count,
+            skipped_count: outcome.result.skipped_count + outcome.result.duplicate_count,
+            errors: outcome.result.errors,
+        })),
         Err(DbError::ImportSessionVersionConflict {
             session_id,
             expected,

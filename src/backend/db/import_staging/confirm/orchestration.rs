@@ -49,7 +49,7 @@ pub fn confirm_preview_to_bills_with_ack(
     user_id: UserId,
     history_acknowledgement: Option<&ImportHistoryRewriteAcknowledgement>,
 ) -> DbResult<ConfirmPreviewResult> {
-    let receipt = confirm_import_command(
+    let outcome = confirm_import_command(
         pool,
         user_id,
         &ConfirmCommand {
@@ -62,7 +62,7 @@ pub fn confirm_preview_to_bills_with_ack(
             declared_confirm_time_effects: Vec::new(),
         },
     )?;
-    confirm_preview_result_from_envelope(&receipt.success_envelope)
+    Ok(outcome.result)
 }
 
 /// Canonical HTTP-to-repository confirm entrypoint. The command is consumed by the locked
@@ -76,7 +76,7 @@ pub fn confirm_import_command(
     pool: &PostgresPool,
     user_id: UserId,
     command: &ConfirmCommand,
-) -> DbResult<ConfirmReceiptResponse> {
+) -> DbResult<ConfirmOutcome> {
     confirm_import_command_with_receipt_read_source(
         pool,
         user_id,
@@ -100,7 +100,7 @@ pub fn confirm_import_command_with_receipt_read_source(
     user_id: UserId,
     command: &ConfirmCommand,
     read_source: ConfirmReceiptReadSource,
-) -> DbResult<ConfirmReceiptResponse> {
+) -> DbResult<ConfirmOutcome> {
     tracing::info!(
         domain = "import_confirm",
         operation = "confirm",
@@ -114,15 +114,15 @@ pub fn confirm_import_command_with_receipt_read_source(
     let result =
         confirm_import_command_in_transaction(pool, user_id, command, read_source);
     match &result {
-        Ok(receipt) => tracing::info!(
+        Ok(outcome) => tracing::info!(
             domain = "import_confirm",
             operation = "confirm",
-            outcome = if receipt.replayed { "replayed" } else { "committed" },
+            outcome = if outcome.replayed { "replayed" } else { "committed" },
             session_key = %command.session_id,
             receipt_read_source = read_source.as_str(),
             request_session_version = ?command.expected_session_version,
             response_schema_version = CONFIRM_RESPONSE_SCHEMA_VERSION,
-            http_status = receipt.http_status,
+            http_status = CONFIRM_HTTP_SUCCESS_STATUS,
             "import confirmation transaction completed"
         ),
         Err(error) => tracing::warn!(
@@ -144,7 +144,7 @@ fn confirm_import_command_in_transaction(
     user_id: UserId,
     command: &ConfirmCommand,
     read_source: ConfirmReceiptReadSource,
-) -> DbResult<ConfirmReceiptResponse> {
+) -> DbResult<ConfirmOutcome> {
     block_on_db(async move {
         let user_id = user_id_i64(user_id)?;
         let mut tx = pool.begin().await?;
@@ -213,9 +213,9 @@ fn confirm_import_command_in_transaction(
                 session_version = session.version,
                 "terminal import confirmation replayed stored receipt"
             );
-            return Ok(ConfirmReceiptResponse {
-                http_status: receipt.http_status as u16,
-                success_envelope: receipt.success_envelope,
+            let result = confirm_preview_result_from_receipt_envelope(&receipt.success_envelope)?;
+            return Ok(ConfirmOutcome {
+                result,
                 replayed: true,
             });
         }
@@ -378,20 +378,14 @@ fn confirm_import_command_in_transaction(
             duplicate_count: 0,
             errors: Vec::new(),
         };
-        let response = bill_analyser_core::import_stage_confirm_success(
-            bill_analyser_core::ImportStageConfirmData {
-                imported_count: result.confirmed_count,
-                skipped_count: result.skipped_count + result.duplicate_count,
-                errors: result.errors.clone(),
-            },
-        );
+        let success_envelope = confirm_receipt_success_envelope(&result);
         let receipt = StoredConfirmReceipt {
             receipt_schema_version: CONFIRM_RECEIPT_SCHEMA_VERSION,
             command_fingerprint,
             request_session_version: session.version,
             response_schema_version: CONFIRM_RESPONSE_SCHEMA_VERSION,
             http_status: CONFIRM_HTTP_SUCCESS_STATUS,
-            success_envelope: response.body.clone(),
+            success_envelope,
         };
         persist_confirm_receipt(
             &mut tx,
@@ -429,9 +423,8 @@ fn confirm_import_command_in_transaction(
             "import confirmation child staging data cleared"
         );
         tx.commit().await?;
-        Ok(ConfirmReceiptResponse {
-            http_status: response.status_code,
-            success_envelope: response.body,
+        Ok(ConfirmOutcome {
+            result,
             replayed: false,
         })
     })

@@ -3,10 +3,28 @@ use std::{env, error::Error, io};
 use bill_analyser_core::UserId;
 use bill_analyser_db::{
     confirm_import_command, confirm_import_command_with_receipt_read_source, create_import_session,
-    ConfirmCommand, ConfirmReceiptReadSource, ImportSessionDraft,
+    ConfirmCommand, ConfirmOutcome, ConfirmPreviewResult, ConfirmReceiptReadSource,
+    ImportSessionDraft,
 };
+use serde_json::json;
 
 mod postgres_test_support;
+
+#[test]
+fn confirm_outcome_contract_is_transport_neutral() {
+    let outcome = ConfirmOutcome {
+        result: ConfirmPreviewResult {
+            confirmed_count: 2,
+            skipped_count: 1,
+            duplicate_count: 1,
+            errors: Vec::new(),
+        },
+        replayed: false,
+    };
+
+    assert_eq!(outcome.result.confirmed_count, 2);
+    assert!(!outcome.replayed);
+}
 
 async fn strict_isolated_postgres_database(
     prefix: &str,
@@ -61,6 +79,23 @@ async fn explicit_typed_reader_replays_and_missing_projection_fails_without_meta
 
         let first = confirm_import_command(&isolated.pool, scoped_user_id, &command)?;
         assert!(!first.replayed);
+        let persisted_envelope: serde_json::Value = sqlx::query_scalar(
+            "SELECT success_envelope FROM import_confirm_receipts WHERE user_id = $1",
+        )
+        .bind(user_id)
+        .fetch_one(&isolated.pool)
+        .await?;
+        assert_eq!(
+            persisted_envelope,
+            json!({
+                "success": true,
+                "data": {
+                    "imported_count": 0,
+                    "skipped_count": 0,
+                    "errors": [],
+                }
+            })
+        );
         let typed = confirm_import_command_with_receipt_read_source(
             &isolated.pool,
             scoped_user_id,
@@ -68,8 +103,7 @@ async fn explicit_typed_reader_replays_and_missing_projection_fails_without_meta
             ConfirmReceiptReadSource::TypedV1,
         )?;
         assert!(typed.replayed);
-        assert_eq!(typed.http_status, first.http_status);
-        assert_eq!(typed.success_envelope, first.success_envelope);
+        assert_eq!(typed.result, first.result);
 
         sqlx::query("DELETE FROM import_confirm_receipts WHERE user_id = $1")
             .bind(user_id)
@@ -89,7 +123,7 @@ async fn explicit_typed_reader_replays_and_missing_projection_fails_without_meta
 
         let metadata_replay = confirm_import_command(&isolated.pool, scoped_user_id, &command)?;
         assert!(metadata_replay.replayed);
-        assert_eq!(metadata_replay.success_envelope, first.success_envelope);
+        assert_eq!(metadata_replay.result, first.result);
         Ok::<(), Box<dyn Error>>(())
     }
     .await;

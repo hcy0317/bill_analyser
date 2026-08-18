@@ -2219,8 +2219,7 @@ async fn real_postgres_confirm_command_applies_patch_selection_version_and_repla
 
     let first = confirm_import_command(pool, scoped_user_id, &command)?;
     assert!(!first.replayed);
-    assert_eq!(first.http_status, 200);
-    assert_eq!(first.success_envelope["data"]["imported_count"], 1);
+    assert_eq!(first.result.confirmed_count, 1);
     let bill = sqlx::query(
         "SELECT transaction_type, category_id, description FROM bills WHERE user_id = $1",
     )
@@ -2241,8 +2240,7 @@ async fn real_postgres_confirm_command_applies_patch_selection_version_and_repla
 
     let replay = confirm_import_command(pool, scoped_user_id, &command)?;
     assert!(replay.replayed);
-    assert_eq!(replay.http_status, first.http_status);
-    assert_eq!(replay.success_envelope, first.success_envelope);
+    assert_eq!(replay.result, first.result);
 
     let empty_conflict = ConfirmCommand {
         selected_preview_ids: Some(Vec::new()),
@@ -2310,7 +2308,7 @@ async fn real_postgres_confirm_command_applies_patch_selection_version_and_repla
     assert_failed_confirm_retryable(pool, user_id, empty_session, 1, 1).await?;
     empty_command.expected_session_version = Some(empty_version);
     let empty = confirm_import_command(pool, scoped_user_id, &empty_command)?;
-    assert_eq!(empty.success_envelope["data"]["imported_count"], 0);
+    assert_eq!(empty.result.confirmed_count, 0);
     assert_eq!(count_user_bills(pool, user_id).await?, 1);
 
     test_db.cleanup().await?;
@@ -3690,7 +3688,7 @@ async fn real_postgres_confirm_failure_stage_matrix_restores_full_state_and_retr
         assert!(!first.replayed, "{stage_name} retry was not first success");
         let replay = confirm_import_command(pool, scoped_user_id, &retry_command)?;
         assert!(replay.replayed, "{stage_name} receipt did not replay");
-        assert_eq!(replay.success_envelope, first.success_envelope);
+        assert_eq!(replay.result, first.result);
         let (status, metadata, _) = session_receipt_state(pool, user_id, &session_id).await?;
         assert_eq!(status, "confirmed", "{stage_name} retry did not confirm");
         assert!(metadata.get("confirm_receipt").is_some());

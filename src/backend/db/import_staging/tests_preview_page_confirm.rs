@@ -200,7 +200,7 @@ fn import_confirm_and_lifecycle_observability_is_complete_and_secret_safe() {
         "operation = \"child_cleanup\"",
         "outcome = \"rolled_back\"",
         "outcome = \"replay\"",
-        "outcome = if receipt.replayed { \"replayed\" } else { \"committed\" }",
+        "outcome = if outcome.replayed { \"replayed\" } else { \"committed\" }",
         "session_key = %command.session_id",
         "request_session_version",
         "session_version",

@@ -19,22 +19,6 @@ async fn apply_confirm_time_effect_boundary(
     Ok(())
 }
 
-fn confirm_preview_result_from_envelope(envelope: &Value) -> DbResult<ConfirmPreviewResult> {
-    let data = envelope.get("data").ok_or_else(|| {
-        DbError::InvalidOperation("invalid import confirm receipt envelope".to_string())
-    })?;
-    let data = serde_json::from_value::<bill_analyser_core::ImportStageConfirmData>(data.clone())
-        .map_err(|_| {
-            DbError::InvalidOperation("invalid import confirm receipt envelope".to_string())
-        })?;
-    Ok(ConfirmPreviewResult {
-        confirmed_count: data.imported_count,
-        skipped_count: data.skipped_count,
-        duplicate_count: 0,
-        errors: data.errors,
-    })
-}
-
 async fn lock_import_session_for_confirm(
     tx: &mut sqlx::Transaction<'_, Postgres>,
     session_id: &str,
