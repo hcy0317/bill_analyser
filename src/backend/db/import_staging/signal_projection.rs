@@ -121,6 +121,23 @@ const IMPORT_PREVIEW_SIGNAL_PROJECTION_PARITY_SQL: &str =
                    history BOOLEAN, learning BOOLEAN, llm BOOLEAN)
        WHERE p.id = ANY($1::bigint[])"#;
 
+async fn import_preview_signal_projection_parity_counts(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    preview_ids: &[i64],
+) -> DbResult<(i64, i64)> {
+    if preview_ids.is_empty() {
+        return Ok((0, 0));
+    }
+    let row = sqlx::query(IMPORT_PREVIEW_SIGNAL_PROJECTION_PARITY_SQL)
+        .bind(preview_ids)
+        .fetch_one(&mut **tx)
+        .await?;
+    Ok((
+        row.try_get("observed_rows")?,
+        row.try_get("mismatch_rows")?,
+    ))
+}
+
 async fn observe_import_preview_signal_projection_parity(
     tx: &mut sqlx::Transaction<'_, Postgres>,
     preview_ids: &[i64],
@@ -131,12 +148,8 @@ async fn observe_import_preview_signal_projection_parity(
     }
     let sampled_preview_ids =
         &preview_ids[..preview_ids.len().min(IMPORT_PREVIEW_SIGNAL_SHADOW_SAMPLE_SIZE)];
-    let row = sqlx::query(IMPORT_PREVIEW_SIGNAL_PROJECTION_PARITY_SQL)
-    .bind(sampled_preview_ids)
-    .fetch_one(&mut **tx)
-    .await?;
-    let observed_rows: i64 = row.try_get("observed_rows")?;
-    let mismatch_rows: i64 = row.try_get("mismatch_rows")?;
+    let (observed_rows, mismatch_rows) =
+        import_preview_signal_projection_parity_counts(tx, sampled_preview_ids).await?;
     let expected_rows = i64::try_from(sampled_preview_ids.len()).unwrap_or(i64::MAX);
     if observed_rows != expected_rows || mismatch_rows != 0 {
         tracing::warn!(

@@ -1,0 +1,102 @@
+{
+  "schema_version": 1,
+  "date": "2026-08-18",
+  "cyanflow_slice": "C5e import signal backfill",
+  "status": "local_audit_green",
+  "source": {
+    "base_head": "0baf76ec9c3af1a68ebe088b922873aafed5dc56",
+    "implementation_commit": "635589b11b2eab7c4dafaa4b9c63fb1d6e93012a",
+    "database_policy": "full workspace coverage used a fresh isolated database; the long-lived development database migration ledger and preview rows were not modified"
+  },
+  "ownership": {
+    "semantic_writer": "Rust PreviewStateKernel",
+    "online_writer": "import staging evidence mutation transaction",
+    "backfill_writer": "backfill_import_preview_signal_projection_batch",
+    "legacy_sql_role": "read-only full-batch parity oracle",
+    "active_reader": "legacy import_preview_signal_flags aliases",
+    "api_changed": false,
+    "session_contract_changed": false,
+    "confirm_contract_changed": false
+  },
+  "batch_contract": {
+    "version_selected": 0,
+    "version_written": 1,
+    "default_batch_size": 200,
+    "maximum_batch_size": 1000,
+    "default_sleep_ms": 50,
+    "ordering": "primary key ascending",
+    "watermark": "after_id",
+    "checkpoint_emitted_after_commit": true,
+    "skip_locked_allowed": false,
+    "fixed_transaction_advisory_lock": true,
+    "online_version_1_overwrite_allowed": false,
+    "parity_scope": "every row in each claimed batch"
+  },
+  "failure_policy": {
+    "unsafe_watermark": "rollback and fail closed",
+    "malformed_payload": "rollback the whole batch",
+    "cas_count_mismatch": "rollback and fail closed",
+    "schema_or_oracle_error": "rollback and fail closed",
+    "parity_mismatch_changes_canonical_result": false
+  },
+  "transition_ledger": {
+    "writer": "online and backfill writers share PreviewStateKernel; backfill can only mutate version 0",
+    "read": "unchanged legacy SQL projection",
+    "backfill": "command is delivery-ready; no long-lived target database backfill executed in this slice",
+    "rollback": "stop the command and resume from the last persisted committed next_after_id",
+    "next": "C5f typed-column read cutover after target database cumulative parity is zero"
+  },
+  "tdd": {
+    "red": {
+      "test": "import_signal_backfill_postgres",
+      "failure": "backfill_import_preview_signal_projection_batch was unresolved"
+    },
+    "green": {
+      "backfill_real_postgres": {
+        "passed": 6,
+        "failed": 0,
+        "skipped": 0
+      },
+      "cli_unit": {
+        "passed": 4,
+        "failed": 0
+      },
+      "import_staging_real_postgres": {
+        "passed": 36,
+        "failed": 0,
+        "skipped": 0
+      },
+      "db_all_targets": "pass",
+      "workspace_format": "pass",
+      "workspace_clippy_all_targets": "pass",
+      "rust_only_source_tree": {
+        "status": "pass",
+        "tracked_paths": 2017
+      },
+      "rust_backend_structure": {
+        "status": "pass",
+        "files_scanned": 603,
+        "baseline_entries": 3
+      },
+      "workspace_line_coverage": {
+        "lines_found": 73148,
+        "lines_hit": 48931,
+        "percent": 66.8931
+      },
+      "changed_line_coverage": {
+        "coverage_eligible_files": 3,
+        "matched_files": 3,
+        "executable_lines": 323,
+        "covered_lines": 310,
+        "percent": 95.98
+      }
+    }
+  },
+  "isolated_coverage_database": {
+    "name": "bill_analyser_c5e_cov_20260818_3",
+    "migration_count": 26,
+    "maximum_migration_version": 26,
+    "removed_after_test": true,
+    "verified_absent_after_cleanup": true
+  }
+}

@@ -2,11 +2,11 @@
 
 日期：2026-08-17
 
-状态：`ACCEPTED`；C5b、C5c 已合并，C5d 本地实现与审计门禁完成，等待 exact-head CI；C5e 及后续阶段尚未启动
+状态：`ACCEPTED`；C5b、C5c、C5d 已合并，C5e 本地实现与完整审计门禁完成，等待 exact-head CI；C5f 及后续阶段尚未启动
 
 决策编号：`ADR-IMPORT-SCHEMA-001`
 
-机器可读证据：`docs/refactor/evidence/cyanflow-c5-import-schema-benchmark-2026-08-17.json`、`docs/refactor/evidence/cyanflow-c5-import-signal-schema-expand-2026-08-18.json`、`docs/refactor/evidence/cyanflow-c5-import-signal-writer-shadow-2026-08-18.json`
+机器可读证据：`docs/refactor/evidence/cyanflow-c5-import-schema-benchmark-2026-08-17.json`、`docs/refactor/evidence/cyanflow-c5-import-signal-schema-expand-2026-08-18.json`、`docs/refactor/evidence/cyanflow-c5-import-signal-writer-shadow-2026-08-18.json`、`docs/refactor/evidence/cyanflow-c5-import-signal-backfill-2026-08-18.json`
 
 可复跑基准：`Get-Content -Raw scripts/bench_import_signal_schema.sql | docker exec -i bill-analyser-postgres psql -X -U bill_analyser -d bill_analyser`
 
@@ -147,6 +147,8 @@ flowchart LR
 7. receipt 路径先 expand/backfill/shadow，再由 C6 切 typed read；同一真实 confirm 永不双执行。
 
 C5d 已按上述边界实现：所有新行和 evidence mutation 行由 `PreviewStateKernel` 写 version `1`；selection-only 写入不升级旧行。批量 writer 在一个事务内保留最多 64 个确定性样本并只执行一次 legacy SQL 比较，避免按 500 行 chunk 重复增加数据库往返；真实 PostgreSQL 验收另行逐行核对完整测试批次，不以运行时采样代替放行 parity。生产 read、历史 backfill、NOT NULL 和 API 合同保持不变。
+
+C5e 已实现独立 Rust 运维命令与 repository batch API。每批在固定 advisory lock 下拒绝水位之前仍存在 version `0` 缺口，随后按主键顺序锁定最多 1,000 行并通过 version `0` CAS 写入；不得用 `SKIP LOCKED` 越过低主键。投影复用 C5d 唯一 kernel，legacy SQL 仅在同一事务内对本批全部行做只读 parity。成功提交后才输出可持久化 JSON checkpoint，毒数据、migration/schema 错误、观察行数或 CAS 数量异常均整批回滚。C5e 没有修改生产 read、API、session 或 confirm 合同，也没有对长期开发数据库执行迁移或历史回填；目标库实跑 parity=0 仍是 C5f read cutover 的前置门禁。
 
 ## 8. Restore 与放行门禁
 

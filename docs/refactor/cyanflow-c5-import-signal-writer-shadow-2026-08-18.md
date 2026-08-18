@@ -2,7 +2,7 @@
 
 日期：2026-08-18
 
-状态：本地实现与完整审计门禁完成；等待 exact-head CI
+状态：已由 Gitea PR #320 squash 合并到 `main`（`0baf76ec9c3af1a68ebe088b922873aafed5dc56`）；exact-head CI 全绿
 
 范围：启用 `PreviewStateKernel` 驱动的唯一 Rust signal projection writer，并让 legacy SQL 只承担有界只读 shadow parity；不回填历史行、不切换生产 read、不增加索引、不改变 API 或 confirm 协议
 
