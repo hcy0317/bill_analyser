@@ -30,7 +30,12 @@ pub async fn import_confirm_runtime_handler(
         Err(response) => return route_response(response),
     };
 
-    match confirm_import_command(runtime.pool(), user_id, &command) {
+    match confirm_import_command_with_receipt_read_source(
+        runtime.pool(),
+        user_id,
+        &command,
+        state.config.confirm_receipt_read_source,
+    ) {
         Ok(receipt) => route_response(ImportV2RouteResponse {
             status_code: receipt.http_status,
             body: receipt.success_envelope,
@@ -473,7 +478,12 @@ mod confirm_handler_contract_tests {
             .next()
             .expect("confirm handler boundary");
 
-        assert_eq!(handler.matches("confirm_import_command(").count(), 1);
+        assert_eq!(
+            handler
+                .matches("confirm_import_command_with_receipt_read_source(")
+                .count(),
+            1
+        );
         for forbidden in [
             "get_import_session(",
             "get_preview_bill_by_id(",

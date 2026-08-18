@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "date": "2026-08-19",
+  "cyanflow_slice": "C6e-a confirm receipt typed reader seam",
+  "status": "local_audit_green_default_inactive",
+  "source": {
+    "base_head": "7507a37ecf6d7ef1ad047cd385396bffc1059f37",
+    "implementation_commit": "c8191c9f4816556039c4371eec5383fd160b06ee",
+    "database_policy": "full coverage used a fresh exact-name database; no production target backfill, target audit or long-lived development database mutation was executed"
+  },
+  "ownership": {
+    "production_writer": "confirm_import_command_in_transaction -> persist_confirm_receipt",
+    "repository_reader_port": "confirm_import_command_with_receipt_read_source",
+    "default_replay_reader": "metadata",
+    "typed_replay_reader_available": true,
+    "typed_replay_reader_default_enabled": false,
+    "business_confirm_double_execution": false,
+    "public_http_payload_changed": false,
+    "schema_changed": false
+  },
+  "cutover_contract": {
+    "config": "BILL_ANALYSER_IMPORT_CONFIRM_RECEIPT_READ_SOURCE",
+    "accepted_values": ["metadata", "typed_v1"],
+    "missing_value": "metadata",
+    "unknown_value": "startup failure",
+    "typed_query_scope": ["session_id", "user_id"],
+    "typed_missing_fallback": false,
+    "active_confirm_writer_affected": false,
+    "activation_gate": "target C6c complete and target C6d zero missing, zero unexpected and zero mismatch"
+  },
+  "tdd": {
+    "red": [
+      "missing HttpShellConfig.confirm_receipt_read_source and InvalidConfirmReceiptReadSource",
+      "unresolved confirm_import_command_with_receipt_read_source and ConfirmReceiptReadSource"
+    ],
+    "green": {
+      "typed_reader_real_postgres": {"passed": 1, "failed": 0, "skipped": 0},
+      "backfill_real_postgres": {"passed": 8, "failed": 0, "skipped": 0},
+      "read_audit_real_postgres": {"passed": 5, "failed": 0, "skipped": 0},
+      "existing_confirm_transaction_real_postgres": {"passed": 1, "failed": 0, "skipped": 0},
+      "http_config_contract": {"passed": 1, "failed": 0},
+      "http_handler_seam": {"passed": 1, "failed": 0},
+      "workspace_format": "pass",
+      "workspace_clippy_all_targets": "pass",
+      "rust_backend_structure": {"status": "pass", "files_scanned": 615, "baseline_entries": 3},
+      "rust_only_source_tree": {"status": "pass", "tracked_paths": 2052},
+      "backend_doc_map": "pass",
+      "git_diff_check": "pass",
+      "workspace_line_coverage": {"lines_found": 80254, "lines_hit": 53135, "percent": 66.21},
+      "changed_line_coverage": {"executable_lines": 95, "covered_lines": 92, "percent": 96.84},
+      "fresh_database_migration_ledger": {"max_version": 27, "migration_count": 27}
+    }
+  },
+  "review": {
+    "base_ref": "7507a37ecf6d7ef1ad047cd385396bffc1059f37",
+    "standards_axis_final": "passed_no_findings",
+    "spec_axis_final": "passed_no_findings",
+    "security_review": "passed",
+    "parameterized_sql": true,
+    "user_scoped_query": true,
+    "sensitive_log_fields_absent": true
+  },
+  "known_environment_gate": {
+    "long_lived_database_error": "VersionMismatch(25)",
+    "long_lived_database_ledger_modified": false,
+    "fresh_database_chain_verified": true,
+    "production_target_evidence_present": false
+  },
+  "cleanup": {
+    "coverage_database_removed": true,
+    "workspace_lcov_removed": true,
+    "preexisting_coverage_json_modified": false
+  },
+  "next": "run target C6c and C6d outside this code slice before any public typed_v1 activation"
+}

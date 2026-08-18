@@ -35,3 +35,47 @@ fn explicit_development_profile_can_use_documented_local_postgres_url() {
         Some(DEFAULT_LOCAL_POSTGRES_URL)
     );
 }
+
+#[test]
+fn confirm_receipt_read_source_is_metadata_by_default_and_typed_only_when_explicit() {
+    let default = config_from(&[(
+        "BILL_ANALYSER_POSTGRES_URL",
+        "postgres://bill_analyser:test@127.0.0.1:5432/bill_analyser",
+    )])
+    .expect("default config");
+    assert_eq!(
+        default.confirm_receipt_read_source,
+        ConfirmReceiptReadSource::Metadata
+    );
+
+    let typed = config_from(&[
+        (
+            "BILL_ANALYSER_POSTGRES_URL",
+            "postgres://bill_analyser:test@127.0.0.1:5432/bill_analyser",
+        ),
+        (
+            "BILL_ANALYSER_IMPORT_CONFIRM_RECEIPT_READ_SOURCE",
+            "typed_v1",
+        ),
+    ])
+    .expect("explicit typed receipt reader");
+    assert_eq!(
+        typed.confirm_receipt_read_source,
+        ConfirmReceiptReadSource::TypedV1
+    );
+
+    assert_eq!(
+        config_from(&[
+            (
+                "BILL_ANALYSER_POSTGRES_URL",
+                "postgres://bill_analyser:test@127.0.0.1:5432/bill_analyser",
+            ),
+            (
+                "BILL_ANALYSER_IMPORT_CONFIRM_RECEIPT_READ_SOURCE",
+                "fallback",
+            ),
+        ])
+        .expect_err("unknown receipt source must fail startup"),
+        HttpShellConfigError::InvalidConfirmReceiptReadSource
+    );
+}

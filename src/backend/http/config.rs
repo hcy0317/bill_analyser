@@ -5,6 +5,7 @@
 use std::{env, time::Duration};
 
 use bill_analyser_core::auth::PasswordPolicy;
+use bill_analyser_db::ConfirmReceiptReadSource;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -43,6 +44,7 @@ pub struct HttpShellConfig {
     pub backup_dir: String,
     pub backup_encryption_key: Option<String>,
     pub import_route_mode: ImportRouteMode,
+    pub confirm_receipt_read_source: ConfirmReceiptReadSource,
     pub postgres_url: Option<String>,
     pub database_backend: DatabaseBackend,
     pub trusted_user_header_secret: Option<String>,
@@ -96,6 +98,7 @@ impl HttpShellConfig {
             backup_dir: DEFAULT_BACKUP_DIR.to_string(),
             backup_encryption_key: None,
             import_route_mode,
+            confirm_receipt_read_source: ConfirmReceiptReadSource::Metadata,
             postgres_url: normalize_postgres_url(Some(DEFAULT_LOCAL_POSTGRES_URL.to_string()))?,
             database_backend: DatabaseBackend::Postgres,
             trusted_user_header_secret: None,
@@ -300,6 +303,9 @@ impl HttpShellConfig {
         )?;
         let import_route_mode =
             parse_import_route_mode(lookup("BILL_ANALYSER_HTTP_IMPORT_ROUTE_MODE").as_deref())?;
+        let confirm_receipt_read_source = parse_confirm_receipt_read_source(
+            lookup("BILL_ANALYSER_IMPORT_CONFIRM_RECEIPT_READ_SOURCE").as_deref(),
+        )?;
         let database_backend =
             parse_database_backend(lookup("BILL_ANALYSER_DATABASE_BACKEND").as_deref())?;
         let runtime_profile = lookup("BILL_ANALYSER_RUNTIME_PROFILE");
@@ -445,6 +451,7 @@ impl HttpShellConfig {
         )?;
         config.postgres_url = postgres_url;
         config.database_backend = database_backend;
+        config.confirm_receipt_read_source = confirm_receipt_read_source;
         config.uploads_dir = uploads_dir;
         config.data_dir = data_dir;
         config.backup_dir = backup_dir;
@@ -491,6 +498,8 @@ pub enum HttpShellConfigError {
     InvalidBoolean(&'static str),
     #[error("invalid import route mode")]
     InvalidImportRouteMode,
+    #[error("invalid import confirm receipt read source")]
+    InvalidConfirmReceiptReadSource,
     #[error("invalid database backend")]
     InvalidDatabaseBackend,
     #[error("invalid PostgreSQL URL")]
@@ -635,6 +644,18 @@ fn parse_import_route_mode(value: Option<&str>) -> Result<ImportRouteMode, HttpS
             Ok(ImportRouteMode::ImportDbRuntime)
         }
         _ => Err(HttpShellConfigError::InvalidImportRouteMode),
+    }
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+fn parse_confirm_receipt_read_source(
+    value: Option<&str>,
+) -> Result<ConfirmReceiptReadSource, HttpShellConfigError> {
+    let normalized = value.unwrap_or("").trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "" | "metadata" => Ok(ConfirmReceiptReadSource::Metadata),
+        "typed_v1" => Ok(ConfirmReceiptReadSource::TypedV1),
+        _ => Err(HttpShellConfigError::InvalidConfirmReceiptReadSource),
     }
 }
 

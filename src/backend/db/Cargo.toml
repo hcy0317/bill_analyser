@@ -146,5 +146,9 @@ path = "../../../tests/backend/db/import_confirm_receipt_backfill_postgres.rs"
 name = "import_confirm_receipt_read_audit_postgres"
 path = "../../../tests/backend/db/import_confirm_receipt_read_audit_postgres.rs"
 
+[[test]]
+name = "import_confirm_receipt_typed_read_postgres"
+path = "../../../tests/backend/db/import_confirm_receipt_typed_read_postgres.rs"
+
 [lints]
 workspace = true

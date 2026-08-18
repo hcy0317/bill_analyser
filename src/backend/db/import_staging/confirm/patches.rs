@@ -78,12 +78,66 @@ fn stored_confirm_receipt(metadata: &Value) -> DbResult<StoredConfirmReceipt> {
     let receipt = serde_json::from_value::<StoredConfirmReceipt>(receipt).map_err(|_| {
         DbError::InvalidOperation("confirmed import session receipt is invalid".to_string())
     })?;
+    validate_stored_confirm_receipt(receipt)
+}
+
+fn validate_stored_confirm_receipt(
+    receipt: StoredConfirmReceipt,
+) -> DbResult<StoredConfirmReceipt> {
     if receipt.receipt_schema_version != CONFIRM_RECEIPT_SCHEMA_VERSION {
         return Err(DbError::InvalidOperation(
             "unsupported import confirm receipt schema".to_string(),
         ));
     }
     Ok(receipt)
+}
+
+async fn typed_stored_confirm_receipt(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    session_db_id: i64,
+    user_id: i64,
+) -> DbResult<StoredConfirmReceipt> {
+    let row = sqlx::query(
+        r#"
+        SELECT receipt_schema_version,
+               command_fingerprint,
+               request_session_version,
+               response_schema_version,
+               http_status,
+               success_envelope
+        FROM import_confirm_receipts
+        WHERE session_id = $1 AND user_id = $2
+        "#,
+    )
+    .bind(session_db_id)
+    .bind(user_id)
+    .fetch_optional(&mut **tx)
+    .await?
+    .ok_or_else(|| {
+        DbError::InvalidOperation("typed confirm receipt is missing".to_string())
+    })?;
+    validate_stored_confirm_receipt(StoredConfirmReceipt {
+        receipt_schema_version: row.try_get("receipt_schema_version")?,
+        command_fingerprint: row.try_get("command_fingerprint")?,
+        request_session_version: row.try_get("request_session_version")?,
+        response_schema_version: row.try_get("response_schema_version")?,
+        http_status: row.try_get("http_status")?,
+        success_envelope: row.try_get("success_envelope")?,
+    })
+}
+
+async fn stored_confirm_receipt_from_source(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    session: &LockedImportSession,
+    user_id: i64,
+    read_source: ConfirmReceiptReadSource,
+) -> DbResult<StoredConfirmReceipt> {
+    match read_source {
+        ConfirmReceiptReadSource::Metadata => stored_confirm_receipt(&session.metadata),
+        ConfirmReceiptReadSource::TypedV1 => {
+            typed_stored_confirm_receipt(tx, session.id, user_id).await
+        }
+    }
 }
 
 async fn apply_confirm_command_mutations(

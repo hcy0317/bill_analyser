@@ -77,22 +77,49 @@ pub fn confirm_import_command(
     user_id: UserId,
     command: &ConfirmCommand,
 ) -> DbResult<ConfirmReceiptResponse> {
+    confirm_import_command_with_receipt_read_source(
+        pool,
+        user_id,
+        command,
+        ConfirmReceiptReadSource::Metadata,
+    )
+}
+
+/// Canonical confirm entrypoint with an explicit terminal receipt authority.
+///
+/// New confirmations always keep the existing metadata + typed projection write contract. The
+/// selector affects terminal replay reads only, so operators can stage and roll back the cutover
+/// without introducing a second confirm writer.
+#[tracing::instrument(
+    level = "debug",
+    skip_all,
+    fields(session_key = %command.session_id, receipt_read_source = read_source.as_str())
+)]
+pub fn confirm_import_command_with_receipt_read_source(
+    pool: &PostgresPool,
+    user_id: UserId,
+    command: &ConfirmCommand,
+    read_source: ConfirmReceiptReadSource,
+) -> DbResult<ConfirmReceiptResponse> {
     tracing::info!(
         domain = "import_confirm",
         operation = "confirm",
         outcome = "started",
         session_key = %command.session_id,
+        receipt_read_source = read_source.as_str(),
         request_session_version = ?command.expected_session_version,
         response_schema_version = CONFIRM_RESPONSE_SCHEMA_VERSION,
         "import confirmation started"
     );
-    let result = confirm_import_command_in_transaction(pool, user_id, command);
+    let result =
+        confirm_import_command_in_transaction(pool, user_id, command, read_source);
     match &result {
         Ok(receipt) => tracing::info!(
             domain = "import_confirm",
             operation = "confirm",
             outcome = if receipt.replayed { "replayed" } else { "committed" },
             session_key = %command.session_id,
+            receipt_read_source = read_source.as_str(),
             request_session_version = ?command.expected_session_version,
             response_schema_version = CONFIRM_RESPONSE_SCHEMA_VERSION,
             http_status = receipt.http_status,
@@ -103,6 +130,7 @@ pub fn confirm_import_command(
             operation = "confirm",
             outcome = "rolled_back",
             session_key = %command.session_id,
+            receipt_read_source = read_source.as_str(),
             request_session_version = ?command.expected_session_version,
             rollback_reason = confirm_rollback_reason(error),
             "import confirmation transaction rolled back"
@@ -115,6 +143,7 @@ fn confirm_import_command_in_transaction(
     pool: &PostgresPool,
     user_id: UserId,
     command: &ConfirmCommand,
+    read_source: ConfirmReceiptReadSource,
 ) -> DbResult<ConfirmReceiptResponse> {
     block_on_db(async move {
         let user_id = user_id_i64(user_id)?;
@@ -122,7 +151,15 @@ fn confirm_import_command_in_transaction(
         let session =
             lock_import_session_for_confirm(&mut tx, &command.session_id, user_id).await?;
         let receipt = if session.status == "confirmed" {
-            Some(stored_confirm_receipt(&session.metadata)?)
+            Some(
+                stored_confirm_receipt_from_source(
+                    &mut tx,
+                    &session,
+                    user_id,
+                    read_source,
+                )
+                .await?,
+            )
         } else {
             None
         };

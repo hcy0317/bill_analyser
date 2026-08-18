@@ -10,6 +10,26 @@ pub struct ConfirmCommand {
     pub declared_confirm_time_effects: Vec<ConfirmTimeEffect>,
 }
 
+/// Authority used only when replaying a terminal confirm receipt.
+///
+/// `Metadata` remains the safe default until a target database has completed the typed receipt
+/// backfill and all-target parity audit. `TypedV1` is deliberately strict and never falls back to
+/// metadata when its projection is missing or invalid.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConfirmReceiptReadSource {
+    Metadata,
+    TypedV1,
+}
+
+impl ConfirmReceiptReadSource {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Metadata => "metadata",
+            Self::TypedV1 => "typed_v1",
+        }
+    }
+}
+
 /// Confirm-time effects intentionally have no variants until a persisted domain effect is supported.
 ///
 /// Keeping the collection typed prevents arbitrary JSON effects from crossing the repository boundary.
