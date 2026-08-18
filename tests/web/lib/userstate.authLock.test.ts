@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, jest, test } from '@jest/globals';
 
 let mockApplicationLockEnabled = false;
+const legacyAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0eXBlIjoiYWNjZXNzIiwiZXhwIjo0MTAyNDQ0ODAwfQ.signature';
+const legacyAccessCiphertext = 'U2FsdGVkX18UKBz2l2ZPcsPQ10HiuyuQb7lDAL6P2lf7MzEKwQzL2WiGjuapbeKdA15RGImDGtcvO9pQKKcgTw8CTUKFXp3AArqW5ruzC22rYurcWIB/Q2Fplwkqsm2/qatNfPpiloiUa0bmc1Jx7A==';
+const legacyRefreshToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0eXBlIjoicmVmcmVzaCIsImV4cCI6NDEwMjQ0NDgwMH0.signature';
+const legacyRefreshCiphertext = 'U2FsdGVkX19P3lq3w85d96A0m+s9ms+IIzvjBKUgeU1+JdEQ0tgfhH7jo8zu1x5vXzQbvdflkvP86gsFfuaVEt5szrrUTbdKlhwBz7aypRW44KT+7HOP4sdhaWh/bBrk0g8tJChovzUR07TeW4cz2A==';
 
 jest.mock('@/lib/settings.ts', () => ({
     __esModule: true,
@@ -54,7 +58,7 @@ function expectNoUnlockedCredentialState(): void {
 
 function mutateEncryptedCredential(credential: string): string {
     const mutationIndex = credential.endsWith('=') ? credential.length - 2 : credential.length - 1;
-    const replacement = credential[mutationIndex] === 'A' ? 'B' : 'A';
+    const replacement = credential[mutationIndex] === 'a' ? 'b' : 'a';
     return `${credential.slice(0, mutationIndex)}${replacement}${credential.slice(mutationIndex + 1)}`;
 }
 
@@ -66,8 +70,9 @@ function mockCredentialDecryption(
         AES: { decrypt: (candidate: unknown, key: unknown) => unknown };
     };
     const originalDecrypt = CryptoJS.AES.decrypt.bind(CryptoJS.AES);
+    const encryptedPayload = credential.split('.v1.')[0] ?? credential;
     return jest.spyOn(CryptoJS.AES, 'decrypt').mockImplementation((candidate, key) => {
-        if (String(candidate) !== credential) {
+        if (String(candidate) !== encryptedPayload) {
             return originalDecrypt(candidate, key);
         }
 
@@ -234,16 +239,15 @@ describe('userstate application-lock credential lifecycle', () => {
             if (!encryptedRefreshToken) {
                 throw new Error('encrypted refresh credential was not created');
             }
-            const corruptedRefreshToken = mutateEncryptedCredential(encryptedRefreshToken);
-            localStorage.setItem('ebk_user_refresh_token', corruptedRefreshToken);
             mockApplicationLockEnabled = true;
             userstate.clearCurrentSessionToken();
-            const decryptSpy = mockCredentialDecryption(corruptedRefreshToken, outcome);
+            const decryptSpy = mockCredentialDecryption(encryptedRefreshToken, outcome);
 
             try {
                 expect(() => userstate.unlockTokenByPinCode('alice', '123456')).toThrow('Unable to decrypt refresh credential');
+                expect(decryptSpy).toHaveBeenCalled();
                 expectNoUnlockedCredentialState();
-                expect(localStorage.getItem('ebk_user_refresh_token')).toBe(corruptedRefreshToken);
+                expect(localStorage.getItem('ebk_user_refresh_token')).toBe(encryptedRefreshToken);
             } finally {
                 decryptSpy.mockRestore();
             }
@@ -285,6 +289,90 @@ describe('userstate application-lock credential lifecycle', () => {
         expect(sessionStorage.getItem('ebk_user_session_refresh_token')).toBe('refresh-before-lock');
     });
 
+    test('legacy ciphertext that yields wrong-key plaintext cannot unlock the session', async () => {
+        const userstate = await loadUserState();
+        localStorage.setItem(
+            'ebk_user_token',
+            'U2FsdGVkX1/acrHtmLIAugwD1mURuvcNowYoxMP8zj/yf8qIEl35sYF4vOdOX1Q3aKuAs/39ZvfsAREeqaXY+LYXSay4sXQcRbwZr47uq/4='
+        );
+        mockApplicationLockEnabled = true;
+
+        expect(() => userstate.unlockTokenByPinCode('alice', '000000')).toThrow('Unable to decrypt token');
+        expectNoUnlockedCredentialState();
+    });
+
+    test('valid legacy JWT ciphertext is upgraded after a successful unlock', async () => {
+        const userstate = await loadUserState();
+        localStorage.setItem('ebk_user_token', legacyAccessCiphertext);
+        localStorage.setItem('ebk_user_refresh_token', legacyRefreshCiphertext);
+        mockApplicationLockEnabled = true;
+
+        userstate.unlockTokenByPinCode('alice', '123456');
+
+        expect(userstate.getCurrentToken()).toBe(legacyAccessToken);
+        expect(userstate.getCurrentRefreshToken()).toBe(legacyRefreshToken);
+        expect(localStorage.getItem('ebk_user_token')).not.toBe(legacyAccessCiphertext);
+        expect(localStorage.getItem('ebk_user_token')).toContain('.v1.');
+        expect(localStorage.getItem('ebk_user_refresh_token')).not.toBe(legacyRefreshCiphertext);
+        expect(localStorage.getItem('ebk_user_refresh_token')).toContain('.v1.');
+    });
+
+    test('malformed authenticated envelope is rejected by the credential boundary', async () => {
+        const credentials = await import('@/lib/userstate/credentials.ts');
+        const appLockState = {
+            username: 'alice',
+            secret: credentials.getAppLockSecret('123456')
+        };
+        const encryptedToken = credentials.getEncryptedToken('access-before-lock', appLockState);
+        const ciphertext = encryptedToken.split('.v1.')[0];
+
+        expect(() => credentials.getDecryptedToken(`${ciphertext}.v1.short`, appLockState)).toThrow(
+            'Invalid encrypted credential'
+        );
+    });
+
+    test.each([
+        'U2FsdGVkX1+vVAB4pOHleZKmfZIfKIjQlpfPp99Lcaw=',
+        'U2FsdGVkX1/+yXLRfO7bTCR14HS/U9MbgU5j7WOrAPcNa2/i5wc5VjY1ZJNSE0kS'
+    ])('legacy ciphertext with a non-JWT payload cannot unlock the session', async (legacyCiphertext) => {
+        const userstate = await loadUserState();
+        localStorage.setItem('ebk_user_token', legacyCiphertext);
+        mockApplicationLockEnabled = true;
+
+        expect(() => userstate.unlockTokenByPinCode('alice', '123456')).toThrow('Unable to decrypt token');
+        expectNoUnlockedCredentialState();
+    });
+
+    test('legacy encrypted refresh credential must have refresh JWT semantics', async () => {
+        const userstate = await loadUserState();
+        localStorage.setItem('ebk_user_token', legacyAccessCiphertext);
+        localStorage.setItem('ebk_user_refresh_token', legacyAccessCiphertext);
+        mockApplicationLockEnabled = true;
+
+        expect(() => userstate.unlockTokenByPinCode('alice', '123456')).toThrow(
+            'Unable to decrypt refresh credential'
+        );
+        expectNoUnlockedCredentialState();
+        expect(localStorage.getItem('ebk_user_token')).toBe(legacyAccessCiphertext);
+        expect(localStorage.getItem('ebk_user_refresh_token')).toBe(legacyAccessCiphertext);
+    });
+
+    test('tampered authenticated ciphertext fails before restoring session state', async () => {
+        const userstate = await loadUserState();
+        userstate.updateCurrentToken('access-before-lock');
+        userstate.encryptToken('alice', '123456');
+        const encryptedToken = localStorage.getItem('ebk_user_token');
+        if (!encryptedToken) {
+            throw new Error('encrypted access credential was not created');
+        }
+        localStorage.setItem('ebk_user_token', mutateEncryptedCredential(encryptedToken));
+        mockApplicationLockEnabled = true;
+        userstate.clearCurrentSessionToken();
+
+        expect(() => userstate.unlockTokenByPinCode('alice', '123456')).toThrow('Unable to decrypt token');
+        expectNoUnlockedCredentialState();
+    });
+
     test('invalid unlock and locked refresh updates fail closed', async () => {
         const userstate = await loadUserState();
         userstate.updateCurrentToken('access-before-lock');
@@ -322,6 +410,7 @@ describe('userstate application-lock credential lifecycle', () => {
 
             try {
                 expect(userstate.getCurrentRefreshToken()).toBeNull();
+                expect(decryptSpy).toHaveBeenCalled();
                 expect(sessionStorage.getItem('ebk_user_session_refresh_token')).toBeNull();
                 expect(sessionStorage.getItem('ebk_user_session_encrypted_refresh_token')).toBeNull();
             } finally {
