@@ -203,12 +203,10 @@ async fn query_preview_page_from_connection(
     })
 }
 
-/// 迁移期只读 shadow：同一请求分别走 legacy payload 与 typed v1 columns，生产入口不调用它。
-#[tracing::instrument(level = "debug", skip_all)]
-pub fn audit_import_preview_signal_read_parity(
-    pool: &PostgresPool,
-    session_id: &str,
-    user_id: UserId,
+async fn query_import_preview_signal_read_parity_on_connection(
+    connection: &mut sqlx::PgConnection,
+    session_db_id: i64,
+    user_id: i64,
     request: &ImportPreviewPageRequest,
 ) -> DbResult<ImportPreviewSignalReadParityReport> {
     if !request.preview_ids.is_empty() {
@@ -217,42 +215,25 @@ pub fn audit_import_preview_signal_read_parity(
                 .to_string(),
         ));
     }
-    block_on_db(async move {
-        let user_id_i64 = user_id_i64(user_id)?;
-        let mut tx = pool.begin().await?;
-        sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
-            .execute(&mut *tx)
-            .await?;
-        let session_db_id = sqlx::query_scalar::<_, Option<i64>>(
-            "SELECT id FROM import_sessions WHERE session_key=$1 AND user_id=$2",
-        )
-        .bind(session_id)
-        .bind(user_id_i64)
-        .fetch_one(&mut *tx)
-        .await?
-        .ok_or_else(|| DbError::InvalidOperation("import session not found".to_string()))?;
-        ensure_preview_signal_projection_v1(&mut tx, session_db_id, user_id_i64).await?;
-        let legacy = query_preview_page_from_connection(
-            &mut tx,
-            session_db_id,
-            user_id_i64,
-            request,
-            PreviewSignalReadSource::LegacyPayload,
-        )
-        .await?;
-        let typed = query_preview_page_from_connection(
-            &mut tx,
-            session_db_id,
-            user_id_i64,
-            request,
-            PreviewSignalReadSource::TypedV1,
-        )
-        .await?;
-        tx.commit().await?;
-        Ok(build_import_preview_signal_read_parity_report(
-            legacy, typed,
-        ))
-    })
+    let legacy = query_preview_page_from_connection(
+        connection,
+        session_db_id,
+        user_id,
+        request,
+        PreviewSignalReadSource::LegacyPayload,
+    )
+    .await?;
+    let typed = query_preview_page_from_connection(
+        connection,
+        session_db_id,
+        user_id,
+        request,
+        PreviewSignalReadSource::TypedV1,
+    )
+    .await?;
+    Ok(build_import_preview_signal_read_parity_report(
+        legacy, typed,
+    ))
 }
 
 fn build_import_preview_signal_read_parity_report(

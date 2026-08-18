@@ -1,0 +1,134 @@
+{
+  "schema_version": 1,
+  "date": "2026-08-18",
+  "cyanflow_slice": "C5f-b import signal target audit",
+  "status": "local_audit_green",
+  "source": {
+    "base_head": "60f106c1cdc6909d4274f945f3510f1bc4899bb1",
+    "implementation_commit": "e8e742b0d",
+    "target_database_executed": false,
+    "database_policy": "full workspace coverage used a fresh isolated database; no target or long-lived database backfill, audit, or read cutover was performed"
+  },
+  "command": {
+    "name": "bill_import_signal_read_audit",
+    "database_env": "BILL_ANALYSER_POSTGRES_URL",
+    "default_row_batch_size": 1000,
+    "maximum_row_batch_size": 10000,
+    "default_query_page_size": 100,
+    "maximum_query_page_size": 1000,
+    "runs_migrations": false,
+    "writes_business_data": false,
+    "emits_one_report_after_transaction_commit": true,
+    "cross_process_resume_allowed": false,
+    "database_url_redacted_from_errors": true
+  },
+  "snapshot_contract": {
+    "transaction_isolation": "repeatable read",
+    "transaction_read_only": true,
+    "migration_ledger_must_exactly_match_binary": true,
+    "required_projection_version": 1,
+    "row_parity_scope": "every import_preview_rows row in the snapshot",
+    "row_parity_dimensions": [
+      "projection_version",
+      "six_typed_columns_non_null",
+      "six_typed_columns_equal_legacy_oracle"
+    ],
+    "query_corpus_max_sessions": 7,
+    "query_cases_per_session": 7,
+    "query_case_filters": [
+      "unfiltered",
+      "parser",
+      "platform_duplicate",
+      "transfer",
+      "history",
+      "learning",
+      "llm"
+    ],
+    "query_parity_dimensions": [
+      "rows",
+      "total",
+      "six_signal_counts",
+      "selection_counts",
+      "facets",
+      "selection_hash"
+    ]
+  },
+  "failure_policy": {
+    "migration_ledger_mismatch": "fail closed without running migrations",
+    "unmaterialized_row": "emit ineligible report and skip query corpus",
+    "row_parity_mismatch": "emit ineligible report and skip query corpus",
+    "query_parity_mismatch": "emit ineligible report",
+    "invalid_limits": "reject before database access",
+    "ineligible_process_exit": 1
+  },
+  "tdd": {
+    "red": [
+      "target snapshot audit API unresolved",
+      "nullable unmaterialized family aggregate failed to decode",
+      "target audit CLI binary missing"
+    ],
+    "green": {
+      "target_audit_real_postgres": {
+        "passed": 3,
+        "failed": 0,
+        "skipped": 0
+      },
+      "target_audit_cli_unit": {
+        "passed": 4,
+        "failed": 0
+      },
+      "read_shadow_real_postgres": {
+        "passed": 2,
+        "failed": 0,
+        "skipped": 0
+      },
+      "db_lib": {
+        "passed": 149,
+        "failed": 0
+      },
+      "import_staging_real_postgres": {
+        "passed": 36,
+        "failed": 0,
+        "skipped": 0
+      },
+      "db_all_targets": "pass",
+      "workspace_format": "pass",
+      "workspace_clippy_all_targets": "pass",
+      "rust_only_source_tree": {
+        "status": "pass",
+        "tracked_paths": 2026
+      },
+      "rust_backend_structure": {
+        "status": "pass",
+        "files_scanned": 606,
+        "baseline_entries": 3
+      },
+      "workspace_line_coverage": {
+        "lines_found": 74045,
+        "lines_hit": 49612,
+        "percent": 67.0025
+      },
+      "changed_line_coverage": {
+        "coverage_eligible_files": 3,
+        "matched_files": 3,
+        "executable_lines": 479,
+        "covered_lines": 459,
+        "percent": 95.82
+      }
+    }
+  },
+  "isolated_coverage_database": {
+    "name": "bill_analyser_c5fb_audit_cov_20260818_1",
+    "migration_count": 26,
+    "maximum_migration_version": 26,
+    "removed_after_test": true,
+    "verified_absent_after_cleanup": true
+  },
+  "transition_ledger": {
+    "production_read": "unchanged legacy projection",
+    "target_backfill": "not executed",
+    "target_audit": "command delivered but not executed against a real target database",
+    "public_read_cutover": "blocked until target full backfill, eligible audit report, and performance gates",
+    "next": "target operator execution and query/write p95 evidence before any public read cutover"
+  }
+}

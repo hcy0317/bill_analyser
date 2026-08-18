@@ -2,7 +2,7 @@
 
 日期：2026-08-18
 
-状态：本地实现与完整审计门禁完成；等待 exact-head CI
+状态：已由 PR #322 合并；exact-head CI run `16176` 的 backend、frontend、governance、E2E 全部通过，main 为 `60f106c1cdc6909d4274f945f3510f1bc4899bb1`
 
 范围：建立 typed signal columns 的私有读取和单快照 parity 审计边界；不执行目标库历史回填，不切换生产 read，不改变 API/session/mutation/confirm 合同，不增加索引
 
@@ -35,5 +35,6 @@ typed 查询直接读取 `signal_parser`、`signal_platform_duplicate`、`signal
 - 本切片业务改动行覆盖率 `97.33%`（474/487）；3 个 coverage-eligible 文件全部匹配 LCOV。
 - `cargo fmt --all -- --check`、`cargo clippy --workspace --all-targets -- -D warnings`、Rust-only source-tree gate、Rust backend structure gate 与 `git diff --check` 全部通过。
 - 实现 commit：`789a019a3`。
+- Gitea：PR #322 已 squash merge；exact-head CI run `16176`，backend job `19182`、frontend job `19183`、governance job `19184`、E2E job `19185` 全部成功。
 
 完整 coverage 使用隔离数据库 `bill_analyser_c5f_shadow_cov_20260818_2`，测试后已按精确名称删除并复核不存在。机器可读证据位于 `docs/refactor/evidence/cyanflow-c5-import-signal-read-shadow-2026-08-18.json`。

@@ -2,11 +2,11 @@
 
 日期：2026-08-17
 
-状态：`ACCEPTED`；C5b、C5c、C5d、C5e 已合并；C5f-a read shadow 本地实现与完整审计门禁完成，等待 exact-head CI；公开 read cutover 尚未启动
+状态：`ACCEPTED`；C5b、C5c、C5d、C5e、C5f-a 已合并；C5f-b 目标库只读审计命令本地实现与完整审计门禁完成，等待 exact-head CI；公开 read cutover 尚未启动
 
 决策编号：`ADR-IMPORT-SCHEMA-001`
 
-机器可读证据：`docs/refactor/evidence/cyanflow-c5-import-schema-benchmark-2026-08-17.json`、`docs/refactor/evidence/cyanflow-c5-import-signal-schema-expand-2026-08-18.json`、`docs/refactor/evidence/cyanflow-c5-import-signal-writer-shadow-2026-08-18.json`、`docs/refactor/evidence/cyanflow-c5-import-signal-backfill-2026-08-18.json`、`docs/refactor/evidence/cyanflow-c5-import-signal-read-shadow-2026-08-18.json`
+机器可读证据：`docs/refactor/evidence/cyanflow-c5-import-schema-benchmark-2026-08-17.json`、`docs/refactor/evidence/cyanflow-c5-import-signal-schema-expand-2026-08-18.json`、`docs/refactor/evidence/cyanflow-c5-import-signal-writer-shadow-2026-08-18.json`、`docs/refactor/evidence/cyanflow-c5-import-signal-backfill-2026-08-18.json`、`docs/refactor/evidence/cyanflow-c5-import-signal-read-shadow-2026-08-18.json`、`docs/refactor/evidence/cyanflow-c5-import-signal-target-audit-2026-08-18.json`
 
 可复跑基准：`Get-Content -Raw scripts/bench_import_signal_schema.sql | docker exec -i bill-analyser-postgres psql -X -U bill_analyser -d bill_analyser`
 
@@ -152,6 +152,8 @@ C5d 已按上述边界实现：所有新行和 evidence mutation 行由 `Preview
 C5e 已实现独立 Rust 运维命令与 repository batch API。每批在固定 advisory lock 下拒绝水位之前仍存在 version `0` 缺口，随后按主键顺序锁定最多 1,000 行并通过 version `0` CAS 写入；不得用 `SKIP LOCKED` 越过低主键。投影复用 C5d 唯一 kernel，legacy SQL 仅在同一事务内对本批全部行做只读 parity。成功提交后才输出可持久化 JSON checkpoint，毒数据、migration/schema 错误、观察行数或 CAS 数量异常均整批回滚。C5e 没有修改生产 read、API、session 或 confirm 合同，也没有对长期开发数据库执行迁移或历史回填；目标库实跑 parity=0 仍是 C5f read cutover 的前置门禁。
 
 C5f-a 已实现 repository 私有 typed read shadow。公开 `query_preview_page_by_session` 继续硬编码 legacy source；迁移审计先验证当前 user/session 的每一行都是 `signal_projection_version=1`，随后在同一 `REPEATABLE READ, READ ONLY` 事务快照中分别读取 legacy 与 typed 结果，比较 rows、total、六类 signal counts、selection counts、facets 与 selection hash。typed 查询不调用 legacy signal 函数，只从六个 boolean 列读取 family membership；带 `preview_ids` 的旁路查询不进入该合同。该阶段没有执行目标库历史回填、公开 read cutover、API/session/mutation/confirm 改动或索引变更。
+
+C5f-b 已实现独立 Rust 运维命令 `bill_import_signal_read_audit`。它不运行 migration，先在只读可重复读事务内要求 `_sqlx_migrations` 与当前 binary 的完整版本序列相同，再按有界 row batch 全量比较 version、六列与 legacy oracle。只有逐行 parity 为零时，才从最大 session 及六个可见 family 的最大覆盖 session 组成最多 7 个去重 corpus，并对每个 session 执行无筛选与六类 family 筛选的 page/count/facet parity；报告在事务提交后一次性输出，避免跨进程 checkpoint 拼接不同快照。未物化、逐行漂移或查询差异会输出不合格报告并以非零状态退出。该阶段只交付审计能力，没有在真实目标库执行 backfill/audit，也没有开放 production read。
 
 ## 8. Restore 与放行门禁
 

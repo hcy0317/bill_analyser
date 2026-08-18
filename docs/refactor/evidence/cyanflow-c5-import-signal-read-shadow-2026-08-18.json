@@ -2,7 +2,7 @@
   "schema_version": 1,
   "date": "2026-08-18",
   "cyanflow_slice": "C5f-a import signal read shadow",
-  "status": "local_audit_green",
+  "status": "merged",
   "source": {
     "base_head": "aca34e7e864d89e04190017256960c22ced1b65c",
     "implementation_commit": "789a019a3",
@@ -99,5 +99,18 @@
     "target_backfill": "not executed",
     "public_read_cutover": "blocked until target full backfill, cumulative parity zero, and performance gates",
     "next": "C5f-b target batch orchestration and cumulative parity evidence"
+  },
+  "delivery": {
+    "pull_request": 322,
+    "ci_run": 16176,
+    "ci_jobs": {
+      "backend": 19182,
+      "frontend": 19183,
+      "governance": 19184,
+      "e2e": 19185
+    },
+    "all_required_jobs_succeeded": true,
+    "merged_main_head": "60f106c1cdc6909d4274f945f3510f1bc4899bb1",
+    "source_branch_deleted": true
   }
 }
