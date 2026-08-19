@@ -8,6 +8,11 @@ use chrono::{Datelike, Duration, NaiveDate};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+use crate::{
+    derive_ledger_balance_effects, ErrorCode, LedgerBalanceInput, Money, RuntimeError,
+    TransactionType,
+};
+
 pub const DEFAULT_EXCHANGE_RATE_PROVIDER_ORDER: [&str; 4] = ["boc_cn", "cmb_cn", "ecb", "rba"];
 pub const TARGET_EXCHANGE_CURRENCIES: [&str; 16] = [
     "USD", "EUR", "GBP", "JPY", "HKD", "KRW", "AUD", "CAD", "SGD", "TWD", "MYR", "THB", "VND",
@@ -71,6 +76,44 @@ pub struct StatisticsBillInput {
     pub sub_category: String,
     pub counterparty: String,
     pub description: String,
+}
+
+/// 把统计账单映射到统一账本余额语义，并将有效账户腿应用到当前余额。
+pub fn apply_statistics_bill_balance_effects(
+    current_balances: &mut BTreeMap<i64, i64>,
+    bill: &StatisticsBillInput,
+) -> Result<(), RuntimeError> {
+    let effects = derive_ledger_balance_effects(LedgerBalanceInput {
+        transaction_type: TransactionType::from_backend_name(&bill.bill_type)?,
+        amount: Money::from_cents(bill.amount_cents),
+        destination_amount: bill.destination_amount_cents.map(Money::from_cents),
+        source_account_id: bill.source_account_id,
+        destination_account_id: bill.destination_account_id,
+    })?;
+
+    let mut deltas = BTreeMap::<i64, i128>::new();
+    for leg in effects.legs() {
+        if !current_balances.contains_key(&leg.account_id) {
+            continue;
+        }
+        *deltas.entry(leg.account_id).or_default() += i128::from(leg.delta.to_cents());
+    }
+
+    let mut updates = Vec::with_capacity(deltas.len());
+    for (account_id, delta) in deltas {
+        let current = i128::from(current_balances[&account_id]);
+        let next = i64::try_from(current + delta).map_err(|_| {
+            RuntimeError::new(
+                ErrorCode::InvalidInput,
+                "statistics account balance exceeds integer cents range",
+            )
+        })?;
+        updates.push((account_id, next));
+    }
+    for (account_id, balance) in updates {
+        current_balances.insert(account_id, balance);
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

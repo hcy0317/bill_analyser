@@ -139,40 +139,6 @@ fn signed_statistics_amount_cents(bill: &StatisticsBillInput) -> i64 {
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-fn apply_asset_trend_bill(current_balances: &mut BTreeMap<i64, i64>, bill: &StatisticsBillInput) {
-    let amount = bill.amount_cents.abs();
-    if is_income_type(&bill.bill_type) {
-        if let Some(source_id) = bill.source_account_id {
-            if let Some(balance) = current_balances.get_mut(&source_id) {
-                *balance += amount;
-            }
-        }
-    } else if is_expense_type(&bill.bill_type) {
-        if let Some(source_id) = bill.source_account_id {
-            if let Some(balance) = current_balances.get_mut(&source_id) {
-                *balance -= amount;
-            }
-        }
-    } else if is_transfer_type(&bill.bill_type) {
-        if let Some(source_id) = bill.source_account_id {
-            if let Some(balance) = current_balances.get_mut(&source_id) {
-                *balance -= amount;
-            }
-        }
-        if let Some(destination_id) = bill.destination_account_id {
-            if let Some(balance) = current_balances.get_mut(&destination_id) {
-                let destination_amount = bill
-                    .destination_amount_cents
-                    .filter(|amount| *amount != 0)
-                    .unwrap_or(amount)
-                    .abs();
-                *balance += destination_amount;
-            }
-        }
-    }
-}
-
-#[tracing::instrument(level = "debug", skip_all)]
 fn parse_bill_date_prefix(value: &str) -> Option<NaiveDate> {
     NaiveDate::parse_from_str(value.get(0..10)?, "%Y-%m-%d").ok()
 }

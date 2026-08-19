@@ -48,7 +48,8 @@ async fn load_postgres_statistics_bills(
                 .try_get::<Option<String>, _>("transaction_type")?
                 .unwrap_or_default();
             let amount_cents: i64 = row.try_get("amount_cents")?;
-            let amount_cents = signed_postgres_statistics_amount_cents(&bill_type, amount_cents);
+            let amount_cents =
+                signed_postgres_statistics_amount_cents(&bill_type, amount_cents)?;
             Ok(StatisticsBillInput {
                 id: row.try_get("id")?,
                 date: postgres_timestamp_text(row.try_get("occurred_at")?),
@@ -84,8 +85,7 @@ async fn load_postgres_statistics_bills(
                     .unwrap_or_default(),
             })
         })
-        .collect::<Result<Vec<_>, sqlx::Error>>()
-        .map_err(DbError::from)
+        .collect::<DbResult<Vec<_>>>()
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -219,36 +219,14 @@ async fn load_postgres_account_balance_deltas_before(
         ..StatisticsBillFilters::default()
     };
     let bills = load_postgres_statistics_bills(pool, user_id, &filters).await?;
-    let account_ids = load_postgres_statistics_accounts(pool, user_id)
+    let mut deltas = load_postgres_statistics_accounts(pool, user_id)
         .await?
         .into_iter()
-        .map(|account| account.id)
-        .collect::<Vec<_>>();
-    let mut deltas = BTreeMap::new();
-    for account_id in account_ids {
-        let mut cents = 0_i64;
-        for bill in &bills {
-            let amount_cents = bill.amount_cents.abs();
-            if is_income_type(&bill.bill_type) && bill.source_account_id == Some(account_id) {
-                cents += amount_cents;
-            } else if is_expense_type(&bill.bill_type) && bill.source_account_id == Some(account_id)
-            {
-                cents -= amount_cents;
-            } else if is_transfer_type(&bill.bill_type) {
-                if bill.source_account_id == Some(account_id) {
-                    cents -= amount_cents;
-                }
-                if bill.destination_account_id == Some(account_id) {
-                    let destination_cents = bill
-                        .destination_amount_cents
-                        .map(i64::abs)
-                        .filter(|value| *value != 0)
-                        .unwrap_or(amount_cents);
-                    cents += destination_cents;
-                }
-            }
-        }
-        deltas.insert(account_id, cents);
+        .map(|account| (account.id, 0_i64))
+        .collect::<BTreeMap<_, _>>();
+    for bill in &bills {
+        bill_analyser_core::statistics::apply_statistics_bill_balance_effects(&mut deltas, bill)
+            .map_err(|error| DbError::InvalidOperation(error.to_string()))?;
     }
     Ok(deltas)
 }

@@ -16,7 +16,8 @@ pub async fn query_postgres_asset_trends_payload(
     let accounts = load_postgres_statistics_accounts(pool, user_id).await?;
     let balances_before =
         load_postgres_account_balance_deltas_before(pool, user_id, start_date).await?;
-    let days = build_asset_trends(&bills, &accounts, &balances_before, start_date, end_date);
+    let days = build_asset_trends(&bills, &accounts, &balances_before, start_date, end_date)
+        .map_err(|error| DbError::InvalidOperation(error.to_string()))?;
     let legend = build_asset_trend_legend(&accounts, &days);
     Ok(json!({
         "items": days,

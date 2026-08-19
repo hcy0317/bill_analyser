@@ -6,7 +6,7 @@ pub fn build_asset_trends(
     balances_before_date_cents: &BTreeMap<i64, i64>,
     start_date: NaiveDate,
     end_date: NaiveDate,
-) -> Vec<AssetTrendDay> {
+) -> Result<Vec<AssetTrendDay>, RuntimeError> {
     #[cfg(not(coverage))]
     tracing::info!(
         domain = "statistics",
@@ -20,7 +20,13 @@ pub fn build_asset_trends(
             .get(&account.id)
             .copied()
             .unwrap_or_default();
-        current_balances.insert(account.id, initial + history);
+        let opening_balance = initial.checked_add(history).ok_or_else(|| {
+            RuntimeError::new(
+                ErrorCode::InvalidInput,
+                "asset trend opening balance exceeds integer cents range",
+            )
+        })?;
+        current_balances.insert(account.id, opening_balance);
     }
 
     let mut bills_by_date: BTreeMap<String, Vec<&StatisticsBillInput>> = BTreeMap::new();
@@ -40,7 +46,7 @@ pub fn build_asset_trends(
         let opening_balances = current_balances.clone();
 
         for bill in bills_by_date.get(&date_text).into_iter().flatten() {
-            apply_asset_trend_bill(&mut current_balances, bill);
+            apply_statistics_bill_balance_effects(&mut current_balances, bill)?;
         }
 
         let items = accounts
@@ -60,7 +66,7 @@ pub fn build_asset_trends(
         });
         current_date += Duration::days(1);
     }
-    result
+    Ok(result)
 }
 
 /// 提取在资产趋势区间内有非零余额或余额变化的账户 ID。

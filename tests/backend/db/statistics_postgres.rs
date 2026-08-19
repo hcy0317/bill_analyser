@@ -16,12 +16,12 @@ use sqlx::{postgres::PgConnectOptions, postgres::PgPoolOptions, Executor, Row};
 #[tokio::test]
 async fn statistics_postgres_queries_preserve_explicit_cents_and_transfer_boundaries(
 ) -> Result<(), Box<dyn Error>> {
-    let Ok(postgres_url) = env::var("BILL_ANALYSER_TEST_POSTGRES_URL") else {
-        eprintln!(
-            "skipping PostgreSQL statistics contract: BILL_ANALYSER_TEST_POSTGRES_URL is not set"
-        );
-        return Ok(());
-    };
+    let postgres_url = env::var("BILL_ANALYSER_TEST_POSTGRES_URL").map_err(|_| {
+        std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "BILL_ANALYSER_TEST_POSTGRES_URL is required for PostgreSQL statistics contracts",
+        )
+    })?;
 
     let unique = chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default();
     let test_db = format!("statistics_contract_{unique}");
@@ -115,9 +115,19 @@ async fn statistics_postgres_queries_preserve_explicit_cents_and_transfer_bounda
     assert_eq!(analyzer["summary"]["total_expense_cents"], -1234);
     assert_eq!(analyzer["summary"]["net_income_cents"], 4444);
     assert_eq!(analyzer["by_type"]["expense"]["total_cents"], -1234);
-    assert_eq!(analyzer["by_type"]["transfer"]["total_cents"], -2000);
-    assert_eq!(analyzer["trend"][0]["expense_cents"], -1234);
-    assert_eq!(analyzer["trend"][0]["net_cents"], 4444);
+    assert_eq!(analyzer["by_type"]["transfer"]["total_cents"], -2300);
+    let march_analyzer_trend = analyzer["trend"]
+        .as_array()
+        .expect("analyzer trend array")
+        .iter()
+        .find(|bucket| {
+            bucket["date"]
+                .as_str()
+                .is_some_and(|date| date.starts_with("2026-03"))
+        })
+        .expect("March analyzer trend");
+    assert_eq!(march_analyzer_trend["expense_cents"], -1234);
+    assert_eq!(march_analyzer_trend["net_cents"], 4444);
 
     let asset = query_postgres_asset_trends_payload(
         &pool,
@@ -127,8 +137,8 @@ async fn statistics_postgres_queries_preserve_explicit_cents_and_transfer_bounda
     )
     .await?;
     let first_day = &asset["items"][0];
-    assert_json_asset_amount(first_day, cash_id, 10025, 10941);
-    assert_json_asset_amount(first_day, bank_id, 50000, 53678);
+    assert_json_asset_amount(first_day, cash_id, 10375, 11741);
+    assert_json_asset_amount(first_day, bank_id, 49400, 52678);
     let explicit_id = account_id(&pool, user_id, &format!("零钱包-{unique}")).await?;
     assert_json_asset_amount(first_day, explicit_id, 1234, 1234);
     let cash_id_text = cash_id.to_string();
@@ -137,6 +147,32 @@ async fn statistics_postgres_queries_preserve_explicit_cents_and_transfer_bounda
         .expect("asset legend")
         .iter()
         .any(|entry| entry["id"].as_str() == Some(cash_id_text.as_str())));
+
+    insert_bill(
+        &pool,
+        user_id,
+        "2026-03-01T13:00:00Z",
+        "expense",
+        "expense",
+        i64::MIN,
+        cash_id,
+        None,
+        breakfast_id,
+        "非法最小金额",
+        json!({"main_category": "餐饮", "sub_category": "早餐"}),
+    )
+    .await?;
+    let minimum_amount_error = query_postgres_asset_trends_payload(
+        &pool,
+        scoped_user_id,
+        NaiveDate::from_ymd_opt(2026, 3, 1).expect("start date"),
+        NaiveDate::from_ymd_opt(2026, 3, 1).expect("end date"),
+    )
+    .await
+    .expect_err("i64::MIN statistics amount must fail closed");
+    assert!(minimum_amount_error
+        .to_string()
+        .contains("invalid statistics amount_cents"));
 
     pool.close().await;
     admin_pool
@@ -165,6 +201,7 @@ async fn seed_statistics_fixture(
     let breakfast_id = insert_category(pool, user_id, "早餐", "餐饮/早餐").await?;
     let salary_id = insert_category(pool, user_id, "主业", "工资/主业").await?;
     let transfer_id = insert_category(pool, user_id, "转账", "转账").await?;
+    let investment_id = insert_category(pool, user_id, "投资", "投资").await?;
 
     insert_bill(
         pool,
@@ -208,6 +245,57 @@ async fn seed_statistics_fixture(
         json!({
             "main_category": "转账",
             "destination_amount_cents": 2150
+        }),
+    )
+    .await?;
+    insert_bill(
+        pool,
+        user_id,
+        "2026-02-28T10:00:00Z",
+        "expense",
+        "investment",
+        300,
+        bank_id,
+        Some(cash_id),
+        investment_id,
+        "区间前投资",
+        json!({
+            "main_category": "投资",
+            "destination_amount_cents": 350
+        }),
+    )
+    .await?;
+    insert_bill(
+        pool,
+        user_id,
+        "2026-03-01T11:00:00Z",
+        "expense",
+        "investment",
+        400,
+        bank_id,
+        Some(cash_id),
+        investment_id,
+        "区间内投资",
+        json!({
+            "main_category": "投资",
+            "destination_amount_cents": 450
+        }),
+    )
+    .await?;
+    insert_bill(
+        pool,
+        user_id,
+        "2026-02-28T11:00:00Z",
+        "expense",
+        "transfer",
+        300,
+        bank_id,
+        Some(cash_id),
+        transfer_id,
+        "显式零目的金额",
+        json!({
+            "main_category": "转账",
+            "destination_amount_cents": 0
         }),
     )
     .await?;

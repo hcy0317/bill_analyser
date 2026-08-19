@@ -48,16 +48,21 @@ fn postgres_value_to_i64(value: &Value) -> Option<i64> {
     }
 }
 
-fn signed_postgres_statistics_amount_cents(transaction_type: &str, amount_cents: i64) -> i64 {
+fn signed_postgres_statistics_amount_cents(
+    transaction_type: &str,
+    amount_cents: i64,
+) -> DbResult<i64> {
     let normalized = transaction_type.trim().to_ascii_lowercase();
-    let amount = amount_cents.abs();
-    match normalized.as_str() {
+    let amount = amount_cents
+        .checked_abs()
+        .ok_or_else(|| DbError::InvalidOperation("invalid statistics amount_cents".to_string()))?;
+    Ok(match normalized.as_str() {
         "income" | "收入" | "2" => amount,
         "expense" | "支出" | "3" | "transfer" | "转账" | "4" | "investment" | "投资" | "5" => {
             -amount
         }
         _ => amount_cents,
-    }
+    })
 }
 
 fn postgres_initial_balance_cents(metadata: &Value, balance_cents: i64) -> i64 {
@@ -105,16 +110,4 @@ fn effective_date_timestamp(value: &str) -> Option<i64> {
         .ok()
         .and_then(|date| date.and_hms_opt(0, 0, 0))
         .map(|datetime| datetime.and_utc().timestamp())
-}
-
-fn is_expense_type(value: &str) -> bool {
-    matches!(value.trim().to_lowercase().as_str(), "expense" | "支出")
-}
-
-fn is_income_type(value: &str) -> bool {
-    matches!(value.trim().to_lowercase().as_str(), "income" | "收入")
-}
-
-fn is_transfer_type(value: &str) -> bool {
-    matches!(value.trim().to_lowercase().as_str(), "transfer" | "转账")
 }

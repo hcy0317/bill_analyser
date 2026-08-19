@@ -1,16 +1,16 @@
 use std::collections::BTreeMap;
 
 use bill_analyser_core::statistics::{
-    build_asset_trend_legend, build_asset_trends, build_builtin_fallback_exchange_rates,
-    build_calendar_events_data, build_calendar_events_response, build_category_pie_data,
-    build_category_statistics_items, build_category_statistics_response,
-    build_category_trend_statistics, build_insight_anomaly_summary, build_net_worth_snapshot,
-    build_net_worth_snapshot_response, build_overview_result_from_report,
-    build_provider_candidate_order, build_provider_exchange_rates_result,
-    build_statistics_analyzer_category_result, build_statistics_analyzer_comparison_result,
-    build_statistics_analyzer_report, build_statistics_analyzer_trend_bucket,
-    build_statistics_analyzer_trends_result, build_statistics_report_chart_plan,
-    build_statistics_trend_response, build_top_merchants_data,
+    apply_statistics_bill_balance_effects, build_asset_trend_legend, build_asset_trends,
+    build_builtin_fallback_exchange_rates, build_calendar_events_data,
+    build_calendar_events_response, build_category_pie_data, build_category_statistics_items,
+    build_category_statistics_response, build_category_trend_statistics,
+    build_insight_anomaly_summary, build_net_worth_snapshot, build_net_worth_snapshot_response,
+    build_overview_result_from_report, build_provider_candidate_order,
+    build_provider_exchange_rates_result, build_statistics_analyzer_category_result,
+    build_statistics_analyzer_comparison_result, build_statistics_analyzer_report,
+    build_statistics_analyzer_trend_bucket, build_statistics_analyzer_trends_result,
+    build_statistics_report_chart_plan, build_statistics_trend_response, build_top_merchants_data,
     build_transaction_amount_period_result, build_transaction_amounts_response,
     build_user_custom_exchange_rates_result, convert_cny_quote_map_to_rates,
     convert_provider_base_currency, exchange_rate_provider_options, extract_numeric_values,
@@ -214,7 +214,8 @@ fn asset_trends_contract_preserves_balance_math_and_filters_empty_legends() {
         &balances_before,
         date("2026-03-01"),
         date("2026-03-02"),
-    );
+    )
+    .expect("valid asset trends");
     assert_eq!(trends.len(), 2);
     assert_asset_day(
         &trends[0],
@@ -237,6 +238,87 @@ fn asset_trends_contract_preserves_balance_math_and_filters_empty_legends() {
     assert_eq!(legend.len(), 2);
     assert_eq!(legend[0].id, "10");
     assert_eq!(legend[1].id, "20");
+}
+
+#[test]
+fn asset_trends_apply_investment_legs_and_preserve_explicit_zero_destination() {
+    let accounts = vec![
+        account(10, "现金", "10.00"),
+        account(20, "投资账户", "20.00"),
+    ];
+    let bills = vec![
+        StatisticsBillInput {
+            source_account_id: Some(10),
+            destination_account_id: Some(20),
+            destination_amount_cents: Some(450),
+            ..bill(1, "2026-03-01T08:00:00", "投资", "3.00")
+        },
+        StatisticsBillInput {
+            source_account_id: Some(10),
+            destination_account_id: Some(20),
+            destination_amount_cents: Some(0),
+            ..bill(2, "2026-03-01T09:00:00", "转账", "2.00")
+        },
+    ];
+
+    let trends = build_asset_trends(
+        &bills,
+        &accounts,
+        &BTreeMap::new(),
+        date("2026-03-01"),
+        date("2026-03-01"),
+    )
+    .expect("ledger-backed asset trends");
+
+    assert_asset_day(
+        &trends[0],
+        json!([
+            {"accountId": "10", "accountOpeningBalanceCents": 1000, "accountClosingBalanceCents": 500},
+            {"accountId": "20", "accountOpeningBalanceCents": 2000, "accountClosingBalanceCents": 2450},
+        ]),
+    );
+}
+
+#[test]
+fn statistics_balance_effects_do_not_leave_partial_state_when_a_leg_overflows() {
+    let mut balances = BTreeMap::from([(10, i64::MAX)]);
+    let bill = StatisticsBillInput {
+        bill_type: "转账".to_string(),
+        amount_cents: 1,
+        destination_amount_cents: Some(i64::MAX),
+        source_account_id: Some(10),
+        destination_account_id: Some(10),
+        ..StatisticsBillInput::default()
+    };
+
+    let error = apply_statistics_bill_balance_effects(&mut balances, &bill)
+        .expect_err("overflowing destination leg must fail closed");
+
+    assert_eq!(
+        error.message,
+        "statistics account balance exceeds integer cents range"
+    );
+    assert_eq!(balances, BTreeMap::from([(10, i64::MAX)]));
+}
+
+#[test]
+fn asset_trends_fail_closed_when_opening_balance_overflows() {
+    let mut overflowing_account = account(10, "现金", "0.00");
+    overflowing_account.initial_balance_cents = i64::MAX;
+
+    let error = build_asset_trends(
+        &[],
+        &[overflowing_account],
+        &BTreeMap::from([(10, 1)]),
+        date("2026-03-01"),
+        date("2026-03-01"),
+    )
+    .expect_err("opening balance overflow must fail closed");
+
+    assert_eq!(
+        error.message,
+        "asset trend opening balance exceeds integer cents range"
+    );
 }
 
 #[test]
