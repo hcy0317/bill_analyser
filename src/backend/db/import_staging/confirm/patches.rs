@@ -130,7 +130,7 @@ async fn apply_confirm_command_mutations(
     user_id: i64,
     command: &ConfirmCommand,
 ) -> DbResult<()> {
-    let identity_maps = load_import_identity_maps_for_confirm(tx, user_id).await?;
+    let identity_maps = load_import_identity_maps_on_tx(tx, user_id).await?;
     if !command.preview_patches.is_empty()
         && !command.preserve_unpatched_selection
         && command.selected_preview_ids.is_none()

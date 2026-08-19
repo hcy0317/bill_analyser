@@ -106,7 +106,7 @@ async fn apply_preview_patches_on_tx(
     user_id: i64,
     patches: &[ImportPreviewPatch],
 ) -> DbResult<usize> {
-    let identity_maps = load_import_identity_maps_for_confirm(tx, user_id).await?;
+    let identity_maps = load_import_identity_maps_on_tx(tx, user_id).await?;
     let mut changed = 0usize;
     for patch in patches {
         if apply_preview_patch_on_tx(tx, session_db_id, user_id, patch, &identity_maps).await? {

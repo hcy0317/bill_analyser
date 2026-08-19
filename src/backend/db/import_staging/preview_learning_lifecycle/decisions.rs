@@ -230,8 +230,7 @@ pub fn apply_preview_learning_decision(
         let payload = row
             .try_get::<Value, _>("preview_payload")
             .unwrap_or_else(|_| json!({}));
-        let identity_maps =
-            load_import_identity_maps_in_transaction(&mut transaction, user_id).await?;
+        let identity_maps = load_import_identity_maps_on_tx(&mut transaction, user_id).await?;
         let projection = project_preview_patch(preview, payload, &patch, &identity_maps)?;
         let mut update = build_preview_row_update_query(
             &projection.preview,

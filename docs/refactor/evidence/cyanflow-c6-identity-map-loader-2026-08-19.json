@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "date": "2026-08-19",
+  "cyanflow_slice": "C6i-a Transactional IdentityMap Loader",
+  "status": "local_audit_green_public_contract_unchanged",
+  "source": {
+    "base_head": "36bce491834ea446936e63ccd8af507286b2f29f",
+    "implementation_commit": "7b67bb30a694f2106f8e5e278a3793b6033da94b",
+    "database_policy": "focused and full coverage used isolated local databases; no production target backfill, target audit, read-source switch or business confirm was executed"
+  },
+  "ownership": {
+    "identity_read_owner": "identity_persistence::load_import_identity_maps_on_tx",
+    "identity_validation_owner": "identity_validation",
+    "runtime_callers": 6,
+    "old_loader_names_removed": true,
+    "borrowed_transaction": true,
+    "transaction_begin_or_commit_in_loader": false,
+    "cross_request_cache_added": false,
+    "new_port_or_trait": false,
+    "unit_of_work_added": false,
+    "production_writer_count_changed": false,
+    "public_http_payload_changed": false,
+    "schema_changed": false,
+    "durable_receipt_changed": false,
+    "production_config_changed": false
+  },
+  "contract": {
+    "active_accounts_user_scoped": true,
+    "active_categories_user_scoped": true,
+    "category_type_conversion_preserved": true,
+    "fresh_read_per_existing_transaction": true,
+    "generic_row_cas_preserved": true,
+    "confirm_session_lock_and_effect_order_preserved": true,
+    "learning_lifecycle_and_row_cas_preserved": true
+  },
+  "tdd": {
+    "red": "architecture contract failed because the neutral transactional loader did not exist",
+    "green": {
+      "focused_architecture_contract": {"passed": 1, "failed": 0},
+      "import_staging_db_lib": {"passed": 169, "failed": 0},
+      "import_staging_real_postgres": {"passed": 36, "failed": 0, "skipped": 0},
+      "workspace_format": "pass",
+      "workspace_clippy_all_targets": "pass",
+      "rust_backend_structure": {"status": "pass", "files_scanned": 620, "baseline_entries": 3},
+      "rust_only_source_tree": {"status": "pass", "tracked_paths": 2068},
+      "backend_doc_map": "pass",
+      "git_diff_check": "pass",
+      "workspace_line_coverage": {"lines_found": 80793, "lines_hit": 53747, "percent": 66.52},
+      "changed_line_coverage": {"executable_lines": 33, "covered_lines": 33, "percent": 100.0}
+    }
+  },
+  "review": {
+    "base_ref": "36bce491834ea446936e63ccd8af507286b2f29f",
+    "standards_axis_final": "passed_no_findings_after_persistence_validation_split",
+    "spec_axis_final": "passed_no_findings",
+    "new_endpoint_or_request_input": false,
+    "user_scope_changed": false,
+    "money_units_changed": false,
+    "sensitive_log_fields_added": false
+  },
+  "cleanup": {
+    "coverage_database": "bill_analyser_c6i_cov_20260819_02",
+    "coverage_database_removed": true,
+    "workspace_lcov_tracked": false,
+    "changed_diff_artifact_tracked": false,
+    "long_lived_development_database_modified": false
+  },
+  "next": "deliver C6i-a through exact-head Gitea CI and squash merge, then let Cyanflow select the next evidence-backed slice without activating typed_v1 or production target operations"
+}

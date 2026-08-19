@@ -50,6 +50,7 @@ include!("import_staging/sources_standard_rows.rs");
 include!("import_staging/signal_projection.rs");
 include!("import_staging/signal_backfill.rs");
 include!("import_staging/preview_write.rs");
+include!("import_staging/identity_persistence.rs");
 include!("import_staging/identity_validation.rs");
 include!("import_staging/preview_query.rs");
 include!("import_staging/preview_metadata_query.rs");

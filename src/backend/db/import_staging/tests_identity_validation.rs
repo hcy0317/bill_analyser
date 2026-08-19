@@ -287,3 +287,51 @@ fn identity_annotation_sync_preserves_non_identity_and_maps_all_identity_fields(
     assert!(!category_type_matches_preview_type(Some(2), "支出"));
     assert!(category_type_matches_preview_type(Some(99), "未知"));
 }
+
+#[test]
+fn import_identity_maps_have_one_transactional_loader_for_every_runtime_path() {
+    let identity_persistence_source = include_str!("identity_persistence.rs");
+    let identity_validation_source = include_str!("identity_validation.rs");
+    let runtime_sources = [
+        include_str!("preview_write.rs"),
+        include_str!("preview_selection.rs"),
+        include_str!("confirm/orchestration.rs"),
+        include_str!("confirm/patches.rs"),
+        include_str!("preview_learning_lifecycle/decisions.rs"),
+    ];
+    let retired_owner_sources = [
+        include_str!("confirm/persistence.rs"),
+        include_str!("preview_learning_lifecycle/persistence.rs"),
+    ];
+
+    assert_eq!(
+        identity_persistence_source
+            .matches("async fn load_import_identity_maps_on_tx(")
+            .count(),
+        1,
+        "identity persistence must own the single transactional identity-map loader"
+    );
+    assert_eq!(
+        runtime_sources
+            .iter()
+            .map(|source| source.matches("load_import_identity_maps_on_tx(").count())
+            .sum::<usize>(),
+        6,
+        "all six runtime reads must use the shared loader"
+    );
+    assert!(identity_persistence_source.contains(
+        "SELECT id FROM accounts WHERE user_id = $1 AND is_active = true"
+    ));
+    assert!(identity_persistence_source.contains(
+        "SELECT id, category_type FROM categories WHERE user_id = $1 AND is_active = true"
+    ));
+    assert!(!identity_persistence_source.contains(".begin()"));
+    assert!(!identity_persistence_source.contains(".commit()"));
+    assert!(!identity_validation_source.contains("sqlx::"));
+
+    let retired_sources = retired_owner_sources.join("\n");
+    assert!(!retired_sources.contains("load_import_identity_maps_for_confirm"));
+    assert!(!retired_sources.contains("load_import_identity_maps_in_transaction"));
+    assert!(!retired_sources.contains("SELECT id FROM accounts"));
+    assert!(!retired_sources.contains("SELECT id, category_type FROM categories"));
+}

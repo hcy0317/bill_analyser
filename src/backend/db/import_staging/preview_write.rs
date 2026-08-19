@@ -11,7 +11,7 @@ pub fn insert_preview_bill(
         let mut tx = pool.begin().await?;
         let session_db_id =
             lock_active_import_session_on_tx(&mut tx, session_id, user_id).await?;
-        let identity_maps = load_import_identity_maps_for_confirm(&mut tx, user_id).await?;
+        let identity_maps = load_import_identity_maps_on_tx(&mut tx, user_id).await?;
         let id =
             insert_preview_row_async(&mut tx, session_db_id, user_id, draft, &identity_maps)
                 .await?;
@@ -214,7 +214,7 @@ async fn insert_preview_rows_batch_async(
     user_id: i64,
     drafts: &[ImportPreviewDraft],
 ) -> DbResult<usize> {
-    let identity_maps = load_import_identity_maps_for_confirm(tx, user_id).await?;
+    let identity_maps = load_import_identity_maps_on_tx(tx, user_id).await?;
     let mut drafts = drafts.to_vec();
     for draft in &mut drafts {
         apply_identity_validation_to_draft(draft, &identity_maps);

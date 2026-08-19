@@ -274,7 +274,7 @@ fn confirm_import_command_in_transaction(
         .map_err(|error| {
             confirm_plan_validation_error(error, command, &session, request_session_version)
         })?;
-        let identity_maps = load_import_identity_maps_for_confirm(&mut tx, user_id).await?;
+        let identity_maps = load_import_identity_maps_on_tx(&mut tx, user_id).await?;
         let plan = build_confirm_plan(prepared_plan, &identity_maps).map_err(|error| {
             confirm_plan_validation_error(error, command, &session, request_session_version)
         })?;
