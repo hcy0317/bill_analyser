@@ -83,5 +83,9 @@ path = "../../../tests/backend/http/bill_route_input_contract.rs"
 name = "ledger_list_contract"
 path = "../../../tests/backend/http/ledger_list_contract.rs"
 
+[[test]]
+name = "reconciliation_statement_contract"
+path = "../../../tests/backend/http/reconciliation_statement_contract.rs"
+
 [lints]
 workspace = true

@@ -777,7 +777,7 @@ fn reconciliation_query_filters_and_error_envelopes_match_bills_route_contract()
 }
 
 #[test]
-fn reconciliation_opening_balance_preserves_all_time_and_filtered_fallbacks() {
+fn reconciliation_opening_balance_uses_account_initial_balance_without_prior_bills() {
     let all_time =
         parse_reconciliation_query(Some("1"), Some(0), Some(0), None, None, None).unwrap();
     assert_eq!(
@@ -796,7 +796,7 @@ fn reconciliation_opening_balance_preserves_all_time_and_filtered_fallbacks() {
     .unwrap();
     assert_eq!(
         reconciliation_opening_balance(&filtered, money("20.00"), &[]).to_cents(),
-        0
+        2000
     );
     assert_eq!(
         reconciliation_opening_balance(

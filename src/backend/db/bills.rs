@@ -32,6 +32,7 @@ pub struct BillFilters {
     pub id: Option<i64>,
     pub date_from: Option<String>,
     pub date_to: Option<String>,
+    pub date_before: Option<String>,
     pub transaction_type: Option<String>,
     pub main_category: Option<String>,
     pub sub_category: Option<String>,

@@ -17,6 +17,11 @@ fn push_bill_filters(
         builder.push_bind(value);
         builder.push("::date + interval '1 day')");
     }
+    if let Some(value) = text_filter(filters.date_before.as_deref()) {
+        builder.push(" AND b.occurred_at < ");
+        builder.push_bind(value);
+        builder.push("::date");
+    }
     if let Some(value) = text_filter(filters.transaction_type.as_deref()) {
         let canonical = canonical_transaction_type(&value);
         builder.push(" AND (b.transaction_type = ");

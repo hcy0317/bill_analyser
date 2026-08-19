@@ -187,7 +187,7 @@ pub fn reconciliation_opening_balance(
         previous_bills
             .first()
             .map(|bill| bill.account_balance)
-            .unwrap_or(Money::ZERO)
+            .unwrap_or(account_initial_balance)
     } else {
         account_initial_balance
     }

@@ -154,7 +154,7 @@ async fn load_postgres_reconciliation_opening_snapshots(
         pool,
         user_id,
         &BillFilters {
-            date_to: Some(start_date),
+            date_before: Some(start_date),
             account_ids: vec![params.account_id_int],
             ..BillFilters::default()
         },
