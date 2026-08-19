@@ -73,7 +73,7 @@ async fn move_account_transactions_handler(
             .await;
     match result {
         Ok(result) if result.success => {
-            if sync_all_postgres_account_balances(runtime.pool(), user_id)
+            if sync_all_postgres_account_balances(runtime.pool(), user_id_value)
                 .await
                 .is_err()
             {

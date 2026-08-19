@@ -2,6 +2,8 @@
 // 维护重点：金额从 PostgreSQL 分直接投影为显式 cents 字段，handler 不复制 SQL。
 // 不变式：所有查询必须按 user_id 过滤且忽略 is_deleted，不允许回退 non-Postgres。
 
+use std::collections::BTreeMap;
+
 use bill_analyser_core::adapters::transaction::{
     validate_batch_route_update_fields, ReconciliationCategoryRecord,
 };
@@ -14,8 +16,9 @@ use serde_json::{json, Map, Number, Value};
 use sqlx::{postgres::PgRow, Postgres, QueryBuilder, Row};
 
 use crate::{
-    calculate_bill_hash_from_record, BatchUpdateBillsResult, BillCategoryFilter, BillCreateDraft,
-    BillFilters, BillPage, BillRecord, BillUpdateDraft, DbError, DbResult, PostgresPool,
+    calculate_bill_hash_from_record, AccountBalanceDiscrepancy, BatchUpdateBillsResult,
+    BillCategoryFilter, BillCreateDraft, BillFilters, BillPage, BillRecord, BillUpdateDraft,
+    DbError, DbResult, PostgresPool, SyncAllAccountBalancesResult,
 };
 
 const MAIN_CATEGORY_EXPR: &str = "COALESCE(NULLIF(b.standard_payload->>'main_category', ''), NULLIF(split_part(c.path, '/', 1), ''), c.name, '')";
@@ -29,6 +32,8 @@ include!("postgres_reads/tags_accounts.rs");
 include!("postgres_reads/create.rs");
 include!("postgres_reads/update.rs");
 include!("postgres_reads/delete.rs");
+include!("postgres_reads/balance_effects.rs");
+include!("postgres_reads/account_balance_sync.rs");
 include!("postgres_reads/mutation_types.rs");
 include!("postgres_reads/mutation_prepare.rs");
 include!("postgres_reads/tags.rs");

@@ -4,8 +4,8 @@ use bill_analyser_core::{LedgerListQuery, Money, TransactionType, UserId};
 use bill_analyser_db::{
     batch_create_postgres_bills, batch_update_postgres_bills, create_postgres_bill,
     delete_postgres_bill, get_postgres_bill_by_id, get_postgres_bill_tags, query_postgres_bills,
-    update_postgres_bill, BillCategoryFilter, BillCreateDraft, BillFilters, BillUpdateDraft,
-    PostgresLedgerQueries, PostgresPool,
+    sync_all_postgres_account_balances, update_postgres_bill, BillCategoryFilter, BillCreateDraft,
+    BillFilters, BillUpdateDraft, PostgresLedgerQueries, PostgresPool,
 };
 use serde_json::{json, Value};
 use sqlx::Row;
@@ -104,6 +104,118 @@ async fn ledger_queries_list_returns_typed_page_with_cents_tags_and_user_scope(
     assert!(empty_page.items.is_empty());
     assert_eq!(empty_page.page, 1);
     assert_eq!(empty_page.page_size, 500);
+
+    test_db.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn account_balance_sync_replays_authoritative_bills_with_user_scope(
+) -> Result<(), Box<dyn Error>> {
+    let test_db = required_isolated_postgres_database("account_balance_sync").await?;
+    let fixture = seed_bills_fixture(&test_db.pool).await?;
+    let unchanged_account_id = insert_account(&test_db.pool, fixture.user_id, "无流水账户").await?;
+    let other_account_id: i64 =
+        sqlx::query_scalar("SELECT source_account_id FROM bills WHERE id = $1")
+            .bind(fixture.other_user_bill_id)
+            .fetch_one(&test_db.pool)
+            .await?;
+
+    sqlx::query("UPDATE accounts SET balance_cents = $1, metadata = $2 WHERE id = $3")
+        .bind(1_i64)
+        .bind(json!({"initial_balance_cents": "100000"}))
+        .bind(fixture.wallet_account_id)
+        .execute(&test_db.pool)
+        .await?;
+    sqlx::query("UPDATE accounts SET balance_cents = $1, metadata = $2 WHERE id = $3")
+        .bind(5_000_i64)
+        .bind(json!({"initial_balance_cents": "invalid"}))
+        .bind(fixture.bank_account_id)
+        .execute(&test_db.pool)
+        .await?;
+    sqlx::query("UPDATE accounts SET balance_cents = $1, metadata = $2 WHERE id = $3")
+        .bind(7_777_i64)
+        .bind(json!({"initial_balance_cents": 7_777}))
+        .bind(unchanged_account_id)
+        .execute(&test_db.pool)
+        .await?;
+
+    let before_versions = sqlx::query_as::<_, (i64, i64)>(
+        "SELECT id, version FROM accounts WHERE id = ANY($1) ORDER BY id",
+    )
+    .bind(vec![
+        fixture.wallet_account_id,
+        fixture.bank_account_id,
+        unchanged_account_id,
+    ])
+    .fetch_all(&test_db.pool)
+    .await?;
+
+    let result = sync_all_postgres_account_balances(&test_db.pool, fixture.user_id).await?;
+
+    assert_eq!(result.total_accounts, 3);
+    assert_eq!(result.synced_accounts, 2);
+    assert!(result.errors.is_empty());
+    assert_eq!(result.discrepancies.len(), 2);
+    let wallet = result
+        .discrepancies
+        .iter()
+        .find(|item| item.account_id == fixture.wallet_account_id)
+        .expect("wallet discrepancy");
+    assert_eq!(wallet.old_balance_cents, 1);
+    assert_eq!(wallet.new_balance_cents, 62_655);
+    assert_eq!(wallet.diff_cents, 62_654);
+    let bank = result
+        .discrepancies
+        .iter()
+        .find(|item| item.account_id == fixture.bank_account_id)
+        .expect("bank discrepancy");
+    assert_eq!(bank.old_balance_cents, 5_000);
+    assert_eq!(bank.new_balance_cents, 25_150);
+    assert_eq!(bank.diff_cents, 20_150);
+
+    let after_accounts = sqlx::query_as::<_, (i64, i64, i64)>(
+        "SELECT id, balance_cents, version FROM accounts WHERE id = ANY($1) ORDER BY id",
+    )
+    .bind(vec![
+        fixture.wallet_account_id,
+        fixture.bank_account_id,
+        unchanged_account_id,
+    ])
+    .fetch_all(&test_db.pool)
+    .await?;
+    for ((before_id, before_version), (after_id, _, after_version)) in
+        before_versions.iter().zip(&after_accounts)
+    {
+        assert_eq!(before_id, after_id);
+        let expected_increment = i64::from(*after_id != unchanged_account_id);
+        assert_eq!(*after_version, *before_version + expected_increment);
+    }
+    assert_eq!(
+        after_accounts
+            .iter()
+            .find(|(id, _, _)| *id == fixture.wallet_account_id)
+            .map(|(_, balance, _)| *balance),
+        Some(62_655)
+    );
+    assert_eq!(
+        after_accounts
+            .iter()
+            .find(|(id, _, _)| *id == fixture.bank_account_id)
+            .map(|(_, balance, _)| *balance),
+        Some(25_150)
+    );
+    assert_eq!(
+        after_accounts
+            .iter()
+            .find(|(id, _, _)| *id == unchanged_account_id)
+            .map(|(_, balance, _)| *balance),
+        Some(7_777)
+    );
+    assert_eq!(
+        account_balance_cents(&test_db.pool, other_account_id).await?,
+        0
+    );
 
     test_db.cleanup().await?;
     Ok(())

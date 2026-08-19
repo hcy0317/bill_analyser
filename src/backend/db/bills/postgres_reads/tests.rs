@@ -148,4 +148,49 @@ mod tests {
             vec![(11, -12_000), (22, 12_500)]
         );
     }
+
+    #[test]
+    fn postgres_balance_projection_preserves_legacy_adapter_semantics() {
+        assert_eq!(
+            project_postgres_bill_balance_deltas(
+                "investment",
+                12_000,
+                Some(11),
+                Some(22),
+                Some(0),
+            )
+            .expect("valid ledger effects"),
+            vec![(11, -12_000), (22, 0)]
+        );
+        assert_eq!(
+            project_postgres_bill_balance_deltas(
+                "legacy-expense",
+                -12_000,
+                Some(11),
+                Some(22),
+                None,
+            )
+            .expect("legacy unknown types remain expense-shaped at the adapter"),
+            vec![(11, -12_000)]
+        );
+        assert_eq!(
+            project_postgres_bill_balance_deltas(
+                "transfer",
+                12_000,
+                Some(11),
+                Some(22),
+                None,
+            )
+            .expect("missing destination amount falls back to source amount"),
+            vec![(11, -12_000), (22, 12_000)]
+        );
+        assert!(project_postgres_bill_balance_deltas(
+            "expense",
+            i64::MIN,
+            Some(11),
+            None,
+            None,
+        )
+        .is_err());
+    }
 }

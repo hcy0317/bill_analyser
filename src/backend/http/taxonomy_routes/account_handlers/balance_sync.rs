@@ -15,7 +15,7 @@ async fn sync_account_balances_handler(
         Err(response) => return *response,
     };
 
-    match sync_all_postgres_account_balances(runtime.pool(), user_id).await {
+    match sync_all_postgres_account_balances(runtime.pool(), db_user_id(user_id)).await {
         Ok(result) => success_result(
             StatusCode::OK,
             format_sync_account_balances_response(result),
