@@ -1,0 +1,111 @@
+{
+  "schema_version": "cyanflow-slice-evidence.v1",
+  "slice": "C7g-a",
+  "work_id": "bill-analyser-cyanflow-c7g-import-identity-catalog-20260820",
+  "base_commit": "8dceb2742d7e62312ba5f5dc5be429352dd4f192",
+  "branch": "codex/c7g-import-identity-catalog",
+  "objective": "Give import Stage 2 and LLM adapters one neutral typed PostgreSQL owner for active category and account catalog reads without changing their projections or public contracts.",
+  "architecture": {
+    "owner": "src/backend/db/import_catalog.rs",
+    "public_facade": "bill_analyser_db",
+    "production_adapters": [
+      "src/backend/db/import_stage2.rs",
+      "src/backend/http/import_routes/stage_handlers/stage2_application.rs",
+      "src/backend/http/import_routes/llm/preview_helpers.rs"
+    ],
+    "indirect_consumers": [
+      "import Stage 2",
+      "LLM preview and rule synthesis",
+      "OCR receipt context",
+      "import preview page",
+      "vector recall"
+    ],
+    "unchanged_boundaries": [
+      "active and user-scoped PostgreSQL filters",
+      "display_order then id ordering",
+      "category prompt path and type mapping",
+      "account trim, blank skip, and duplicate overwrite behavior",
+      "database error to import response mapping",
+      "REST, schema, session, configuration, and money contracts"
+    ],
+    "rejected_expansion": [
+      "repository trait",
+      "UnitOfWork",
+      "catalog cache",
+      "aggregate catalog loader",
+      "second writer or transaction"
+    ]
+  },
+  "tdd": {
+    "red": {
+      "command": "cargo test -p bill-analyser-db --test import_stage2_context real_postgres_stage2_context_is_user_scoped_ordered_and_fresh_per_batch --no-run",
+      "result": "failed before implementation because load_import_category_catalog_records and load_import_account_catalog_records did not exist"
+    },
+    "green": [
+      {
+        "command": "cargo test -p bill-analyser-http --test import_runtime_contract",
+        "discovered": 12,
+        "executed": 12,
+        "failed": 0,
+        "skipped": 0
+      },
+      {
+        "command": "cargo test -p bill-analyser-http --lib import_routes::action_scope_tests",
+        "discovered": 6,
+        "executed": 6,
+        "failed": 0,
+        "skipped": 0
+      },
+      {
+        "command": "cargo test -p bill-analyser-db --test import_stage2_context -- --nocapture",
+        "discovered": 2,
+        "executed": 2,
+        "failed": 0,
+        "skipped": 0,
+        "database": "fresh isolated PostgreSQL database"
+      }
+    ]
+  },
+  "verification": {
+    "cargo_fmt_check": "passed",
+    "cargo_clippy_workspace_all_targets_deny_warnings": "passed",
+    "cargo_test_workspace": {
+      "result": "passed on a fresh isolated PostgreSQL database",
+      "discovered": 840,
+      "executed": 840,
+      "failed": 0,
+      "skipped": 0
+    },
+    "cargo_llvm_cov_workspace": {
+      "command": "cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 35",
+      "result": "passed on a fresh isolated PostgreSQL database",
+      "executable_lines": 80899,
+      "covered_lines": 54331,
+      "line_coverage_percent": 67.16
+    },
+    "changed_line_coverage": {
+      "command": "node scripts/governance-normalizers.mjs changed-coverage --lcov workspace.lcov --diff .git/ai/c7g-rust-changed.diff --threshold 90 --require-matched-files --require-executable-lines --allow-no-business-files",
+      "business_files": 6,
+      "matched_coverage_files": 3,
+      "executable_changed_lines": 52,
+      "covered_changed_lines": 49,
+      "coverage_percent": 94.23,
+      "strict_threshold_percent": 90,
+      "status": "passed"
+    },
+    "new_catalog_module_changed_line_coverage_percent": 100.0,
+    "review": {
+      "base_ref": "8dceb2742d7e62312ba5f5dc5be429352dd4f192",
+      "head_ref": "working tree on codex/c7g-import-identity-catalog",
+      "standards_axis": "passed with no findings",
+      "spec_axis": "passed with no findings"
+    }
+  },
+  "environment_hygiene": {
+    "long_lived_development_database": "not migrated or cleared; an initial workspace test attempt exposed its existing migration version 25 checksum mismatch before business assertions",
+    "authoritative_workspace_test_rerun": "passed against a fresh one-time database",
+    "fresh_test_databases_removed": true,
+    "workspace_lcov_removed_after_measurement": true,
+    "changed_diff_artifact_removed_after_measurement": true
+  }
+}

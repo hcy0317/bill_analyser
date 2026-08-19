@@ -144,7 +144,7 @@ impl ImportStage2ContextSnapshot {
 }
 
 fn import_intelligence_category_from_record(
-    row: ImportStage2CategoryRecord,
+    row: ImportCategoryCatalogRecord,
 ) -> ImportIntelligenceCategory {
     let (main_category, sub_category) =
         import_intelligence_category_parts(row.path.as_deref(), &row.name);
@@ -198,7 +198,7 @@ async fn load_import_intelligence_categories(
     connection: &Connection,
     user_id: i64,
 ) -> Result<Vec<ImportIntelligenceCategory>, bill_analyser_db::DbError> {
-    load_import_stage2_category_records(connection, user_id)
+    load_import_category_catalog_records(connection, user_id)
         .await
         .map(|rows| {
             rows.into_iter()
@@ -225,7 +225,7 @@ async fn load_import_intelligence_accounts(
     connection: &Connection,
     user_id: i64,
 ) -> Result<Vec<ImportIntelligenceAccount>, bill_analyser_db::DbError> {
-    load_import_stage2_account_records(connection, user_id)
+    load_import_account_catalog_records(connection, user_id)
         .await
         .map(|rows| {
             rows.into_iter()

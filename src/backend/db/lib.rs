@@ -17,6 +17,7 @@ pub mod bills;
 pub mod budgets;
 mod category_path;
 pub mod error;
+mod import_catalog;
 pub mod import_config;
 pub mod import_stage2;
 pub mod import_staging;
@@ -104,17 +105,19 @@ pub use budgets::{
     BudgetUpdateDraft,
 };
 pub use error::{DbError, DbResult};
+pub use import_catalog::{
+    load_import_account_catalog_records, load_import_category_catalog_records,
+    ImportAccountCatalogRecord, ImportCategoryCatalogRecord,
+};
 pub use import_config::{
     delete_postgres_import_config, list_postgres_import_configs, match_postgres_import_config,
     save_postgres_import_config, ImportConfigRepositoryError,
 };
 pub use import_stage2::{
-    load_import_stage2_account_records, load_import_stage2_account_rule_candidates,
-    load_import_stage2_category_records, load_import_stage2_category_rule_records,
+    load_import_stage2_account_rule_candidates, load_import_stage2_category_rule_records,
     load_import_stage2_context, load_import_stage2_learning_lifecycle_views,
-    load_import_stage2_recurring_template_records, ImportStage2AccountRecord,
-    ImportStage2CategoryRecord, ImportStage2CategoryRuleRecord, ImportStage2ContextRows,
-    ImportStage2LearningRuleRecord, ImportStage2RecurringTemplateRecord,
+    load_import_stage2_recurring_template_records, ImportStage2CategoryRuleRecord,
+    ImportStage2ContextRows, ImportStage2LearningRuleRecord, ImportStage2RecurringTemplateRecord,
 };
 pub use import_staging::{
     apply_import_decision_group_command, apply_preview_learning_decision,

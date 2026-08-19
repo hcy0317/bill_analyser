@@ -8,15 +8,14 @@ use bill_analyser_core::{
 use serde_json::Value;
 use sqlx::Row;
 
-use crate::{import_staging::ImportLearningLifecycleView, DbError, DbResult, PostgresPool};
-
-#[derive(Debug, Clone)]
-pub struct ImportStage2CategoryRecord {
-    pub id: i64,
-    pub category_type: Option<String>,
-    pub path: Option<String>,
-    pub name: String,
-}
+use crate::{
+    import_catalog::{
+        load_import_account_catalog_records, load_import_category_catalog_records,
+        ImportAccountCatalogRecord, ImportCategoryCatalogRecord,
+    },
+    import_staging::ImportLearningLifecycleView,
+    DbError, DbResult, PostgresPool,
+};
 
 #[derive(Debug, Clone)]
 pub struct ImportStage2CategoryRuleRecord {
@@ -24,12 +23,6 @@ pub struct ImportStage2CategoryRuleRecord {
     pub category_id: i64,
     pub priority: i32,
     pub rule_expression: Value,
-}
-
-#[derive(Debug, Clone)]
-pub struct ImportStage2AccountRecord {
-    pub id: i64,
-    pub name: String,
 }
 
 #[derive(Debug, Clone)]
@@ -54,9 +47,9 @@ pub struct ImportStage2RecurringTemplateRecord {
 #[derive(Debug, Clone)]
 pub struct ImportStage2ContextRows {
     pub user_id: i64,
-    pub categories: Vec<ImportStage2CategoryRecord>,
+    pub categories: Vec<ImportCategoryCatalogRecord>,
     pub category_rules: Vec<ImportStage2CategoryRuleRecord>,
-    pub accounts: Vec<ImportStage2AccountRecord>,
+    pub accounts: Vec<ImportAccountCatalogRecord>,
     pub account_rules: Vec<AccountRuleCandidate>,
     pub learning_rules: Vec<ImportStage2LearningRuleRecord>,
     pub recurring_templates: Vec<ImportStage2RecurringTemplateRecord>,
@@ -70,9 +63,9 @@ pub async fn load_import_stage2_context(
 ) -> DbResult<ImportStage2ContextRows> {
     let user_id = i64::try_from(user_id.get())
         .map_err(|_| DbError::InvalidOperation("invalid user id".to_string()))?;
-    let categories = load_import_stage2_category_records(pool, user_id).await?;
+    let categories = load_import_category_catalog_records(pool, user_id).await?;
     let category_rules = load_import_stage2_category_rule_records(pool, user_id).await?;
-    let accounts = load_import_stage2_account_records(pool, user_id).await?;
+    let accounts = load_import_account_catalog_records(pool, user_id).await?;
     let account_rules = load_import_stage2_account_rule_candidates(pool, user_id).await?;
     let learning_rules = load_learning_rules(pool, user_id).await?;
     let recurring_templates = load_import_stage2_recurring_template_records(pool, user_id).await?;
@@ -131,33 +124,6 @@ pub async fn load_import_stage2_learning_lifecycle_views(
         .collect()
 }
 
-pub async fn load_import_stage2_category_records(
-    pool: &PostgresPool,
-    user_id: i64,
-) -> DbResult<Vec<ImportStage2CategoryRecord>> {
-    let rows = sqlx::query(
-        r#"
-        SELECT id, category_type, path, name
-        FROM categories
-        WHERE user_id = $1 AND is_active = true
-        ORDER BY display_order ASC, id ASC
-        "#,
-    )
-    .bind(user_id)
-    .fetch_all(pool)
-    .await?;
-    rows.into_iter()
-        .map(|row| {
-            Ok(ImportStage2CategoryRecord {
-                id: row.try_get("id")?,
-                category_type: row.try_get("category_type")?,
-                path: row.try_get("path")?,
-                name: row.try_get("name")?,
-            })
-        })
-        .collect()
-}
-
 pub async fn load_import_stage2_category_rule_records(
     pool: &PostgresPool,
     user_id: i64,
@@ -184,31 +150,6 @@ pub async fn load_import_stage2_category_rule_records(
             })
         })
         .collect())
-}
-
-pub async fn load_import_stage2_account_records(
-    pool: &PostgresPool,
-    user_id: i64,
-) -> DbResult<Vec<ImportStage2AccountRecord>> {
-    let rows = sqlx::query(
-        r#"
-        SELECT id, name
-        FROM accounts
-        WHERE user_id = $1 AND is_active = true
-        ORDER BY display_order ASC, id ASC
-        "#,
-    )
-    .bind(user_id)
-    .fetch_all(pool)
-    .await?;
-    rows.into_iter()
-        .map(|row| {
-            Ok(ImportStage2AccountRecord {
-                id: row.try_get("id")?,
-                name: row.try_get("name")?,
-            })
-        })
-        .collect()
 }
 
 pub async fn load_import_stage2_account_rule_candidates(

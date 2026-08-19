@@ -1,7 +1,10 @@
 use std::{env, error::Error};
 
 use bill_analyser_core::UserId;
-use bill_analyser_db::{load_import_stage2_context, load_import_stage2_learning_lifecycle_views};
+use bill_analyser_db::{
+    load_import_account_catalog_records, load_import_category_catalog_records,
+    load_import_stage2_context, load_import_stage2_learning_lifecycle_views,
+};
 use serde_json::json;
 use sqlx::Row;
 
@@ -112,6 +115,24 @@ async fn real_postgres_stage2_context_is_user_scoped_ordered_and_fresh_per_batch
     .bind(json!({"counterparty":"订阅商户"}))
     .execute(&database.pool)
     .await?;
+
+    let catalog_categories =
+        load_import_category_catalog_records(&database.pool, first_user).await?;
+    assert_eq!(
+        catalog_categories
+            .iter()
+            .map(|row| row.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["现金转账", "餐饮"]
+    );
+    assert!(catalog_categories
+        .iter()
+        .all(|row| row.name != "停用分类" && row.name != "他人分类"));
+
+    let catalog_accounts = load_import_account_catalog_records(&database.pool, first_user).await?;
+    assert_eq!(catalog_accounts.len(), 1);
+    assert_eq!(catalog_accounts[0].id, account_id);
+    assert_eq!(catalog_accounts[0].name, "工资卡");
 
     let canonical_user = UserId::new(first_user as u64).expect("positive fixture user");
     let first = load_import_stage2_context(&database.pool, canonical_user).await?;

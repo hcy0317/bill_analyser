@@ -292,6 +292,59 @@ fn stage2_production_paths_share_one_application_boundary_and_http_owns_no_sql()
 }
 
 #[test]
+fn stage2_and_llm_share_one_typed_import_identity_catalog_repository() {
+    let catalog = source("src/backend/db/import_catalog.rs");
+    assert!(catalog.contains("pub async fn load_import_category_catalog_records"));
+    assert!(catalog.contains("pub async fn load_import_account_catalog_records"));
+    assert_eq!(
+        catalog
+            .matches("WHERE user_id = $1 AND is_active = true")
+            .count(),
+        2,
+        "category and account catalog reads must remain active and user scoped"
+    );
+    assert_eq!(
+        catalog
+            .matches("ORDER BY display_order ASC, id ASC")
+            .count(),
+        2,
+        "both catalog reads must retain their deterministic order"
+    );
+
+    let stage2 = source("src/backend/db/import_stage2.rs");
+    assert_eq!(
+        stage2
+            .matches("load_import_category_catalog_records(")
+            .count(),
+        1
+    );
+    assert_eq!(
+        stage2
+            .matches("load_import_account_catalog_records(")
+            .count(),
+        1
+    );
+    assert!(!stage2.contains("load_import_stage2_category_records"));
+    assert!(!stage2.contains("load_import_stage2_account_records"));
+
+    let llm = source("src/backend/http/import_routes/llm/preview_helpers.rs");
+    assert_eq!(
+        llm.matches("load_import_category_catalog_records(").count(),
+        1
+    );
+    assert_eq!(
+        llm.matches("load_import_account_catalog_records(").count(),
+        1
+    );
+    assert!(
+        !llm.contains("sqlx::query"),
+        "LLM prompt adapters must not own PostgreSQL catalog queries"
+    );
+    assert!(!llm.contains("FROM categories"));
+    assert!(!llm.contains("FROM accounts"));
+}
+
+#[test]
 fn vector_recall_projects_lifecycle_from_one_batch_repository_read() {
     let results = source("src/backend/http/import_routes/stage_vector_recall/results.rs");
 

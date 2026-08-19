@@ -313,29 +313,15 @@ async fn load_existing_category_values(
     connection: &Connection,
     user_id: i64,
 ) -> Result<Vec<Value>, ImportV2RouteResponse> {
-    let rows = sqlx::query(
-        r#"
-        SELECT id, category_type, path, name
-        FROM categories
-        WHERE user_id = $1 AND is_active = true
-        ORDER BY display_order ASC, id ASC
-        "#,
-    )
-    .bind(user_id)
-    .fetch_all(connection)
-    .await
-    .map_err(db_error_response)?;
+    let rows = load_import_category_catalog_records(connection, user_id)
+        .await
+        .map_err(db_error_response)?;
     rows.into_iter()
         .map(|row| {
-            let id: i64 = row.try_get("id").map_err(db_error_response)?;
-            let category_type: Option<String> =
-                row.try_get("category_type").map_err(db_error_response)?;
-            let path: Option<String> = row.try_get("path").map_err(db_error_response)?;
-            let name: String = row.try_get("name").map_err(db_error_response)?;
-            let path = category_prompt_path(path.as_deref(), &name);
+            let path = category_prompt_path(row.path.as_deref(), &row.name);
             Ok(json!({
-                "id": id,
-                "type": category_type_label(category_type.as_deref()).unwrap_or_default(),
+                "id": row.id,
+                "type": category_type_label(row.category_type.as_deref()).unwrap_or_default(),
                 "path": path,
             }))
         })
@@ -359,27 +345,16 @@ async fn load_account_id_map(
     connection: &Connection,
     user_id: i64,
 ) -> Result<BTreeMap<String, i64>, ImportV2RouteResponse> {
-    let rows = sqlx::query(
-        r#"
-        SELECT id, name
-        FROM accounts
-        WHERE user_id = $1 AND is_active = true
-        ORDER BY display_order ASC, id ASC
-        "#,
-    )
-    .bind(user_id)
-    .fetch_all(connection)
-    .await
-    .map_err(db_error_response)?;
+    let rows = load_import_account_catalog_records(connection, user_id)
+        .await
+        .map_err(db_error_response)?;
     let mut accounts = BTreeMap::new();
     for row in rows {
-        let id: i64 = row.try_get("id").map_err(db_error_response)?;
-        let name: String = row.try_get("name").map_err(db_error_response)?;
-        let trimmed = name.trim();
+        let trimmed = row.name.trim();
         if trimmed.is_empty() {
             continue;
         }
-        accounts.insert(trimmed.to_string(), id);
+        accounts.insert(trimmed.to_string(), row.id);
     }
     Ok(accounts)
 }
