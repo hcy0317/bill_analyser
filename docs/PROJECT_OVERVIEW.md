@@ -40,6 +40,8 @@ Bill Analyser 是一个多来源账单导入、智能去重、自动分类、预
 
 正式账单列表 `GET /api/bills` 已使用中立的 `LedgerListQuery -> LedgerEntryPage` core 合同：HTTP 层只负责认证、query alias 归一和既有 response envelope 投影，`HttpAppState` 提供当前 PostgreSQL `PostgresLedgerQueries`，repository 在 user scope 内完成分类 ID 解析、筛选、分页、数据库行到 `LedgerEntry` 的映射，并以一次批量查询聚合当前页标签。列表 handler 不接触连接池、`BillRecord` 或 SQL；详情、按月和其他尚未迁移的账单读取仍保留原兼容路径。公开 `/api/bills` 路径、分页别名与 500 上限、排序、整数分金额、前端类型编码及 success/result envelope 保持不变。
 
+正式账单 mutation 与账户全量余额重算通过 core 的 `derive_ledger_balance_effects` 共享同一个余额语义：收入产生来源账户正向 leg，支出产生来源账户负向 leg，转账和投资产生来源负向与目标正向两个具名 leg；金额使用 `Money` 整数分并对不可安全取绝对值的输入失败关闭。DB/HTTP 适配器只负责把现有字符串、JSON 和账户 ID 映射为 typed input，再把 leg 投影为原有 delta；显式目标金额 `0` 继续保持零，缺失目标金额继续回退来源金额。正式账单的 SQL writer、锁和事务边界，以及账户全量同步的 user-scope SQL 与 response envelope 均未改变；statistics 与 reconciliation 的既有 read-model 口径仍待后续独立 characterization/cutover，不伪装成已迁移。
+
 正式交易前端当前以入口 facade + 功能子文件组织：`src/web/src/stores/transaction.ts` 保留 `useTransactionsStore` facade，筛选/month-list 类型、receipt draft 归一化 helper 和交易列表/按月请求代次协调分别下沉到 `stores/transaction/types.ts`、`receiptDraft.ts` 与 `listRequestCoordinator.ts`；`src/web/src/models/transaction.ts` 保留 `Transaction`/`TransactionGeoLocation` facade，REST request/response、统计、overview 和空结果合同下沉到 `models/transaction/contracts.ts`；桌面交易列表、桌面编辑弹窗、批量手工录入、移动列表和移动编辑页保留原 `.vue` 入口，template/style 及无状态展示 helper 下沉到相邻功能文件夹。该拆分不改变 Pinia store 导出名、模型 import 路径、桌面/移动交易入口、投资/转账字段、图片 OCR、批量录入、latest-request-wins 或筛选 URL 合同。
 
 身份设置前端当前以页面 facade + 功能文件夹组织：桌面账户、分类、标签列表页和移动账户编辑页保留页面入口，模板与样式下沉到相邻功能文件夹；账户编辑弹窗保留脚本入口并外置模板/样式；桌面分类列表的页面状态、表单、导入导出和操作回调收敛到 `useCategoryListPage.ts` composable。该拆分不改变按钮入口、导入导出控件、REST/store 调用、账户余额聚合、分类/标签编辑合同或现有视觉布局。

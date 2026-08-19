@@ -89,11 +89,11 @@ async fn apply_prepared_postgres_bill_update_on_tx(
     }
     let mut deltas = prepared
         .old_mutation
-        .balance_deltas()
+        .balance_deltas()?
         .into_iter()
         .map(|(account_id, amount)| (account_id, -amount))
         .collect::<Vec<_>>();
-    deltas.extend(prepared.new_mutation.balance_deltas());
+    deltas.extend(prepared.new_mutation.balance_deltas()?);
     apply_postgres_balance_deltas(tx, user_id, &deltas).await?;
     Ok(true)
 }

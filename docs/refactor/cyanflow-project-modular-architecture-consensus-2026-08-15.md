@@ -463,6 +463,8 @@ Import pilot 完成后，按风险和 cross-layer debt 选择下一域，不允�
 
 每个域重复：`behavior lock -> deep module -> caller migration -> schema/API adapter -> cutover -> legacy deletion -> current-state docs`。
 
+C7a transition ledger：此前正式账单 mutation 与账户全量余额重算分别在 DB/HTTP adapter 内持有同构余额公式；目标 owner 为 core Ledger 的纯 `derive_ledger_balance_effects`，两条生产路径在本切片直接迁移，旧公式随调用方切换删除。正式账单 CRUD 继续只由现有 `apply_postgres_balance_deltas` 事务 writer 更新余额，账户全量重算继续只由既有 user-scoped SQL 写入；没有第二 writer、trait、UnitOfWork 或 cache。old/new read 的外部输入、REST/API/schema/config/session contract 均不变，adapter 保留未知历史类型按 expense 投影、显式 destination amount `0` 与缺失值的既有区别。rollback point 是整体回退该纯 kernel 与两个 adapter 调用，forward-fix point 是 core contract；statistics/reconciliation 未切换，不能用本切片删除其兼容口径。删除门禁为两个已迁移 adapter 中不再存在 transaction-type 余额公式，并由 core contract、DB/HTTP adapter test、真实 PostgreSQL bills contract、完整 Rust coverage、fmt/clippy 和 exact-head CI 共同验证。
+
 ## 9. 可执行架构门禁
 
 ### 9.1 增量 ratchet

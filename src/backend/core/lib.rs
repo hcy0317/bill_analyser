@@ -139,7 +139,10 @@ pub use import_pipeline::{
     PREVIEW_STATE_PROJECTION_VERSION,
 };
 pub use import_pipeline_learning::LearningMatchingPayload;
-pub use ledger::{LedgerEntry, LedgerEntryPage, LedgerListQuery, LedgerTag};
+pub use ledger::{
+    derive_ledger_balance_effects, LedgerBalanceEffects, LedgerBalanceInput, LedgerBalanceLeg,
+    LedgerEntry, LedgerEntryPage, LedgerListQuery, LedgerTag,
+};
 pub use matching::{
     bill_pair_feedback_payload_is_related, build_bill_pair_feedback_payload,
     build_duplicate_bill_candidate, build_duplicate_bill_candidates,

@@ -44,7 +44,7 @@ async fn delete_locked_postgres_bill_on_tx(
         return Ok(false);
     }
     let deltas = old_mutation
-        .balance_deltas()
+        .balance_deltas()?
         .into_iter()
         .map(|(account_id, amount)| (account_id, -amount))
         .collect::<Vec<_>>();

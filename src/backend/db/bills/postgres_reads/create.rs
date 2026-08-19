@@ -35,7 +35,8 @@ pub async fn create_postgres_bill(
     .await?
     .try_get("id")?;
     replace_postgres_bill_tags(&mut tx, user_id, bill_id, &draft.tag_ids).await?;
-    apply_postgres_balance_deltas(&mut tx, user_id, &mutation.balance_deltas()).await?;
+    let balance_deltas = mutation.balance_deltas()?;
+    apply_postgres_balance_deltas(&mut tx, user_id, &balance_deltas).await?;
     tx.commit().await?;
     Ok(bill_id)
 }
@@ -81,7 +82,7 @@ pub(crate) async fn batch_create_postgres_bills_in_transaction(
     for prepared_bill in prepared {
         let bill_id = insert_postgres_bill_on_tx(tx, user_id, &prepared_bill.mutation).await?;
         replace_postgres_bill_tags(tx, user_id, bill_id, &prepared_bill.tag_ids).await?;
-        balance_deltas.extend(prepared_bill.mutation.balance_deltas());
+        balance_deltas.extend(prepared_bill.mutation.balance_deltas()?);
         bill_ids.push(bill_id);
     }
     apply_postgres_balance_deltas(tx, user_id, &balance_deltas).await?;

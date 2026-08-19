@@ -51,7 +51,7 @@ async fn sync_all_postgres_account_balances(
             source_account_id,
             target_account_id.or(transfer_target_account_id),
             &standard_payload,
-        ) {
+        )? {
             *deltas.entry(account_id).or_default() += delta;
         }
     }
@@ -259,29 +259,24 @@ fn postgres_bill_balance_deltas(
     source_account_id: Option<i64>,
     destination_account_id: Option<i64>,
     standard_payload: &Value,
-) -> Vec<(i64, i64)> {
-    let mut deltas = Vec::new();
-    let amount = amount_cents.abs();
-    let destination_amount_cents = standard_payload
-        .get("destination_amount_cents")
-        .and_then(value_to_cents)
-        .unwrap_or(amount)
-        .abs();
-    match transaction_type {
-        "income" => push_account_delta(&mut deltas, source_account_id, amount),
-        "transfer" | "investment" => {
-            push_account_delta(&mut deltas, source_account_id, -amount);
-            push_account_delta(&mut deltas, destination_account_id, destination_amount_cents);
-        }
-        _ => push_account_delta(&mut deltas, source_account_id, -amount),
-    }
-    deltas
-}
-
-fn push_account_delta(deltas: &mut Vec<(i64, i64)>, account_id: Option<i64>, delta: i64) {
-    if let Some(account_id) = account_id.filter(|value| *value > 0) {
-        deltas.push((account_id, delta));
-    }
+) -> bill_analyser_db::DbResult<Vec<(i64, i64)>> {
+    let transaction_type = TransactionType::from_backend_name(transaction_type)
+        .unwrap_or(TransactionType::Expense);
+    let effects = derive_ledger_balance_effects(LedgerBalanceInput {
+        transaction_type,
+        amount: Money::from_cents(amount_cents),
+        destination_amount: standard_payload
+            .get("destination_amount_cents")
+            .and_then(value_to_cents)
+            .map(Money::from_cents),
+        source_account_id,
+        destination_account_id,
+    })
+    .map_err(|error| bill_analyser_db::DbError::InvalidOperation(error.to_string()))?;
+    Ok(effects
+        .legs()
+        .map(|leg| (leg.account_id, leg.delta.to_cents()))
+        .collect())
 }
 
 fn value_to_cents(value: &Value) -> Option<i64> {
@@ -298,4 +293,35 @@ fn metadata_initial_balance_cents(metadata: &Value, fallback_cents: i64) -> i64 
         .get("initial_balance_cents")
         .and_then(value_to_cents)
         .unwrap_or(fallback_cents)
+}
+
+#[cfg(test)]
+mod balance_effect_tests {
+    use super::*;
+
+    #[test]
+    fn account_full_sync_projects_balance_deltas_through_ledger_contract() {
+        assert_eq!(
+            postgres_bill_balance_deltas(
+                "investment",
+                12_000,
+                Some(11),
+                Some(22),
+                &json!({"destination_amount_cents": 0}),
+            )
+            .expect("valid ledger effects"),
+            vec![(11, -12_000), (22, 0)]
+        );
+        assert_eq!(
+            postgres_bill_balance_deltas(
+                "legacy-expense",
+                -12_000,
+                Some(11),
+                Some(22),
+                &Value::Object(Map::new()),
+            )
+            .expect("legacy unknown types remain expense-shaped at the adapter"),
+            vec![(11, -12_000)]
+        );
+    }
 }

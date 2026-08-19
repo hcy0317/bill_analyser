@@ -125,4 +125,27 @@ mod tests {
             DbError::InvalidOperation(message) if message == "invalid bill amount_cents"
         ));
     }
+
+    #[test]
+    fn bill_mutation_projects_balance_deltas_through_ledger_contract() {
+        let mutation = PostgresBillMutation {
+            occurred_at: Utc::now(),
+            amount_cents: 12_000,
+            direction: "expense".to_string(),
+            transaction_type: "transfer".to_string(),
+            source_account_id: Some(11),
+            destination_account_id: Some(22),
+            category_id: None,
+            merchant: None,
+            description: None,
+            payment_method: None,
+            source_hash: None,
+            standard_payload: json!({"destination_amount_cents": 12_500}),
+        };
+
+        assert_eq!(
+            mutation.balance_deltas().expect("valid ledger effects"),
+            vec![(11, -12_000), (22, 12_500)]
+        );
+    }
 }

@@ -63,6 +63,10 @@ name = "import_pipeline_contracts"
 path = "../../../tests/backend/core/import_pipeline_contracts.rs"
 
 [[test]]
+name = "ledger_contracts"
+path = "../../../tests/backend/core/ledger_contracts.rs"
+
+[[test]]
 name = "matching_contracts"
 path = "../../../tests/backend/core/matching_contracts.rs"
 

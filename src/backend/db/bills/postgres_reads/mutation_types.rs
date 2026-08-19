@@ -36,32 +36,21 @@ struct PreparedPostgresBillUpdate {
 }
 
 impl PostgresBillMutation {
-    fn balance_deltas(&self) -> Vec<(i64, i64)> {
-        let mut deltas = Vec::new();
-        let amount = self.amount_cents.abs();
-        let destination_amount = destination_amount_cents(&self.standard_payload)
-            .unwrap_or(amount)
-            .abs();
-        match self.transaction_type.as_str() {
-            "income" => {
-                if let Some(account_id) = self.source_account_id.filter(|value| *value > 0) {
-                    deltas.push((account_id, amount));
-                }
-            }
-            "transfer" | "investment" => {
-                if let Some(account_id) = self.source_account_id.filter(|value| *value > 0) {
-                    deltas.push((account_id, -amount));
-                }
-                if let Some(account_id) = self.destination_account_id.filter(|value| *value > 0) {
-                    deltas.push((account_id, destination_amount));
-                }
-            }
-            _ => {
-                if let Some(account_id) = self.source_account_id.filter(|value| *value > 0) {
-                    deltas.push((account_id, -amount));
-                }
-            }
-        }
-        deltas
+    fn balance_deltas(&self) -> DbResult<Vec<(i64, i64)>> {
+        let transaction_type = TransactionType::from_backend_name(&self.transaction_type)
+            .unwrap_or(TransactionType::Expense);
+        let effects = derive_ledger_balance_effects(LedgerBalanceInput {
+            transaction_type,
+            amount: Money::from_cents(self.amount_cents),
+            destination_amount: destination_amount_cents(&self.standard_payload)
+                .map(Money::from_cents),
+            source_account_id: self.source_account_id,
+            destination_account_id: self.destination_account_id,
+        })
+        .map_err(|error| DbError::InvalidOperation(error.to_string()))?;
+        Ok(effects
+            .legs()
+            .map(|leg| (leg.account_id, leg.delta.to_cents()))
+            .collect())
     }
 }

@@ -4,6 +4,68 @@
 
 use crate::{Money, TransactionType};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LedgerBalanceInput {
+    pub transaction_type: TransactionType,
+    pub amount: Money,
+    pub destination_amount: Option<Money>,
+    pub source_account_id: Option<i64>,
+    pub destination_account_id: Option<i64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LedgerBalanceLeg {
+    pub account_id: i64,
+    pub delta: Money,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LedgerBalanceEffects {
+    source: Option<LedgerBalanceLeg>,
+    destination: Option<LedgerBalanceLeg>,
+}
+
+impl LedgerBalanceEffects {
+    pub const fn source(&self) -> Option<LedgerBalanceLeg> {
+        self.source
+    }
+
+    pub const fn destination(&self) -> Option<LedgerBalanceLeg> {
+        self.destination
+    }
+
+    pub fn legs(&self) -> impl Iterator<Item = LedgerBalanceLeg> {
+        [self.source, self.destination].into_iter().flatten()
+    }
+}
+
+pub fn derive_ledger_balance_effects(
+    input: LedgerBalanceInput,
+) -> Result<LedgerBalanceEffects, crate::RuntimeError> {
+    let amount = input.amount.checked_abs()?;
+    let destination_amount = input.destination_amount.unwrap_or(amount).checked_abs()?;
+    let source_account_id = input.source_account_id.filter(|value| *value > 0);
+    let destination_account_id = input.destination_account_id.filter(|value| *value > 0);
+
+    let (source_delta, destination_delta) = match input.transaction_type {
+        TransactionType::Income => (amount, None),
+        TransactionType::Expense => (amount.checked_negated()?, None),
+        TransactionType::Transfer | TransactionType::Investment => {
+            (amount.checked_negated()?, Some(destination_amount))
+        }
+    };
+
+    Ok(LedgerBalanceEffects {
+        source: source_account_id.map(|account_id| LedgerBalanceLeg {
+            account_id,
+            delta: source_delta,
+        }),
+        destination: destination_delta.and_then(|delta| {
+            destination_account_id.map(|account_id| LedgerBalanceLeg { account_id, delta })
+        }),
+    })
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LedgerListQuery {
     pub page: usize,
