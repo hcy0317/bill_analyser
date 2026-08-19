@@ -12,16 +12,6 @@ struct LockedImportSession {
     version: i64,
 }
 
-#[derive(Debug, Clone)]
-struct HistoryConfirmPlan {
-    preview_id: i64,
-    operation: bill_analyser_core::ImportHistoryRewriteOperation,
-    operation_id: String,
-    history_bill_id: i64,
-    history_bill_version: i64,
-    acknowledgement_token: String,
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct StoredConfirmReceipt {
     receipt_schema_version: i16,
@@ -139,6 +129,39 @@ pub fn confirm_import_command_with_receipt_read_source(
     result
 }
 
+fn confirm_plan_validation_error(
+    error: ConfirmPlanBuildError,
+    command: &ConfirmCommand,
+    session: &LockedImportSession,
+    request_session_version: i64,
+) -> DbError {
+    if let Some(validation_error_count) = error.validation_error_count() {
+        tracing::warn!(
+            domain = "import_confirm",
+            operation = "validation",
+            outcome = "failed",
+            validation_kind = error.validation_kind(),
+            session_key = %command.session_id,
+            request_session_version,
+            session_version = session.version,
+            validation_error_count,
+            "import confirmation validation failed"
+        );
+    } else {
+        tracing::warn!(
+            domain = "import_confirm",
+            operation = "validation",
+            outcome = "failed",
+            validation_kind = error.validation_kind(),
+            session_key = %command.session_id,
+            request_session_version,
+            session_version = session.version,
+            "import confirmation validation failed"
+        );
+    }
+    error.into_db_error()
+}
+
 fn confirm_import_command_in_transaction(
     pool: &PostgresPool,
     user_id: UserId,
@@ -243,141 +266,51 @@ fn confirm_import_command_in_transaction(
         apply_confirm_command_mutations(&mut tx, session.id, user_id, command).await?;
         let previews =
             load_selected_preview_rows_for_confirm(&mut tx, session.id, user_id).await?;
-        let unknown_state_errors = previews
-            .iter()
-            .filter(|preview| {
-                import_preview_matching_feedback_has_unknown_signal_status(
-                    &preview.preview_matching_feedback,
-                )
-            })
-            .map(|preview| format!("preview {} has an unknown signal state", preview.id))
-            .collect::<Vec<_>>();
-        if !unknown_state_errors.is_empty() {
-            tracing::warn!(
-                domain = "import_confirm",
-                operation = "validation",
-                outcome = "failed",
-                validation_kind = "unknown_signal_state",
-                session_key = %command.session_id,
-                request_session_version,
-                session_version = session.version,
-                validation_error_count = unknown_state_errors.len(),
-                "import confirmation validation failed"
-            );
-            return Err(DbError::InvalidOperation(format!(
-                "import preview requires review: {}",
-                unknown_state_errors.join("; ")
-            )));
-        }
-        let history_plans = match validate_history_acknowledgement(
+        let prepared_plan = prepare_confirm_plan(
             &command.session_id,
-            &previews,
+            previews,
             command.history_acknowledgement.as_ref(),
-        ) {
-            Ok(plans) => plans,
-            Err(error) => {
-                tracing::warn!(
-                    domain = "import_confirm",
-                    operation = "validation",
-                    outcome = "failed",
-                    validation_kind = "history_acknowledgement",
-                    session_key = %command.session_id,
-                    request_session_version,
-                    session_version = session.version,
-                    "import confirmation validation failed"
-                );
-                return Err(error);
-            }
-        };
-        let history_preview_ids = history_plans
-            .iter()
-            .map(|plan| plan.preview_id)
-            .collect::<BTreeSet<_>>();
+        )
+        .map_err(|error| {
+            confirm_plan_validation_error(error, command, &session, request_session_version)
+        })?;
         let identity_maps = load_import_identity_maps_for_confirm(&mut tx, user_id).await?;
-        let identity_errors = previews
-            .iter()
-            .flat_map(|preview| preview_identity_error_messages(preview, &identity_maps))
-            .collect::<Vec<_>>();
-        if !identity_errors.is_empty() {
-            tracing::warn!(
-                domain = "import_confirm",
-                operation = "validation",
-                outcome = "failed",
-                validation_kind = "identity",
-                session_key = %command.session_id,
-                request_session_version,
-                session_version = session.version,
-                validation_error_count = identity_errors.len(),
-                "import confirmation validation failed"
-            );
-            return Err(DbError::InvalidOperation(format!(
-                "import preview identity validation failed: {}",
-                identity_errors.join("; ")
-            )));
-        }
-        let review_errors = previews
-            .iter()
-            .filter(|preview| {
-                preview_requires_review(preview) && !history_preview_ids.contains(&preview.id)
-            })
-            .map(|preview| format!("preview {} requires review before confirm", preview.id))
-            .collect::<Vec<_>>();
-        if !review_errors.is_empty() {
-            tracing::warn!(
-                domain = "import_confirm",
-                operation = "validation",
-                outcome = "failed",
-                validation_kind = "review_state",
-                session_key = %command.session_id,
-                request_session_version,
-                session_version = session.version,
-                validation_error_count = review_errors.len(),
-                "import confirmation validation failed"
-            );
-            return Err(DbError::InvalidOperation(format!(
-                "import preview requires review: {}",
-                review_errors.join("; ")
-            )));
-        }
+        let plan = build_confirm_plan(prepared_plan, &identity_maps).map_err(|error| {
+            confirm_plan_validation_error(error, command, &session, request_session_version)
+        })?;
 
-        let previews_by_id = previews
-            .iter()
-            .map(|preview| (preview.id, preview))
-            .collect::<BTreeMap<_, _>>();
-        for plan in &history_plans {
-            let preview = previews_by_id.get(&plan.preview_id).ok_or_else(|| {
-                DbError::InvalidOperation("history acknowledgement preview not selected".to_string())
-            })?;
-            apply_history_confirm_plan(&mut tx, user_id, preview, plan).await?;
+        for history_write in &plan.history_writes {
+            let history_plan = &history_write.plan;
+            apply_history_confirm_plan(
+                &mut tx,
+                user_id,
+                &history_write.preview,
+                history_plan,
+            )
+            .await?;
             tracing::debug!(
                 domain = "import_confirm",
-                operation = plan.operation.as_str(),
+                operation = history_plan.operation.as_str(),
                 outcome = "cas_applied",
                 session_key = %command.session_id,
                 request_session_version,
                 session_version = session.version,
-                request_history_version = plan.history_bill_version,
+                request_history_version = history_plan.history_bill_version,
                 "history confirmation operation CAS completed"
             );
         }
-        let drafts = previews
-            .iter()
-            .filter(|preview| !history_preview_ids.contains(&preview.id))
-            .map(|preview| BillCreateDraft {
-                fields: bill_create_fields_from_preview(preview),
-                tag_ids: Vec::new(),
-            })
-            .collect::<Vec<_>>();
         let created_bill_ids =
-            batch_create_postgres_bills_in_transaction(pool, &mut tx, user_id, &drafts).await?;
+            batch_create_postgres_bills_in_transaction(
+                pool,
+                &mut tx,
+                user_id,
+                &plan.bill_drafts,
+            )
+            .await?;
         apply_confirm_time_effect_boundary(&mut tx, &command.declared_confirm_time_effects)
             .await?;
-        let result = ConfirmPreviewResult {
-            confirmed_count: created_bill_ids.len() + history_plans.len(),
-            skipped_count: 0,
-            duplicate_count: 0,
-            errors: Vec::new(),
-        };
+        let mut result = plan.result;
+        result.confirmed_count = created_bill_ids.len() + plan.history_writes.len();
         let success_envelope = confirm_receipt_success_envelope(&result);
         let receipt = StoredConfirmReceipt {
             receipt_schema_version: CONFIRM_RECEIPT_SCHEMA_VERSION,

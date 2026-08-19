@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "date": "2026-08-19",
+  "cyanflow_slice": "C6g-a pure ConfirmPlan boundary",
+  "status": "local_audit_green_public_contract_unchanged",
+  "source": {
+    "base_head": "24dc8eb3c875ee4bfa8d0b37ded84cc3c49ebffa",
+    "implementation_commit": "e6686d7537ef4d04f44437ee3ee80852e4e05a97",
+    "database_policy": "focused and full coverage used fresh exact-name databases; no production target backfill, target audit, read-source switch or long-lived database mutation was executed"
+  },
+  "ownership": {
+    "pure_prepare_owner": "prepare_confirm_plan",
+    "pure_write_set_owner": "build_confirm_plan",
+    "transaction_executor": "confirm_import_command_in_transaction",
+    "production_writer_count": 1,
+    "business_confirm_double_execution": false,
+    "public_http_payload_changed": false,
+    "schema_changed": false,
+    "durable_receipt_changed": false,
+    "production_config_changed": false
+  },
+  "plan_contract": {
+    "sql_in_plan": false,
+    "persistence_in_plan": false,
+    "http_in_plan": false,
+    "validation_kind": "ConfirmPlanValidationKind enum",
+    "outputs": ["history_writes", "bill_drafts", "result"],
+    "effect_order": ["history_cas", "bill_insert", "confirm_time_effects", "receipt", "staging_cleanup", "commit"],
+    "final_count_source": "actual created bill ids plus executed history writes"
+  },
+  "tdd": {
+    "red": [
+      "pure plan functions were intentionally referenced before implementation",
+      "orchestration source contract failed until the production transaction consumed ConfirmPlan",
+      "initial full changed-line coverage was 162/182 (89.01%) and failed the strict greater-than-90 gate"
+    ],
+    "green": {
+      "focused_plan_contracts": "pass",
+      "import_staging_real_postgres": {"passed": 36, "failed": 0, "skipped": 0},
+      "workspace_format": "pass",
+      "workspace_clippy_all_targets": "pass",
+      "rust_backend_structure": {"status": "pass", "files_scanned": 617, "baseline_entries": 3},
+      "rust_only_source_tree": {"status": "pass", "tracked_paths": 2059},
+      "backend_doc_map": "pass",
+      "git_diff_check": "pass",
+      "workspace_line_coverage": {"lines_found": 80608, "lines_hit": 53541, "percent": 66.42},
+      "changed_line_coverage": {"executable_lines": 191, "covered_lines": 186, "percent": 97.38},
+      "new_plan_module_line_coverage_percent": 100.0
+    }
+  },
+  "review": {
+    "base_ref": "24dc8eb3c875ee4bfa8d0b37ded84cc3c49ebffa",
+    "standards_axis_initial": "one medium stringly validation-kind finding",
+    "standards_axis_final": "passed_no_findings_after_closed_enum",
+    "spec_axis_final": "passed_no_findings",
+    "new_endpoint_or_request_input": false,
+    "parameterized_sql_changed": false,
+    "user_scope_changed": false,
+    "sensitive_log_fields_absent": true
+  },
+  "cleanup": {
+    "coverage_database": "bill_analyser_c6g_cov_20260819_03",
+    "coverage_database_removed": true,
+    "workspace_lcov_removed": false,
+    "workspace_lcov_tracked": false,
+    "cleanup_note": "local ignored LCOV and diff artifacts remain because the host command safety layer rejected deletion"
+  },
+  "next": "select the next Cyanflow slice independently; do not activate typed_v1 or remove durable v1 compatibility before the frozen target rollout and delete gates"
+}
