@@ -1,69 +1,52 @@
 fn apply_transfer_category_rule_match(
     draft: &mut ImportPreviewDraft,
-    rules: &[ImportIntelligenceRule],
+    rules: &[CategoryRuleCandidate],
     preview_rule_text: &str,
 ) -> bool {
     if !is_transfer_protected_preview(draft) {
         return false;
     }
     let combined_text = import_preview_transfer_rule_text(preview_rule_text, draft);
-    apply_category_rule_match_filtered(draft, rules, &combined_text)
+    apply_category_rule_match_filtered(draft, rules, &[4], &combined_text)
 }
 
 fn apply_non_transfer_category_rule_match(
     draft: &mut ImportPreviewDraft,
-    rule_set: &ImportIntelligenceRuleSet,
+    rules: &[CategoryRuleCandidate],
     preview_rule_text: &str,
 ) -> bool {
     if is_transfer_protected_preview(draft) {
         return false;
     }
-    apply_category_rule_match_candidate_refs(
-        draft,
-        rule_set.non_transfer_by_priority(),
-        preview_rule_text,
-    )
+    apply_category_rule_match_filtered(draft, rules, &[2, 3, 5], preview_rule_text)
 }
 
 fn apply_category_rule_match_filtered(
     draft: &mut ImportPreviewDraft,
-    rules: &[ImportIntelligenceRule],
+    rules: &[CategoryRuleCandidate],
+    allowed_category_types: &[i32],
     combined_text: &str,
 ) -> bool {
-    apply_category_rule_match_candidate_refs(draft, rules.iter().collect(), combined_text)
-}
-
-fn apply_category_rule_match_candidate_refs(
-    draft: &mut ImportPreviewDraft,
-    rules: Vec<&ImportIntelligenceRule>,
-    combined_text: &str,
-) -> bool {
-    let combined_text_lower = combined_text.to_lowercase();
-    for rule in rules {
-        if rule.compiled_expression.is_empty
-            || !match_compiled_rule_lowercase_text(&combined_text_lower, &rule.compiled_expression)
-        {
-            continue;
-        }
-        if !rule.main_category.trim().is_empty() || !rule.sub_category.trim().is_empty() {
-            draft.preview_main_category = rule.main_category.clone();
-            draft.preview_sub_category = rule.sub_category.clone();
-            draft.category_id = Some(rule.category_id);
-            normalize_preview_type_for_category(draft, rule.category_type);
-            matching_feedback_object_mut(draft).insert(
-                "category_rule".to_string(),
-                json!({
-                    "rule_id": rule.id,
-                    "category_id": rule.category_id,
-                    "priority": rule.priority,
-                    "reason": "category rule expression matched",
-                    "review_status": "auto_applied",
-                }),
-            );
-            return true;
-        }
-    }
-    false
+    let Some(rule) =
+        select_category_rule_candidate(rules, allowed_category_types, combined_text)
+    else {
+        return false;
+    };
+    draft.preview_main_category = rule.main_category.clone();
+    draft.preview_sub_category = rule.sub_category.clone();
+    draft.category_id = Some(rule.category_id);
+    normalize_preview_type_for_category(draft, i64::from(rule.category_type));
+    matching_feedback_object_mut(draft).insert(
+        "category_rule".to_string(),
+        json!({
+            "rule_id": rule.id,
+            "category_id": rule.category_id,
+            "priority": rule.priority,
+            "reason": "category rule expression matched",
+            "review_status": "auto_applied",
+        }),
+    );
+    true
 }
 
 fn apply_builtin_category_rule_fallback(

@@ -225,9 +225,9 @@ async fn load_receipt_draft_context(
             .map(|rule| ReceiptDraftCategoryRule {
                 id: rule.id.to_string(),
                 category_id: rule.category_id.to_string(),
-                category_type: rule.category_type,
+                category_type: i64::from(rule.category_type),
                 label: category_label(&rule.main_category, &rule.sub_category),
-                priority: rule.priority,
+                priority: i64::from(rule.priority),
                 rule_expression: rule.rule_expression,
                 regex_enabled: rule.regex_enabled,
             })

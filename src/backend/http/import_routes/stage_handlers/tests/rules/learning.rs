@@ -340,7 +340,7 @@
             categories: Vec::new(),
             categories_by_id: BTreeMap::new(),
             category_values: Vec::new(),
-            category_rules: ImportIntelligenceRuleSet::default(),
+            category_rules: Vec::new(),
             accounts: Vec::new(),
             account_values: Vec::new(),
             account_rules: Vec::new(),

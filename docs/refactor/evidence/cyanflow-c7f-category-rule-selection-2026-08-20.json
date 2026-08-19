@@ -1,0 +1,102 @@
+{
+  "schema_version": "cyanflow-slice-evidence.v1",
+  "slice": "C7f-b",
+  "work_id": "bill-analyser-cyanflow-c7f-closeout-next-20260820",
+  "base_commit": "430e4c3319713c3f240b748f8def3aacde83f7cc",
+  "branch": "codex/c7f-category-rule-selection",
+  "objective": "Unify category-rule candidate eligibility, compilation, and deterministic selection across formal bill refresh and import Stage 2.",
+  "architecture": {
+    "owner": "src/backend/core/category_rules/selection.rs",
+    "production_adapters": [
+      "src/backend/http/bill_routes/category_action_handlers.rs",
+      "src/backend/http/import_routes/stage_handlers/stage2_category_rules.rs"
+    ],
+    "selection_order": ["priority", "rule_id"],
+    "target_eligibility": "positive category_id and at least one non-empty trimmed category target",
+    "expression_policy": "compile once and fail closed",
+    "unchanged_boundaries": [
+      "database reads and user scope",
+      "transfer authorization",
+      "bill and preview writers",
+      "REST and schema contracts",
+      "money minor-unit contracts"
+    ],
+    "rejected_expansion": [
+      "generic strategy trait",
+      "UnitOfWork",
+      "second writer",
+      "rule-set cache",
+      "single-caller wrapper"
+    ]
+  },
+  "behavior": {
+    "main_only_category_rules": "accepted consistently by bill refresh and import Stage 2",
+    "equal_priority_tie_break": "lower rule_id wins independently of category_id and input order",
+    "invalid_or_empty_expression": "candidate is dropped",
+    "allowed_category_types": "remain adapter-owned"
+  },
+  "tdd": {
+    "red": {
+      "command": "cargo test -p bill-analyser-core category_rules::tests::category_rule_",
+      "result": "failed before implementation because the new selection symbols did not exist"
+    },
+    "green": [
+      {
+        "command": "cargo test -p bill-analyser-core category_rules::tests::category_rule_",
+        "result": "3 passed, 0 failed"
+      },
+      {
+        "command": "cargo test -p bill-analyser-http category_rule -- --test-threads=1",
+        "result": "6 passed, 0 failed"
+      },
+      {
+        "command": "cargo test -p bill-analyser-http postgres_stage2_rules_preserve_main_only_target_and_rule_id_tie_break -- --exact --test-threads=1",
+        "result": "1 passed, 0 failed, 0 skipped against a fresh PostgreSQL database"
+      },
+      {
+        "command": "cargo test -p bill-analyser-core --test runtime_governance_contracts category_rule_selection_has_one_core_owner_and_two_production_adapters -- --exact",
+        "result": "1 passed, 0 failed"
+      }
+    ]
+  },
+  "verification": {
+    "cargo_fmt_check": "passed",
+    "cargo_clippy_workspace_all_targets_deny_warnings": "passed",
+    "cargo_test_workspace_single_thread": "passed",
+    "cargo_llvm_cov_workspace": {
+      "command": "cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 35 -- --test-threads=1",
+      "result": "passed",
+      "executable_lines": 80904,
+      "covered_lines": 54330,
+      "line_coverage_percent": 67.15
+    },
+    "changed_line_coverage": {
+      "command": "node scripts/governance-normalizers.mjs changed-coverage --lcov workspace.lcov --diff .git/ai/c7fb-changed.diff --threshold 90 --require-matched-files --require-executable-lines",
+      "business_files": 10,
+      "matched_coverage_files": 6,
+      "executable_changed_lines": 138,
+      "covered_changed_lines": 132,
+      "coverage_percent": 95.65,
+      "strict_threshold_percent": 90,
+      "status": "passed"
+    },
+    "core_selection_changed_line_coverage_percent": 100.0,
+    "review": {
+      "base_ref": "430e4c3319713c3f240b748f8def3aacde83f7cc",
+      "head_ref": "working tree on codex/c7f-category-rule-selection",
+      "standards_axis": "passed with no findings",
+      "spec_axis": "passed with no findings"
+    }
+  },
+  "environment_hygiene": {
+    "long_lived_development_database": "not modified; schema version mismatch 25 was observed and isolated",
+    "fresh_test_databases": [
+      "bill_analyser_c7fb_focus_20260820_01",
+      "bill_analyser_c7fb_audit_20260820_01",
+      "bill_analyser_c7fb_cov_20260820_01"
+    ],
+    "fresh_test_databases_removed": true,
+    "workspace_lcov_removed_after_measurement": true,
+    "changed_diff_artifact_removed_after_measurement": true
+  }
+}

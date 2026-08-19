@@ -590,6 +590,8 @@ C7f-a transition ledger：此前 `categories.path`/`name` 到主/子分类的同
 - 全仓依赖图不会在第一个 PR 立即变漂亮，但每个 touched path 会持续收敛。
 - 新接口数量更少，但每个接口必须更深、typed、可删除验证。
 - schema、OpenAPI 和 crate 拆分会晚于旧方案，换取真实 profile 和调用证据。
+C7f-b transition ledger：此前正式账单 refresh/recategorize 在 HTTP 内把分类规则整理为私有 runtime record，要求主分类与子分类同时非空，并按 `(priority, category_id, rule_id)` 排序后逐条匹配；导入 Stage 2 则持有第二套候选结构，接受主/子任一目标，并按 `(priority, rule_id)` 选择，导致主分类 quick-add 规则只在导入生效、正式账单刷新静默丢弃且等优先级结果可能漂移。目标 owner 为既有 core `category_rules::selection`：`CategoryRuleCandidate::compile` 统一正 `category_id`、至少一个非空目标、trim、表达式编译与 fail-closed；`select_category_rule_candidate` 在调用方提供的允许类型内按 `(priority, rule_id)` 返回首个匹配。正式账单和 Stage 2 两个生产 adapter 在同一切片切换，旧 HTTP runtime record、Stage 2 私有 rule DTO、规则池排序与手写匹配循环删除；OCR receipt context 复用同一已编译候选事实，但其“唯一精确匹配/多候选”展示策略保持独立。数据库查询、user scope、转账结构化授权、分类类型过滤、账单 writer、preview feedback、REST/API/schema/config/session 与 cents 合同均不变；不新增 trait、UnitOfWork、缓存、事务或第二 writer。rollback point 是整体恢复两个 adapter 的私有候选与排序，forward-fix point 是 core selection；删除门禁为生产代码不再出现第二个分类规则候选资格或优先级实现，并由 core 合同、bill/Stage 2 adapter 测试、真实 PostgreSQL 主分类与反向 category-id/rule-id fixture、完整 Rust coverage、fmt/clippy、架构文档和 exact-head CI 共同验证。
+
 - Import pilot 后必须继续 domain conveyor，不能把“局部成功”误报为项目重构完成。
 
 ### Follow-ups before implementation

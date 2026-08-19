@@ -38,64 +38,6 @@ struct ImportIntelligenceCategory {
 }
 
 #[derive(Debug, Clone)]
-struct ImportIntelligenceRule {
-    id: i64,
-    category_id: i64,
-    category_type: i64,
-    main_category: String,
-    sub_category: String,
-    priority: i64,
-    rule_expression: String,
-    regex_enabled: bool,
-    compiled_expression: CompiledRuleDto,
-}
-
-#[derive(Debug, Clone, Default)]
-struct ImportIntelligenceRuleSet {
-    income: Vec<ImportIntelligenceRule>,
-    expense: Vec<ImportIntelligenceRule>,
-    transfer: Vec<ImportIntelligenceRule>,
-    investment: Vec<ImportIntelligenceRule>,
-}
-
-impl ImportIntelligenceRuleSet {
-    fn from_rules(rules: Vec<ImportIntelligenceRule>) -> Self {
-        let mut rule_set = Self::default();
-        for rule in rules {
-            match rule.category_type {
-                2 => rule_set.income.push(rule),
-                3 => rule_set.expense.push(rule),
-                4 => rule_set.transfer.push(rule),
-                5 => rule_set.investment.push(rule),
-                _ => {}
-            }
-        }
-        rule_set
-    }
-
-    fn non_transfer_by_priority(&self) -> Vec<&ImportIntelligenceRule> {
-        let mut rules = self
-            .income
-            .iter()
-            .chain(self.expense.iter())
-            .chain(self.investment.iter())
-            .collect::<Vec<_>>();
-        rules.sort_by_key(|rule| (rule.priority, rule.id));
-        rules
-    }
-
-    fn for_type(&self, category_type: i64) -> &[ImportIntelligenceRule] {
-        match category_type {
-            2 => &self.income,
-            3 => &self.expense,
-            4 => &self.transfer,
-            5 => &self.investment,
-            _ => &[],
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
 struct ImportIntelligenceAccount {
     id: i64,
     name: String,

@@ -14,30 +14,30 @@
         main: &str,
         sub: &str,
         expression: &str,
-    ) -> ImportIntelligenceRule {
-        ImportIntelligenceRule {
+    ) -> CategoryRuleCandidate {
+        CategoryRuleCandidate::compile(CategoryRuleCandidateDraft {
             id,
             category_id,
-            category_type,
+            category_type: i32::try_from(category_type).expect("category type"),
             main_category: main.to_string(),
             sub_category: sub.to_string(),
             priority: 1,
             rule_expression: expression.to_string(),
             regex_enabled: false,
-            compiled_expression: compile_rule_expression(expression, false),
-        }
+        })
+        .expect("category rule candidate")
     }
 
     #[test]
     fn non_transfer_category_rules_can_reclassify_expense_to_investment() {
-        let rule_set = ImportIntelligenceRuleSet::from_rules(vec![category_rule(
+        let rules = vec![category_rule(
             10,
             55,
             5,
             "投资交易",
             "基金买入",
             "OR={定投扣款}",
-        )]);
+        )];
         let mut draft = ImportPreviewDraft {
             preview_type: "支出".to_string(),
             preview_description: "基金定投扣款".to_string(),
@@ -48,7 +48,7 @@
 
         assert!(apply_non_transfer_category_rule_match(
             &mut draft,
-            &rule_set,
+            &rules,
             &preview_rule_text
         ));
 
@@ -62,6 +62,33 @@
                 .pointer("/category_rule/category_id"),
             Some(&json!(55))
         );
+    }
+
+    #[test]
+    fn non_transfer_category_rules_apply_main_only_category_target() {
+        let rules = vec![category_rule(
+            11,
+            56,
+            3,
+            "日常消费",
+            "",
+            "OR={便利店}",
+        )];
+        let mut draft = ImportPreviewDraft {
+            preview_type: "支出".to_string(),
+            preview_description: "便利店购物".to_string(),
+            ..ImportPreviewDraft::default()
+        };
+        let preview_rule_text = import_preview_rule_text(&draft);
+
+        assert!(apply_non_transfer_category_rule_match(
+            &mut draft,
+            &rules,
+            &preview_rule_text
+        ));
+        assert_eq!(draft.category_id, Some(56));
+        assert_eq!(draft.preview_main_category, "日常消费");
+        assert!(draft.preview_sub_category.is_empty());
     }
 
     #[test]

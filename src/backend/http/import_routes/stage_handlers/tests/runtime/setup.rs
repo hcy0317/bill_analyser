@@ -192,6 +192,71 @@
         .is_err());
     }
 
+    #[tokio::test(flavor = "multi_thread")]
+    async fn postgres_stage2_rules_preserve_main_only_target_and_rule_id_tie_break() {
+        let (state, user_id, _) = import_postgres_test_state()
+            .await
+            .expect("PostgreSQL test state must be available");
+        let runtime = state
+            .open_postgres_repository_runtime("stage2-category-rule-selection")
+            .expect("postgres runtime");
+        let pool = runtime.pool();
+        let lower_category_id: i64 = sqlx::query_scalar(
+            "INSERT INTO categories (user_id,name,category_type,path,display_order) VALUES ($1,'先建分类','3','先建分类',1) RETURNING id",
+        )
+        .bind(user_id)
+        .fetch_one(pool)
+        .await
+        .expect("insert lower category id");
+        let higher_category_id: i64 = sqlx::query_scalar(
+            "INSERT INTO categories (user_id,name,category_type,path,display_order) VALUES ($1,'后建分类','3','后建分类',2) RETURNING id",
+        )
+        .bind(user_id)
+        .fetch_one(pool)
+        .await
+        .expect("insert higher category id");
+        assert!(lower_category_id < higher_category_id);
+
+        let earlier_rule_id: i64 = sqlx::query_scalar(
+            "INSERT INTO category_rules (user_id,category_id,name,rule_expression,priority,enabled) VALUES ($1,$2,'先建规则',$3,5,true) RETURNING id",
+        )
+        .bind(user_id)
+        .bind(higher_category_id)
+        .bind(json!({"expression":"OR={咖啡}","regex_enabled":false}))
+        .fetch_one(pool)
+        .await
+        .expect("insert earlier rule");
+        let later_rule_id: i64 = sqlx::query_scalar(
+            "INSERT INTO category_rules (user_id,category_id,name,rule_expression,priority,enabled) VALUES ($1,$2,'后建规则',$3,5,true) RETURNING id",
+        )
+        .bind(user_id)
+        .bind(lower_category_id)
+        .bind(json!({"expression":"OR={咖啡}","regex_enabled":false}))
+        .fetch_one(pool)
+        .await
+        .expect("insert later rule");
+        assert!(earlier_rule_id < later_rule_id);
+
+        let categories = load_import_intelligence_categories(pool, user_id)
+            .await
+            .expect("load categories");
+        let categories_by_id = categories
+            .iter()
+            .cloned()
+            .map(|category| (category.id, category))
+            .collect::<BTreeMap<_, _>>();
+        let rules = load_import_intelligence_category_rules(pool, user_id, &categories_by_id)
+            .await
+            .expect("load category rules");
+        let selected = select_category_rule_candidate(&rules, &[3], "咖啡消费")
+            .expect("matching category rule");
+
+        assert_eq!(selected.id, earlier_rule_id);
+        assert_eq!(selected.category_id, higher_category_id);
+        assert_eq!(selected.main_category, "后建分类");
+        assert!(selected.sub_category.is_empty());
+    }
+
     async fn insert_legacy_same_batch_transfer_fixture(
         state: &HttpAppState,
         user_id: i64,

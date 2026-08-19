@@ -4,6 +4,7 @@
 
 mod matching;
 mod parser;
+mod selection;
 mod terms;
 #[cfg(test)]
 mod tests;
@@ -13,5 +14,8 @@ pub use matching::{
     match_compiled_rule, match_compiled_rule_lowercase_text, match_rule_expression,
 };
 pub use parser::compile_rule_expression;
+pub use selection::{
+    select_category_rule_candidate, CategoryRuleCandidate, CategoryRuleCandidateDraft,
+};
 pub use terms::escape_rule_expression_term;
 pub use types::{CompiledRuleDto, RuleExpressionNodeDto};

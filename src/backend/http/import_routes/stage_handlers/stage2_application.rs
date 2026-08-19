@@ -52,7 +52,7 @@ struct ImportStage2ContextSnapshot {
     categories: Vec<ImportIntelligenceCategory>,
     categories_by_id: BTreeMap<i64, ImportIntelligenceCategory>,
     category_values: Vec<Value>,
-    category_rules: ImportIntelligenceRuleSet,
+    category_rules: Vec<CategoryRuleCandidate>,
     accounts: Vec<ImportIntelligenceAccount>,
     account_values: Vec<Value>,
     account_rules: Vec<CompiledAccountRuleCandidate>,
@@ -77,12 +77,11 @@ impl ImportStage2ContextSnapshot {
             .iter()
             .map(import_intelligence_category_value)
             .collect::<Vec<_>>();
-        let category_rules = ImportIntelligenceRuleSet::from_rules(
-            rows.category_rules
-                .into_iter()
-                .filter_map(|row| import_intelligence_rule_from_record(row, &categories_by_id))
-                .collect(),
-        );
+        let category_rules = rows
+            .category_rules
+            .into_iter()
+            .filter_map(|row| import_intelligence_rule_from_record(row, &categories_by_id))
+            .collect();
         let accounts = rows
             .accounts
             .into_iter()
@@ -160,18 +159,17 @@ fn import_intelligence_category_from_record(
 fn import_intelligence_rule_from_record(
     row: ImportStage2CategoryRuleRecord,
     categories_by_id: &BTreeMap<i64, ImportIntelligenceCategory>,
-) -> Option<ImportIntelligenceRule> {
+) -> Option<CategoryRuleCandidate> {
     let category = categories_by_id.get(&row.category_id)?;
     let regex_enabled = rule_expression_regex_enabled(&row.rule_expression);
     let rule_expression = rule_expression_string(&row.rule_expression);
-    Some(ImportIntelligenceRule {
+    CategoryRuleCandidate::compile(CategoryRuleCandidateDraft {
         id: row.id,
         category_id: row.category_id,
-        category_type: category.type_code,
+        category_type: i32::try_from(category.type_code).ok()?,
         main_category: category.main_category.clone(),
         sub_category: category.sub_category.clone(),
-        priority: i64::from(row.priority),
-        compiled_expression: compile_rule_expression(&rule_expression, regex_enabled),
+        priority: row.priority,
         rule_expression,
         regex_enabled,
     })
@@ -213,7 +211,7 @@ async fn load_import_intelligence_category_rules(
     connection: &Connection,
     user_id: i64,
     categories_by_id: &BTreeMap<i64, ImportIntelligenceCategory>,
-) -> Result<Vec<ImportIntelligenceRule>, bill_analyser_db::DbError> {
+) -> Result<Vec<CategoryRuleCandidate>, bill_analyser_db::DbError> {
     load_import_stage2_category_rule_records(connection, user_id)
         .await
         .map(|rows| {

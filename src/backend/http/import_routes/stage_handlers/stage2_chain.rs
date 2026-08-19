@@ -34,7 +34,7 @@ fn prepare_import_intelligence_snapshot(
         } else if is_transfer_protected_preview(draft) {
             if !apply_transfer_category_rule_match(
                 draft,
-                category_rules.for_type(4),
+                category_rules,
                 &preview_rule_text,
             ) {
                 apply_transfer_default_category(draft, categories, transfer_category);

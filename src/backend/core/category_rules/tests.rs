@@ -3,8 +3,101 @@
 
 use super::{
     compile_rule_expression, match_compiled_rule, match_compiled_rule_lowercase_text,
-    match_rule_expression, CompiledRuleDto, RuleExpressionNodeDto,
+    match_rule_expression, select_category_rule_candidate, CategoryRuleCandidate,
+    CategoryRuleCandidateDraft, CompiledRuleDto, RuleExpressionNodeDto,
 };
+
+fn category_rule_candidate(
+    id: i64,
+    category_id: i64,
+    category_type: i32,
+    main_category: &str,
+    sub_category: &str,
+    priority: i32,
+    rule_expression: &str,
+) -> CategoryRuleCandidate {
+    CategoryRuleCandidate::compile(CategoryRuleCandidateDraft {
+        id,
+        category_id,
+        category_type,
+        main_category: main_category.to_string(),
+        sub_category: sub_category.to_string(),
+        priority,
+        rule_expression: rule_expression.to_string(),
+        regex_enabled: false,
+    })
+    .expect("valid category rule candidate")
+}
+
+#[test]
+fn category_rule_candidate_accepts_main_only_target_and_rejects_invalid_facts() {
+    let main_only = category_rule_candidate(7, 70, 3, "  餐饮  ", "  ", 20, "OR={咖啡}");
+    assert_eq!(main_only.main_category, "餐饮");
+    assert!(main_only.sub_category.is_empty());
+
+    for draft in [
+        CategoryRuleCandidateDraft {
+            id: 1,
+            category_id: 0,
+            category_type: 3,
+            main_category: "餐饮".to_string(),
+            sub_category: String::new(),
+            priority: 1,
+            rule_expression: "OR={咖啡}".to_string(),
+            regex_enabled: false,
+        },
+        CategoryRuleCandidateDraft {
+            id: 2,
+            category_id: 20,
+            category_type: 3,
+            main_category: "  ".to_string(),
+            sub_category: "\t".to_string(),
+            priority: 1,
+            rule_expression: "OR={咖啡}".to_string(),
+            regex_enabled: false,
+        },
+        CategoryRuleCandidateDraft {
+            id: 3,
+            category_id: 30,
+            category_type: 3,
+            main_category: "餐饮".to_string(),
+            sub_category: String::new(),
+            priority: 1,
+            rule_expression: "OR={咖啡}+".to_string(),
+            regex_enabled: false,
+        },
+    ] {
+        assert!(CategoryRuleCandidate::compile(draft).is_none());
+    }
+}
+
+#[test]
+fn category_rule_selection_uses_priority_then_id_independent_of_input_order() {
+    let later_id = category_rule_candidate(20, 200, 3, "餐饮", "晚餐", 5, "OR={咖啡}");
+    let earlier_id = category_rule_candidate(10, 100, 3, "餐饮", "早餐", 5, "OR={咖啡}");
+    let higher_priority_number = category_rule_candidate(1, 1, 3, "餐饮", "其他", 50, "OR={咖啡}");
+
+    let rules = vec![later_id, higher_priority_number, earlier_id];
+    let selected =
+        select_category_rule_candidate(&rules, &[3], "星巴克 咖啡").expect("matching expense rule");
+
+    assert_eq!(selected.id, 10);
+    assert_eq!(selected.category_id, 100);
+    assert_eq!(selected.sub_category, "早餐");
+}
+
+#[test]
+fn category_rule_selection_filters_types_and_fails_closed_for_empty_text() {
+    let income = category_rule_candidate(1, 10, 2, "收入", "工资", 1, "OR={公司}");
+    let expense = category_rule_candidate(2, 20, 3, "餐饮", "午餐", 2, "OR={公司}");
+    let rules = vec![expense, income];
+
+    let selected =
+        select_category_rule_candidate(&rules, &[3], "公司食堂").expect("allowed expense rule");
+    assert_eq!(selected.id, 2);
+    assert!(select_category_rule_candidate(&rules, &[4], "公司食堂").is_none());
+    assert!(select_category_rule_candidate(&rules, &[2, 3], "").is_none());
+}
 
 #[test]
 fn compiles_composite_expression_with_visible_not() {

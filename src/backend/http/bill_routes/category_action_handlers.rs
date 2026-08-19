@@ -2,18 +2,6 @@
 // 维护重点：handler 只编排请求到 core/db 的调用，复杂 SQL、事务和跨表规则应下沉到 repository 或业务合同层。
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
-#[derive(Debug, Clone)]
-struct CategoryRuleRuntimeRecord {
-    id: i64,
-    category_id: i64,
-    main_category: String,
-    sub_category: String,
-    category_type: i32,
-    category_priority: i32,
-    rule_expression: String,
-    regex_enabled: bool,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct CategoryRefreshResult {
     total: usize,
@@ -236,13 +224,12 @@ pub(crate) async fn recategorize_bills_with_category_rules_postgres(
 async fn load_category_runtime_rules_postgres(
     pool: &PostgresPool,
     user_id: UserId,
-) -> bill_analyser_db::DbResult<Vec<CategoryRuleRuntimeRecord>> {
+) -> bill_analyser_db::DbResult<Vec<CategoryRuleCandidate>> {
     let records = list_postgres_category_rules(pool, user_id.get() as i64, None, true).await?;
-    let mut rules = records
+    let rules = records
         .iter()
         .filter_map(category_rule_runtime_record_from_postgres)
         .collect::<Vec<_>>();
-    rules.sort_by_key(|rule| (rule.category_priority, rule.category_id, rule.id));
     Ok(rules)
 }
 
@@ -296,8 +283,8 @@ async fn load_all_category_refresh_bills_postgres(
 
 fn category_rule_runtime_record_from_postgres(
     record: &CategoryRuleRecord,
-) -> Option<CategoryRuleRuntimeRecord> {
-    let rule = CategoryRuleRuntimeRecord {
+) -> Option<CategoryRuleCandidate> {
+    CategoryRuleCandidate::compile(CategoryRuleCandidateDraft {
         id: record_i64(record, "id")?,
         category_id: record_i64(record, "category_id")?,
         main_category: record_text(record, "main_category").trim().to_string(),
@@ -306,27 +293,21 @@ fn category_rule_runtime_record_from_postgres(
             record_i64(record, "category_type").and_then(|value| i32::try_from(value).ok()),
         )
         .unwrap_or(3),
-        category_priority: record_i64(record, "priority")
+        priority: record_i64(record, "priority")
             .and_then(|value| i32::try_from(value).ok())
             .unwrap_or(100),
         rule_expression: record_text(record, "rule_expression"),
         regex_enabled: record_i64(record, "regex_enabled").unwrap_or_default() != 0,
-    };
-    if rule.category_id > 0
-        && !rule.main_category.is_empty()
-        && !rule.sub_category.is_empty()
-        && !rule.rule_expression.is_empty()
-    {
-        Some(rule)
-    } else {
-        None
-    }
+    })
 }
 fn match_category_for_bill(
     bill: &BillRecord,
-    rules: &[CategoryRuleRuntimeRecord],
+    rules: &[CategoryRuleCandidate],
 ) -> Option<(String, String)> {
-    let type_filter = category_rule_type_filter(bill);
+    let mut type_filter = category_rule_type_filter(bill);
+    if !bill_is_transfer_refresh_candidate(bill) {
+        type_filter.retain(|category_type| *category_type != 4);
+    }
     let combined_text = [
         record_text(bill, "counterparty"),
         record_text(bill, "description"),
@@ -337,15 +318,7 @@ fn match_category_for_bill(
     .collect::<Vec<_>>()
     .join(" ");
 
-    rules
-        .iter()
-        .filter(|rule| type_filter.contains(&rule.category_type))
-        .find(|rule| {
-            if rule.category_type == 4 && !bill_is_transfer_refresh_candidate(bill) {
-                return false;
-            }
-            match_rule_expression(&combined_text, &rule.rule_expression, rule.regex_enabled)
-        })
+    select_category_rule_candidate(rules, &type_filter, &combined_text)
         .map(|rule| (rule.main_category.clone(), rule.sub_category.clone()))
 }
 
@@ -378,6 +351,71 @@ fn income_category_types(suppress_investment: bool) -> Vec<i32> {
         vec![2]
     } else {
         vec![2, 5]
+    }
+}
+
+#[cfg(test)]
+mod category_rule_selection_contracts {
+    use super::*;
+
+    fn category_rule_record(
+        id: i64,
+        category_id: i64,
+        main_category: &str,
+        sub_category: &str,
+        priority: i64,
+    ) -> CategoryRuleRecord {
+        json!({
+            "id": id,
+            "category_id": category_id,
+            "main_category": main_category,
+            "sub_category": sub_category,
+            "category_type": 3,
+            "priority": priority,
+            "rule_expression": "OR={咖啡}",
+            "regex_enabled": 0,
+        })
+        .as_object()
+        .expect("category rule object")
+        .clone()
+    }
+
+    #[test]
+    fn postgres_rule_adapter_accepts_main_only_category_target() {
+        let candidate = category_rule_runtime_record_from_postgres(&category_rule_record(
+            7, 70, "餐饮", "", 1,
+        ))
+        .expect("main-only category rule");
+
+        assert_eq!(candidate.main_category, "餐饮");
+        assert!(candidate.sub_category.is_empty());
+    }
+
+    #[test]
+    fn bill_category_match_uses_canonical_priority_and_id_tie_break() {
+        let later_id = category_rule_runtime_record_from_postgres(&category_rule_record(
+            20, 1, "餐饮", "晚餐", 5,
+        ))
+        .expect("later rule");
+        let earlier_id = category_rule_runtime_record_from_postgres(&category_rule_record(
+            10, 999, "餐饮", "早餐", 5,
+        ))
+        .expect("earlier rule");
+        let bill = json!({
+            "type": "支出",
+            "amount_cents": -2_000,
+            "counterparty": "星巴克咖啡",
+            "description": "",
+            "original_category": "",
+        })
+        .as_object()
+        .expect("bill object")
+        .clone();
+
+        assert_eq!(
+            match_category_for_bill(&bill, &[later_id, earlier_id]),
+            Some(("餐饮".to_string(), "早餐".to_string()))
+        );
     }
 }
 

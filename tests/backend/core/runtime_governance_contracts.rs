@@ -1377,3 +1377,60 @@ fn generated_frontend_route_ownership_manifest_matches_governance_snapshot() {
         .collect();
     assert_eq!(manifest.routes, expected);
 }
+
+#[test]
+fn category_rule_selection_has_one_core_owner_and_two_production_adapters() {
+    let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+    let core_selection =
+        fs::read_to_string(repo_root.join("src/backend/core/category_rules/selection.rs"))
+            .expect("category rule selection owner is readable");
+    let bill_adapter = fs::read_to_string(
+        repo_root.join("src/backend/http/bill_routes/category_action_handlers.rs"),
+    )
+    .expect("bill category adapter is readable");
+    let stage2_adapter = fs::read_to_string(
+        repo_root.join("src/backend/http/import_routes/stage_handlers/stage2_category_rules.rs"),
+    )
+    .expect("Stage 2 category adapter is readable");
+    let stage2_types = fs::read_to_string(
+        repo_root.join("src/backend/http/import_routes/stage_handlers/stage2_types.rs"),
+    )
+    .expect("Stage 2 types are readable");
+
+    assert!(core_selection.contains("pub fn select_category_rule_candidate"));
+    assert_eq!(
+        bill_adapter
+            .matches("select_category_rule_candidate")
+            .count(),
+        1
+    );
+    assert_eq!(
+        stage2_adapter
+            .matches("select_category_rule_candidate")
+            .count(),
+        1
+    );
+
+    for removed in [
+        "CategoryRuleRuntimeRecord",
+        "rules.sort_by_key(|rule|",
+        "match_rule_expression(&combined_text",
+    ] {
+        assert!(
+            !bill_adapter.contains(removed),
+            "bill adapter restored {removed}"
+        );
+    }
+    for removed in [
+        "apply_category_rule_match_candidate_refs",
+        "match_compiled_rule_lowercase_text",
+        "ImportIntelligenceRule",
+    ] {
+        assert!(
+            !stage2_adapter.contains(removed),
+            "Stage 2 adapter restored {removed}"
+        );
+    }
+    assert!(!stage2_types.contains("ImportIntelligenceRuleSet"));
+    assert!(!stage2_types.contains("struct ImportIntelligenceRule"));
+}

@@ -34,7 +34,10 @@ use bill_analyser_core::adapters::transaction::{
     ReconciliationOpeningBalanceSnapshot, ReconciliationQueryParams, RouteResponseContract,
     EXPORT_COLUMNS,
 };
-use bill_analyser_core::category_rules::{escape_rule_expression_term, match_rule_expression};
+use bill_analyser_core::category_rules::{
+    escape_rule_expression_term, select_category_rule_candidate, CategoryRuleCandidate,
+    CategoryRuleCandidateDraft,
+};
 use bill_analyser_core::{
     LedgerEntry, LedgerEntryPage, LedgerListQuery, Money, RuntimeError, UserId, UtcOffsetMinutes,
 };
