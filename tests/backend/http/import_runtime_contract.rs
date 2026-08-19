@@ -345,6 +345,55 @@ fn stage2_and_llm_share_one_typed_import_identity_catalog_repository() {
 }
 
 #[test]
+fn llm_duplicate_candidate_queries_have_one_db_repository_owner() {
+    let repository = source("src/backend/db/llm/candidates.rs");
+    assert!(repository.contains("pub async fn has_postgres_llm_rule_candidate_duplicate"));
+    assert!(repository.contains("pub async fn has_postgres_llm_account_rule_candidate_duplicate"));
+    for table in [
+        "FROM category_rules",
+        "FROM account_rules",
+        "FROM llm_candidates",
+    ] {
+        assert!(
+            repository.contains(table),
+            "missing repository query for {table}"
+        );
+    }
+
+    let helpers = source("src/backend/http/import_routes/llm/rule_synthesis_helpers.rs");
+    assert!(
+        !helpers.contains("sqlx::query"),
+        "Import HTTP LLM helpers must not own PostgreSQL duplicate queries"
+    );
+    assert!(!helpers.contains("async fn postgres_rule_candidate_duplicate"));
+    assert!(!helpers.contains("async fn postgres_account_rule_candidate_duplicate"));
+    assert!(!helpers.contains("FROM category_rules"));
+    assert!(!helpers.contains("FROM account_rules"));
+    assert!(!helpers.contains("FROM llm_candidates"));
+
+    let analyze = source("src/backend/http/import_routes/llm/analyze_request.rs");
+    assert_eq!(
+        analyze
+            .matches("has_postgres_llm_rule_candidate_duplicate(")
+            .count(),
+        1
+    );
+    assert_eq!(
+        analyze
+            .matches("has_postgres_llm_account_rule_candidate_duplicate(")
+            .count(),
+        1
+    );
+    let synthesis = source("src/backend/http/import_routes/llm/rule_synthesis_request.rs");
+    assert_eq!(
+        synthesis
+            .matches("has_postgres_llm_rule_candidate_duplicate(")
+            .count(),
+        1
+    );
+}
+
+#[test]
 fn vector_recall_projects_lifecycle_from_one_batch_repository_read() {
     let results = source("src/backend/http/import_routes/stage_vector_recall/results.rs");
 

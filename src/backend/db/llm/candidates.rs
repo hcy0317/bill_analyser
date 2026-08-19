@@ -1,5 +1,113 @@
 use super::*;
 
+/// 判断分类规则 LLM 候选是否会与当前用户的已落库规则或 pending 候选重复。
+#[tracing::instrument(level = "debug", skip_all)]
+pub async fn has_postgres_llm_rule_candidate_duplicate(
+    pool: &PostgresPool,
+    user_id: i64,
+    main_category: &str,
+    sub_category: &str,
+    expression: &str,
+) -> DbResult<bool> {
+    let main_category = main_category.trim();
+    let sub_category = sub_category.trim();
+    let expression = expression.trim();
+    let path = llm_candidate_category_path(main_category, sub_category);
+    if sqlx::query(
+        "
+        SELECT 1
+        FROM category_rules cr
+        JOIN categories c ON c.id = cr.category_id AND c.user_id = cr.user_id
+        WHERE cr.user_id = $1
+          AND (
+              c.path = $2
+              OR (split_part(COALESCE(c.path, ''), '/', 1) = $3
+                  AND COALESCE(NULLIF(substring(COALESCE(c.path, '') from position('/' in COALESCE(c.path, '')) + 1), ''), '') = $4)
+              OR (c.path IS NULL AND c.name = $3 AND $4 = '')
+          )
+          AND COALESCE(cr.rule_expression->>'expression', cr.rule_expression->>'rule_expression', '') = $5
+        LIMIT 1
+        ",
+    )
+    .bind(user_id)
+    .bind(path)
+    .bind(main_category)
+    .bind(sub_category)
+    .bind(expression)
+    .fetch_optional(pool)
+    .await?
+    .is_some()
+    {
+        return Ok(true);
+    }
+
+    sqlx::query(
+        "
+        SELECT 1
+        FROM llm_candidates
+        WHERE user_id = $1
+          AND status = 'pending'
+          AND type IN ('rule_synthesis', 'rule_induction')
+          AND suggested_main_category = $2
+          AND suggested_sub_category = $3
+          AND suggested_rule_expression = $4
+        LIMIT 1
+        ",
+    )
+    .bind(user_id)
+    .bind(main_category)
+    .bind(sub_category)
+    .bind(expression)
+    .fetch_optional(pool)
+    .await
+    .map(|row| row.is_some())
+    .map_err(Into::into)
+}
+
+/// 判断账户规则 LLM 候选是否会与当前用户的已落库规则或 pending 候选重复。
+#[tracing::instrument(level = "debug", skip_all)]
+pub async fn has_postgres_llm_account_rule_candidate_duplicate(
+    pool: &PostgresPool,
+    user_id: i64,
+    account_id: i64,
+    expression: &str,
+) -> DbResult<bool> {
+    let expression = expression.trim();
+    let expression_json = json!({"expression": expression, "regex_enabled": false});
+    if sqlx::query(
+        "SELECT 1 FROM account_rules WHERE user_id = $1 AND account_id = $2 AND rule_expression = $3 LIMIT 1",
+    )
+    .bind(user_id)
+    .bind(account_id)
+    .bind(expression_json)
+    .fetch_optional(pool)
+    .await?
+    .is_some()
+    {
+        return Ok(true);
+    }
+    sqlx::query(
+        "SELECT 1 FROM llm_candidates WHERE user_id = $1 AND status = 'pending' AND type = 'account_rule_induction' AND suggested_account_id = $2 AND suggested_rule_expression = $3 LIMIT 1",
+    )
+    .bind(user_id)
+    .bind(account_id)
+    .bind(expression)
+    .fetch_optional(pool)
+    .await
+    .map(|row| row.is_some())
+    .map_err(Into::into)
+}
+
+fn llm_candidate_category_path(main_category: &str, sub_category: &str) -> String {
+    if sub_category.is_empty() {
+        main_category.to_string()
+    } else if main_category.is_empty() {
+        sub_category.to_string()
+    } else {
+        format!("{main_category}/{sub_category}")
+    }
+}
+
 /// 查询用户的 LLM 候选建议列表，支持按状态和候选类型分页过滤。
 pub async fn list_postgres_llm_candidates(
     pool: &PostgresPool,

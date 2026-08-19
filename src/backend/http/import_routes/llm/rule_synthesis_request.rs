@@ -115,7 +115,7 @@ pub async fn llm_rule_synthesis_runtime_handler(
         if !valid_rule_expression(&expression) {
             continue;
         }
-        if match postgres_rule_candidate_duplicate(
+        if match has_postgres_llm_rule_candidate_duplicate(
             postgres_runtime.pool(),
             user_id_value,
             &main_category,
@@ -125,7 +125,7 @@ pub async fn llm_rule_synthesis_runtime_handler(
         .await
         {
             Ok(duplicate) => duplicate,
-            Err(response) => return route_response(response),
+            Err(error) => return route_response(db_error_response(error)),
         } {
             continue;
         }

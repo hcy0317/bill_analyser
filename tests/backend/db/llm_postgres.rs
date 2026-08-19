@@ -3,6 +3,7 @@ use std::{env, error::Error, str::FromStr};
 use bill_analyser_db::{
     accept_postgres_llm_candidate, count_postgres_llm_candidates, create_postgres_llm_candidate,
     create_postgres_llm_config, effective_postgres_llm_config_from_saved, get_postgres_llm_config,
+    has_postgres_llm_account_rule_candidate_duplicate, has_postgres_llm_rule_candidate_duplicate,
     list_postgres_llm_candidates, list_postgres_llm_configs, run_postgres_migrations,
     LlmCandidateDraft, LlmConfigDraft, PostgresPool,
 };
@@ -115,6 +116,85 @@ async fn llm_runtime_tables_round_trip_after_postgres_migrations() -> Result<(),
         1
     );
 
+    let category_id: i64 = sqlx::query(
+        "INSERT INTO categories (user_id, name, category_type, path) VALUES ($1, $2, '3', $3) RETURNING id",
+    )
+    .bind(user_id)
+    .bind("咖啡")
+    .bind("餐饮/咖啡")
+    .fetch_one(&pool)
+    .await?
+    .try_get("id")?;
+    let category_expression = "OR={咖啡,拿铁}";
+    assert!(
+        !has_postgres_llm_rule_candidate_duplicate(
+            &pool,
+            user_id,
+            " 餐饮 ",
+            " 咖啡 ",
+            &format!(" {category_expression} "),
+        )
+        .await?
+    );
+    sqlx::query(
+        "INSERT INTO category_rules (user_id, category_id, name, rule_expression, priority, enabled) VALUES ($1, $2, '咖啡规则', $3, 1, true)",
+    )
+    .bind(user_id)
+    .bind(category_id)
+    .bind(json!({"rule_expression": category_expression, "regex_enabled": false}))
+    .execute(&pool)
+    .await?;
+    assert!(
+        has_postgres_llm_rule_candidate_duplicate(
+            &pool,
+            user_id,
+            " 餐饮 ",
+            " 咖啡 ",
+            &format!(" {category_expression} "),
+        )
+        .await?
+    );
+    assert!(
+        !has_postgres_llm_rule_candidate_duplicate(
+            &pool,
+            user_id + 1,
+            "餐饮",
+            "咖啡",
+            category_expression,
+        )
+        .await?
+    );
+
+    let pending_category_expression = "OR={下午茶}";
+    create_postgres_llm_candidate(
+        &pool,
+        &LlmCandidateDraft {
+            user_id,
+            candidate_type: "rule_induction".to_string(),
+            source_bill_ids: vec![3],
+            suggested_main_category: "餐饮".to_string(),
+            suggested_sub_category: "咖啡".to_string(),
+            suggested_account_id: None,
+            suggested_account_name: String::new(),
+            suggested_rule_expression: pending_category_expression.to_string(),
+            confidence: 0.8,
+            llm_provider: "openai".to_string(),
+            llm_model: "gpt-test".to_string(),
+            llm_response_raw: "{\"pending_rule\":true}".to_string(),
+        },
+    )
+    .await?;
+    assert!(
+        has_postgres_llm_rule_candidate_duplicate(
+            &pool,
+            user_id,
+            "餐饮",
+            "咖啡",
+            pending_category_expression,
+        )
+        .await?
+    );
+
     let account_id: i64 = sqlx::query(
         "INSERT INTO accounts (user_id, name, account_type) VALUES ($1, $2, 'bank') RETURNING id",
     )
@@ -123,6 +203,15 @@ async fn llm_runtime_tables_round_trip_after_postgres_migrations() -> Result<(),
     .fetch_one(&pool)
     .await?
     .try_get("id")?;
+    assert!(
+        !has_postgres_llm_account_rule_candidate_duplicate(
+            &pool,
+            user_id,
+            account_id,
+            "OR={工资,薪资}",
+        )
+        .await?
+    );
     let account_candidate = create_postgres_llm_candidate(
         &pool,
         &LlmCandidateDraft {
@@ -161,6 +250,53 @@ async fn llm_runtime_tables_round_trip_after_postgres_migrations() -> Result<(),
     .fetch_one(&pool)
     .await?;
     assert_eq!(account_rule_count, 1);
+    assert!(
+        has_postgres_llm_account_rule_candidate_duplicate(
+            &pool,
+            user_id,
+            account_id,
+            " OR={工资,薪资} ",
+        )
+        .await?
+    );
+    assert!(
+        !has_postgres_llm_account_rule_candidate_duplicate(
+            &pool,
+            user_id + 1,
+            account_id,
+            "OR={工资,薪资}",
+        )
+        .await?
+    );
+
+    let pending_account_expression = "OR={银行卡入账}";
+    create_postgres_llm_candidate(
+        &pool,
+        &LlmCandidateDraft {
+            user_id,
+            candidate_type: "account_rule_induction".to_string(),
+            source_bill_ids: vec![11],
+            suggested_main_category: String::new(),
+            suggested_sub_category: String::new(),
+            suggested_account_id: Some(account_id),
+            suggested_account_name: "工资卡".to_string(),
+            suggested_rule_expression: pending_account_expression.to_string(),
+            confidence: 0.75,
+            llm_provider: "openai".to_string(),
+            llm_model: "gpt-test".to_string(),
+            llm_response_raw: "{\"pending_account_rule\":true}".to_string(),
+        },
+    )
+    .await?;
+    assert!(
+        has_postgres_llm_account_rule_candidate_duplicate(
+            &pool,
+            user_id,
+            account_id,
+            pending_account_expression,
+        )
+        .await?
+    );
 
     pool.close().await;
     admin_pool

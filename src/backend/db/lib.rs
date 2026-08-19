@@ -199,6 +199,7 @@ pub use llm::{
     create_postgres_llm_candidate, create_postgres_llm_config, default_llm_runtime_config,
     delete_postgres_llm_config, effective_postgres_llm_config_from_saved,
     get_postgres_active_llm_config, get_postgres_llm_candidate_by_id, get_postgres_llm_config,
+    has_postgres_llm_account_rule_candidate_duplicate, has_postgres_llm_rule_candidate_duplicate,
     list_postgres_llm_candidates, list_postgres_llm_configs, reject_postgres_llm_candidate,
     update_postgres_llm_candidate_status, update_postgres_llm_config, LlmCandidateDraft,
     LlmConfigDraft, LlmConfigUpdate,

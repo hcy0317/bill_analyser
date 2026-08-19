@@ -224,7 +224,7 @@ pub async fn llm_analyze_transactions_runtime_handler(
                         continue;
                     }
                     let duplicate_result = if let Some(account_id) = group.account_id {
-                        postgres_account_rule_candidate_duplicate(
+                        has_postgres_llm_account_rule_candidate_duplicate(
                             postgres_runtime.pool(),
                             user_id_value,
                             account_id,
@@ -232,7 +232,7 @@ pub async fn llm_analyze_transactions_runtime_handler(
                         )
                         .await
                     } else {
-                        postgres_rule_candidate_duplicate(
+                        has_postgres_llm_rule_candidate_duplicate(
                             postgres_runtime.pool(),
                             user_id_value,
                             &group.main_category,
@@ -243,7 +243,7 @@ pub async fn llm_analyze_transactions_runtime_handler(
                     };
                     if match duplicate_result {
                         Ok(duplicate) => duplicate,
-                        Err(response) => return route_response(response),
+                        Err(error) => return route_response(db_error_response(error)),
                     } {
                         continue;
                     }

@@ -1,0 +1,101 @@
+{
+  "schema_version": "cyanflow-slice-evidence.v1",
+  "slice": "C7g-b",
+  "work_id": "bill-analyser-cyanflow-c7g-b-llm-duplicate-boundary-20260820",
+  "base_commit": "476f3c721d72b062441dab157ad206264c7fbdeb",
+  "branch": "codex/c7g-b-llm-duplicate-boundary",
+  "objective": "Move LLM category-rule and account-rule duplicate-candidate reads out of Import HTTP helpers into the existing typed DB LLM repository without changing writers or public contracts.",
+  "architecture": {
+    "owner": "src/backend/db/llm/candidates.rs",
+    "public_facade": "bill_analyser_db",
+    "production_callers": [
+      "src/backend/http/import_routes/llm/analyze_request.rs (category rule)",
+      "src/backend/http/import_routes/llm/analyze_request.rs (account rule)",
+      "src/backend/http/import_routes/llm/rule_synthesis_request.rs (category rule)"
+    ],
+    "unchanged_boundaries": [
+      "user-scoped persisted rule and pending candidate filters",
+      "category main/sub path compatibility and expression trimming",
+      "account rule JSON expression shape",
+      "candidate creation, acceptance, materialization, and writer ownership",
+      "database error to existing import response mapping",
+      "REST, schema, configuration, session, and money contracts"
+    ],
+    "rejected_expansion": [
+      "repository trait",
+      "UnitOfWork",
+      "generic duplicate policy enum",
+      "cache, compatibility adapter, second writer, or new transaction"
+    ]
+  },
+  "tdd": {
+    "red": [
+      {
+        "command": "cargo test -p bill-analyser-db --test llm_postgres llm_runtime_tables_round_trip_after_postgres_migrations --no-run",
+        "result": "failed before implementation because both typed duplicate-query functions were unresolved"
+      },
+      {
+        "command": "cargo test -p bill-analyser-http --test import_runtime_contract llm_duplicate_candidate_queries_have_one_db_repository_owner -- --exact --nocapture",
+        "result": "failed before caller migration because the Import HTTP LLM helper still owned sqlx queries"
+      }
+    ],
+    "green": [
+      {
+        "command": "cargo test -p bill-analyser-db --test llm_postgres -- --nocapture",
+        "discovered": 1,
+        "executed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "database": "fresh isolated PostgreSQL database"
+      },
+      {
+        "command": "cargo test -p bill-analyser-http --test import_runtime_contract",
+        "discovered": 13,
+        "executed": 13,
+        "failed": 0,
+        "skipped": 0
+      }
+    ]
+  },
+  "verification": {
+    "cargo_fmt_check": "passed",
+    "cargo_clippy_workspace_all_targets_deny_warnings": "passed",
+    "cargo_test_workspace": {
+      "result": "passed on a fresh isolated PostgreSQL database",
+      "discovered": 841,
+      "executed": 841,
+      "failed": 0,
+      "skipped": 0
+    },
+    "cargo_llvm_cov_workspace": {
+      "command": "cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 35",
+      "result": "passed on a fresh isolated PostgreSQL database",
+      "executable_lines": 80906,
+      "covered_lines": 54318,
+      "line_coverage_percent": 67.14
+    },
+    "changed_line_coverage": {
+      "command": "node scripts/governance-normalizers.mjs changed-coverage --lcov workspace.lcov --diff .git/ai/c7gb-rust-changed.diff --threshold 90 --require-matched-files --require-executable-lines --allow-no-business-files",
+      "business_files": 6,
+      "matched_coverage_files": 1,
+      "executable_changed_lines": 24,
+      "covered_changed_lines": 22,
+      "coverage_percent": 91.67,
+      "strict_threshold_percent": 90,
+      "status": "passed"
+    },
+    "review": {
+      "base_ref": "476f3c721d72b062441dab157ad206264c7fbdeb",
+      "head_ref": "working tree on codex/c7g-b-llm-duplicate-boundary",
+      "standards_axis": "passed with no findings",
+      "spec_axis": "passed with no findings",
+      "residual_risk": "The real PostgreSQL fixture exercises pending rule_induction directly while rule_synthesis remains pinned by the unchanged typed SQL IN contract and the three-caller architecture ratchet."
+    }
+  },
+  "environment_hygiene": {
+    "long_lived_development_database": "not migrated, cleared, or used by the full gates",
+    "fresh_test_databases_removed": true,
+    "workspace_lcov_removed_after_measurement": true,
+    "changed_diff_artifact_removed_after_measurement": true
+  }
+}
