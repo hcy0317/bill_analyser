@@ -353,7 +353,7 @@ function isConservativelyDeclarationOnlyRustSource(filePath, sourceText) {
     }
     let statement = '';
     let sawDeclaration = false;
-    let macroBraceDepth = 0;
+    let declarationBraceDepth = 0;
     const allowed = [
         /^(?:pub(?:\([^)]*\))?\s+)?mod\s+[A-Za-z_][A-Za-z0-9_]*\s*;$/,
         /^(?:pub(?:\([^)]*\))?\s+)?use\s+.+;$/,
@@ -366,18 +366,21 @@ function isConservativelyDeclarationOnlyRustSource(filePath, sourceText) {
         if (trimmed === '' || trimmed.startsWith('//') || /^#!?\[.*\]$/.test(trimmed)) {
             continue;
         }
-        if (macroBraceDepth > 0) {
-            macroBraceDepth += (rawLine.match(/\{/g) ?? []).length;
-            macroBraceDepth -= (rawLine.match(/\}/g) ?? []).length;
-            if (macroBraceDepth < 0) {
+        if (declarationBraceDepth > 0) {
+            declarationBraceDepth += (rawLine.match(/\{/g) ?? []).length;
+            declarationBraceDepth -= (rawLine.match(/\}/g) ?? []).length;
+            if (declarationBraceDepth < 0) {
                 return false;
             }
             continue;
         }
-        if (/^macro_rules!\s*[A-Za-z_][A-Za-z0-9_]*\s*\{/.test(trimmed)) {
-            macroBraceDepth = (rawLine.match(/\{/g) ?? []).length
+        if (
+            /^macro_rules!\s*[A-Za-z_][A-Za-z0-9_]*\s*\{/.test(trimmed)
+            || /^(?:pub(?:\([^)]*\))?\s+)?(?:struct|enum|union)\s+[A-Za-z_][A-Za-z0-9_]*(?:\s*<[^;{]+>)?(?:\s+where\b[^;{]+)?\s*\{/.test(trimmed)
+        ) {
+            declarationBraceDepth = (rawLine.match(/\{/g) ?? []).length
                 - (rawLine.match(/\}/g) ?? []).length;
-            if (macroBraceDepth < 0) {
+            if (declarationBraceDepth < 0) {
                 return false;
             }
             sawDeclaration = true;
@@ -393,7 +396,7 @@ function isConservativelyDeclarationOnlyRustSource(filePath, sourceText) {
         sawDeclaration = true;
         statement = '';
     }
-    return sawDeclaration && statement === '' && macroBraceDepth === 0;
+    return sawDeclaration && statement === '' && declarationBraceDepth === 0;
 }
 
 function sourceTextForPath(filePath, sourceTextByPath) {

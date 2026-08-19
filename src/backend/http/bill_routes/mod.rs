@@ -31,8 +31,8 @@ use bill_analyser_core::adapters::transaction::{
     transaction_picture_delete_path, transaction_picture_internal_error_response,
     transaction_picture_upload_id, transaction_picture_upload_success_response,
     unsupported_transaction_picture_type_response, BackendTransactionView, FrontendTransactionTag,
-    ReconciliationBill, ReconciliationOpeningBalanceSnapshot, ReconciliationQueryParams,
-    RouteResponseContract, EXPORT_COLUMNS,
+    ReconciliationOpeningBalanceSnapshot, ReconciliationQueryParams, RouteResponseContract,
+    EXPORT_COLUMNS,
 };
 use bill_analyser_core::category_rules::{escape_rule_expression_term, match_rule_expression};
 use bill_analyser_core::{
@@ -45,9 +45,10 @@ use bill_analyser_db::{
     get_postgres_bill_recurring_candidates, get_postgres_bill_tags, get_postgres_category_by_name,
     get_postgres_reconciliation_account, list_postgres_category_rules,
     list_postgres_reconciliation_categories, postgres_category_filters_for_ids,
-    query_postgres_bills, resolve_postgres_category_by_id, unbind_postgres_bill_from_recurring,
-    update_postgres_bill, BillCategoryFilter, BillCreateDraft, BillFilters, BillRecord,
-    BillUpdateDraft, CategoryRuleRecord, PostgresPool,
+    query_postgres_bills, query_postgres_reconciliation_bills, resolve_postgres_category_by_id,
+    unbind_postgres_bill_from_recurring, update_postgres_bill, BillCategoryFilter, BillCreateDraft,
+    BillFilters, BillRecord, BillUpdateDraft, CategoryRuleRecord, PostgresPool,
+    PostgresReconciliationBillRow,
 };
 use chrono::{DateTime, Local};
 use ring::rand::{SecureRandom, SystemRandom};

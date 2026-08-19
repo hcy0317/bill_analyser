@@ -447,6 +447,44 @@ function testChangedCoverageReportsDeclarationOnlyRustFacade() {
     assert.equal(summary.status, 'failed');
 }
 
+function testChangedCoverageExcludesPureRustDataDeclarationsWithoutLcov() {
+    const filePath = 'src/backend/core/adapters/transaction/types.rs';
+    const sourceText = [
+        '#[derive(Debug, Clone, PartialEq, Eq)]',
+        'pub struct ReconciliationBill {',
+        '    pub id: String,',
+        '    pub destination_amount: Option<Money>,',
+        '}',
+        '',
+        '#[derive(Debug, Clone, Copy, PartialEq, Eq)]',
+        'pub struct ReconciliationBalanceEntry {',
+        '    pub opening: Money,',
+        '    pub closing: Money,',
+        '}',
+    ].join('\n');
+    const summary = summarizeChangedLineCoverage({
+        lcovText: '',
+        diffText: [
+            `diff --git a/${filePath} b/${filePath}`,
+            `--- a/${filePath}`,
+            `+++ b/${filePath}`,
+            '@@ -3,0 +4 @@',
+            '+    pub destination_amount: Option<Money>,',
+        ].join('\n'),
+        threshold: 90,
+        requireMatchedFiles: true,
+        requireExecutableLines: true,
+        sourceTextByPath: { [filePath]: sourceText },
+    });
+
+    assert.equal(isConservativelyDeclarationOnlyRustSource(filePath, sourceText), true);
+    assert.equal(summary.files[0].exclusion_reason, 'declaration_only_source');
+    assert.equal(summary.missing_lcov_file_count, 0);
+
+    const runtimeSource = `${sourceText}\npub fn destination_amount() -> Option<Money> { None }`;
+    assert.equal(isConservativelyDeclarationOnlyRustSource(filePath, runtimeSource), false);
+}
+
 function testChangedCoverageExcludesRustConstDataInventories() {
     const filePath = 'src/backend/core/runtime_governance/ownership/routes.rs';
     const sourceText = [
@@ -555,6 +593,7 @@ testBusinessSourceClassification();
 testChangedCoverageExcludesPureTypeSourceWithReason();
 testChangedCoverageExcludesCommentOnlyChangeWithReason();
 testChangedCoverageReportsDeclarationOnlyRustFacade();
+testChangedCoverageExcludesPureRustDataDeclarationsWithoutLcov();
 testChangedCoverageExcludesRustConstDataInventories();
 testForgeEvidenceNormalizer();
 testStructureQueueNormalizer();

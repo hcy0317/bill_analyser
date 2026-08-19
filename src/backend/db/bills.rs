@@ -1,6 +1,7 @@
 // 中文导读：PostgreSQL bills DTO 与纯 helper。实际仓储读写在 `bills::postgres_reads`。
 // 维护重点：保留 HTTP/Postgres 层共享的记录结构与 hash 计算，不保留 non-Postgres CRUD runtime。
 
+use bill_analyser_core::adapters::transaction::ReconciliationBill;
 use serde_json::{Map, Value};
 
 use crate::{DbError, DbResult};
@@ -51,6 +52,19 @@ pub struct BillFilters {
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct BillPage {
     pub bills: Vec<BillRecord>,
+    pub total: i64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PostgresReconciliationBillRow {
+    pub bill_id: i64,
+    pub ledger_bill: ReconciliationBill,
+    pub frontend_record: BillRecord,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct PostgresReconciliationBillPage {
+    pub rows: Vec<PostgresReconciliationBillRow>,
     pub total: i64,
 }
 

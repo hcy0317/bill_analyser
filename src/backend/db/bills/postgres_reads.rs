@@ -5,7 +5,7 @@
 use std::collections::BTreeMap;
 
 use bill_analyser_core::adapters::transaction::{
-    validate_batch_route_update_fields, ReconciliationCategoryRecord,
+    validate_batch_route_update_fields, ReconciliationBill, ReconciliationCategoryRecord,
 };
 use bill_analyser_core::{
     derive_ledger_balance_effects, parse_bill_datetime, LedgerBalanceInput, LedgerEntry,
@@ -18,7 +18,8 @@ use sqlx::{postgres::PgRow, Postgres, QueryBuilder, Row};
 use crate::{
     calculate_bill_hash_from_record, AccountBalanceDiscrepancy, BatchUpdateBillsResult,
     BillCategoryFilter, BillCreateDraft, BillFilters, BillPage, BillRecord, BillUpdateDraft,
-    DbError, DbResult, PostgresPool, SyncAllAccountBalancesResult,
+    DbError, DbResult, PostgresPool, PostgresReconciliationBillPage, PostgresReconciliationBillRow,
+    SyncAllAccountBalancesResult,
 };
 
 const MAIN_CATEGORY_EXPR: &str = "COALESCE(NULLIF(b.standard_payload->>'main_category', ''), NULLIF(split_part(c.path, '/', 1), ''), c.name, '')";

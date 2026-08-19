@@ -78,6 +78,62 @@ fn bill_record_from_postgres_row(row: PgRow) -> DbResult<BillRecord> {
     Ok(record)
 }
 
+fn bill_page_from_postgres_rows((rows, total): (Vec<PgRow>, i64)) -> DbResult<BillPage> {
+    let bills = rows
+        .into_iter()
+        .map(bill_record_from_postgres_row)
+        .collect::<DbResult<Vec<_>>>()?;
+    Ok(BillPage { bills, total })
+}
+
+fn reconciliation_bill_page_from_postgres_rows(
+    (rows, total): (Vec<PgRow>, i64),
+) -> DbResult<PostgresReconciliationBillPage> {
+    let rows = rows
+        .into_iter()
+        .map(|row| {
+            let ledger_bill = reconciliation_bill_from_postgres_row(&row)?;
+            let bill_id = row.try_get("id")?;
+            let frontend_record = bill_record_from_postgres_row(row)?;
+            Ok(PostgresReconciliationBillRow {
+                bill_id,
+                ledger_bill,
+                frontend_record,
+            })
+        })
+        .collect::<DbResult<Vec<_>>>()?;
+    Ok(PostgresReconciliationBillPage { rows, total })
+}
+
+fn reconciliation_bill_from_postgres_row(row: &PgRow) -> DbResult<ReconciliationBill> {
+    let standard_payload: Value = row.try_get("standard_payload")?;
+    let occurred_at: DateTime<Utc> = row.try_get("occurred_at")?;
+    let transaction_type = row
+        .try_get::<Option<String>, _>("transaction_type")?
+        .as_deref()
+        .and_then(|value| TransactionType::from_backend_name(value).ok());
+    let source_account_id = first_positive([
+        row.try_get::<Option<i64>, _>("source_account_id")?,
+        row.try_get::<Option<i64>, _>("account_id")?,
+    ]);
+    let destination_account_id = first_positive([
+        row.try_get::<Option<i64>, _>("target_account_id")?,
+        row.try_get::<Option<i64>, _>("transfer_target_account_id")?,
+    ]);
+    Ok(ReconciliationBill {
+        id: row.try_get::<i64, _>("id")?.to_string(),
+        date: occurred_at
+            .naive_utc()
+            .format("%Y-%m-%d %H:%M:%S")
+            .to_string(),
+        transaction_type,
+        amount: Money::from_cents(row.try_get("amount_cents")?),
+        destination_amount: destination_amount_cents(&standard_payload).map(Money::from_cents),
+        source_account_id,
+        destination_account_id,
+    })
+}
+
 fn tag_value_from_postgres_row(row: PgRow) -> DbResult<Value> {
     let metadata: Value = row.try_get("metadata")?;
     let mut tag = Map::new();

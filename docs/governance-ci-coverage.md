@@ -40,6 +40,8 @@ node scripts/governance-normalizers.mjs changed-coverage --lcov workspace.lcov -
 
 输出中的 `status` 只代表 changed-line 目标是否达标；如果本切片只改 docs/scripts/static governance，可在 PR 风险区明确跳过业务覆盖率并说明原因。
 
+LCOV 只记录可执行 Rust 行。完整文件经保守解析确认仅包含属性、导入、模块/常量、宏及 `struct`/`enum`/`union` 数据声明时，归一化器将其标记为 `declaration_only_source`，不要求不存在的 LCOV 文件记录；文件中一旦出现 `fn`、`impl` 或其他未识别运行时代码仍会 fail closed，并继续要求 coverage 匹配。
+
 ## Structure gate queue
 
 结构门禁失败是 backlog 输入，不是 baseline 放宽理由。当前 Rust 与前端结构输出可归一化为仓库根相对路径：

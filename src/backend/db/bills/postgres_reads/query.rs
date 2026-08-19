@@ -6,6 +6,31 @@ pub async fn query_postgres_bills(
     page_size: usize,
     filters: &BillFilters,
 ) -> DbResult<BillPage> {
+    bill_page_from_postgres_rows(
+        query_postgres_bill_rows(pool, user_id, page, page_size, filters).await?,
+    )
+}
+
+/// 按账单列表相同筛选读取对账专用 typed row，保留目标金额缺失与显式零的差异。
+pub async fn query_postgres_reconciliation_bills(
+    pool: &PostgresPool,
+    user_id: i64,
+    page: usize,
+    page_size: usize,
+    filters: &BillFilters,
+) -> DbResult<PostgresReconciliationBillPage> {
+    reconciliation_bill_page_from_postgres_rows(
+        query_postgres_bill_rows(pool, user_id, page, page_size, filters).await?,
+    )
+}
+
+async fn query_postgres_bill_rows(
+    pool: &PostgresPool,
+    user_id: i64,
+    page: usize,
+    page_size: usize,
+    filters: &BillFilters,
+) -> DbResult<(Vec<PgRow>, i64)> {
     let page = page.max(1);
     let page_size = page_size.clamp(1, 500);
     let offset = (page - 1).saturating_mul(page_size);
@@ -38,11 +63,7 @@ pub async fn query_postgres_bills(
     list_builder.push_bind(i64::try_from(offset).unwrap_or(i64::MAX));
 
     let rows = list_builder.build().fetch_all(pool).await?;
-    let bills = rows
-        .into_iter()
-        .map(bill_record_from_postgres_row)
-        .collect::<DbResult<Vec<_>>>()?;
-    Ok(BillPage { bills, total })
+    Ok((rows, total))
 }
 
 #[tracing::instrument(level = "debug", skip_all)]

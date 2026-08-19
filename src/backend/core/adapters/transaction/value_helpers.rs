@@ -36,15 +36,6 @@ fn cents_abs_i64(amount: Money) -> i64 {
     }
 }
 
-fn abs_cents_i128(amount: Money) -> i128 {
-    let cents = i128::from(amount.to_cents());
-    if cents < 0 {
-        -cents
-    } else {
-        cents
-    }
-}
-
 fn account_id_string(value: Option<i64>) -> String {
     match value {
         Some(value) if value > 0 => value.to_string(),

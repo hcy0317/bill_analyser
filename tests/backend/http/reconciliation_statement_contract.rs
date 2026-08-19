@@ -141,6 +141,153 @@ async fn bounded_reconciliation_without_prior_bills_preserves_account_initial_ba
     Ok(())
 }
 
+#[tokio::test]
+async fn reconciliation_preserves_destination_amount_presence_and_replays_all_ledger_legs(
+) -> Result<(), Box<dyn Error>> {
+    let test_db = postgres_test_support::isolated_postgres_database("reconciliation_ledger_http")
+        .await?
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "BILL_ANALYSER_TEST_POSTGRES_URL is required for reconciliation REST contract tests",
+            )
+        })?;
+    let user_id = insert_user(&test_db.pool, "reconciliation-ledger-user").await?;
+    let account_id = insert_account(&test_db.pool, user_id, "目标账户", 1_000).await?;
+    let source_account_id = insert_account(&test_db.pool, user_id, "来源账户", 5_000).await?;
+    let start_time = local_start_time()?;
+    let start_date = local_date(start_time)?;
+
+    let missing_destination_amount_id = insert_balance_effect_bill(
+        &test_db.pool,
+        user_id,
+        source_account_id,
+        account_id,
+        "transfer",
+        300,
+        None,
+        &start_date,
+        "missing-destination-amount",
+    )
+    .await?;
+    let explicit_zero_destination_amount_id = insert_balance_effect_bill(
+        &test_db.pool,
+        user_id,
+        source_account_id,
+        account_id,
+        "transfer",
+        400,
+        Some(0),
+        &start_date,
+        "zero-destination-amount",
+    )
+    .await?;
+    let investment_id = insert_balance_effect_bill(
+        &test_db.pool,
+        user_id,
+        source_account_id,
+        account_id,
+        "investment",
+        500,
+        Some(250),
+        &start_date,
+        "investment-destination-amount",
+    )
+    .await?;
+    let same_account_id = insert_balance_effect_bill(
+        &test_db.pool,
+        user_id,
+        account_id,
+        account_id,
+        "transfer",
+        700,
+        Some(650),
+        &start_date,
+        "same-account-dual-legs",
+    )
+    .await?;
+
+    let other_user_id = insert_user(&test_db.pool, "reconciliation-ledger-other").await?;
+    let other_source_id = insert_account(&test_db.pool, other_user_id, "其他来源", 10_000).await?;
+    let other_destination_id =
+        insert_account(&test_db.pool, other_user_id, "其他目标", 20_000).await?;
+    insert_balance_effect_bill(
+        &test_db.pool,
+        other_user_id,
+        other_source_id,
+        other_destination_id,
+        "investment",
+        99_999,
+        Some(88_888),
+        &start_date,
+        "other-user-investment",
+    )
+    .await?;
+
+    let payload = get_reconciliation_statement(
+        &test_db.db_name,
+        user_id,
+        account_id,
+        start_time,
+        start_time,
+    )
+    .await?;
+
+    assert_eq!(payload["success"], true);
+    let result = &payload["result"];
+    assert_eq!(result["openingBalanceCents"], 1_000);
+    assert_eq!(result["closingBalanceCents"], 1_500);
+    assert_eq!(result["totalInflowsCents"], 1_200);
+    assert_eq!(result["totalOutflowsCents"], 700);
+    assert_eq!(result["netFlowCents"], 500);
+    assert_eq!(result["itemCount"], 4);
+    let transactions = result["transactions"].as_array().unwrap();
+    let has_bill_id = |transaction: &Value, bill_id: i64| {
+        transaction["id"]
+            .as_str()
+            .and_then(|value| value.parse::<i64>().ok())
+            == Some(bill_id)
+    };
+    for expected_id in [
+        missing_destination_amount_id,
+        explicit_zero_destination_amount_id,
+        investment_id,
+        same_account_id,
+    ] {
+        assert!(
+            transactions
+                .iter()
+                .any(|transaction| has_bill_id(transaction, expected_id)),
+            "missing reconciliation transaction {expected_id}"
+        );
+    }
+    let balance_delta = |bill_id: i64| {
+        let transaction = transactions
+            .iter()
+            .find(|transaction| has_bill_id(transaction, bill_id))
+            .expect("reconciliation transaction should exist");
+        transaction["accountClosingBalanceCents"]
+            .as_i64()
+            .expect("closing balance should be cents")
+            - transaction["accountOpeningBalanceCents"]
+                .as_i64()
+                .expect("opening balance should be cents")
+    };
+    assert_eq!(balance_delta(missing_destination_amount_id), 300);
+    assert_eq!(balance_delta(explicit_zero_destination_amount_id), 0);
+    assert_eq!(balance_delta(investment_id), 250);
+    assert_eq!(balance_delta(same_account_id), -50);
+
+    let investment = transactions
+        .iter()
+        .find(|transaction| has_bill_id(transaction, investment_id))
+        .unwrap();
+    assert_eq!(investment["destinationAmountCents"], 250);
+
+    test_db.cleanup().await?;
+    Ok(())
+}
+
 async fn get_reconciliation_statement(
     database: &str,
     user_id: i64,
@@ -249,6 +396,48 @@ async fn insert_bill(
     .bind(format!("reconciliation-{user_id}-{description}"))
     .bind(occurred_on)
     .bind(description)
+    .fetch_one(pool)
+    .await?
+    .try_get("id")?)
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn insert_balance_effect_bill(
+    pool: &PostgresPool,
+    user_id: i64,
+    source_account_id: i64,
+    destination_account_id: i64,
+    transaction_type: &str,
+    amount_cents: i64,
+    destination_amount_cents: Option<i64>,
+    occurred_on: &str,
+    description: &str,
+) -> Result<i64, Box<dyn Error>> {
+    let standard_payload = destination_amount_cents.map_or_else(
+        || serde_json::json!({}),
+        |amount| serde_json::json!({"destination_amount_cents": amount}),
+    );
+    Ok(sqlx::query(
+        r#"
+        INSERT INTO bills (
+            user_id, occurred_at, direction, transaction_type, amount_cents,
+            account_id, source_account_id, target_account_id,
+            transfer_target_account_id, description, source_hash, standard_payload
+        )
+        VALUES ($1, ($7 || ' 12:00:00+00')::timestamptz, 'expense', $4, $5,
+                $2, $2, $3, $3, $8, $6, $9)
+        RETURNING id
+        "#,
+    )
+    .bind(user_id)
+    .bind(source_account_id)
+    .bind(destination_account_id)
+    .bind(transaction_type)
+    .bind(amount_cents)
+    .bind(format!("reconciliation-{user_id}-{description}"))
+    .bind(occurred_on)
+    .bind(description)
+    .bind(standard_payload)
     .fetch_one(pool)
     .await?
     .try_get("id")?)

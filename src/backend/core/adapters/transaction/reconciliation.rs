@@ -211,29 +211,30 @@ pub fn calculate_reconciliation_summary(
         let Some(transaction_type) = bill.transaction_type else {
             continue;
         };
-        let amount = abs_cents_i128(bill.amount);
+        let effects = derive_ledger_balance_effects(LedgerBalanceInput {
+            transaction_type,
+            amount: bill.amount,
+            destination_amount: bill.destination_amount,
+            source_account_id: bill.source_account_id,
+            destination_account_id: bill.destination_account_id,
+        })?;
+        let account_deltas = effects
+            .legs()
+            .filter(|leg| leg.account_id == account_id)
+            .map(|leg| i128::from(leg.delta.to_cents()))
+            .collect::<Vec<_>>();
+        if account_deltas.is_empty() {
+            continue;
+        }
         let transaction_opening_balance = current_balance;
 
-        match transaction_type {
-            TransactionType::Income => {
-                total_inflows += amount;
-                current_balance += amount;
+        for delta in account_deltas {
+            if delta > 0 {
+                total_inflows += delta;
+            } else if delta < 0 {
+                total_outflows -= delta;
             }
-            TransactionType::Expense => {
-                total_outflows += amount;
-                current_balance -= amount;
-            }
-            TransactionType::Transfer | TransactionType::Investment => {
-                if bill.destination_account_id == Some(account_id) {
-                    total_inflows += amount;
-                    current_balance += amount;
-                } else if bill.source_account_id == Some(account_id) {
-                    total_outflows += amount;
-                    current_balance -= amount;
-                } else if transaction_type == TransactionType::Transfer {
-                    continue;
-                }
-            }
+            current_balance += delta;
         }
 
         balance_history.insert(

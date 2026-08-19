@@ -82,14 +82,15 @@ pub use bills::postgres_reads::{
     create_postgres_bill, delete_postgres_bill, get_first_postgres_account_id,
     get_postgres_bill_by_id, get_postgres_bill_tags, get_postgres_reconciliation_account,
     list_postgres_reconciliation_categories, postgres_category_filters_for_ids,
-    query_postgres_bills, resolve_postgres_category_by_id, sync_all_postgres_account_balances,
-    update_postgres_bill, PostgresLedgerQueries, PostgresReconciliationAccount,
+    query_postgres_bills, query_postgres_reconciliation_bills, resolve_postgres_category_by_id,
+    sync_all_postgres_account_balances, update_postgres_bill, PostgresLedgerQueries,
+    PostgresReconciliationAccount,
 };
 pub use bills::{
     calculate_bill_hash_from_fields, calculate_bill_hash_from_record, AccountBalanceDiscrepancy,
     BatchUpdateBillsResult, BillCategoryFilter, BillCreateDraft, BillFilters, BillPage, BillRecord,
     BillRecurringBindResult, BillRecurringCandidates, BillUpdateDraft,
-    SyncAllAccountBalancesResult,
+    PostgresReconciliationBillPage, PostgresReconciliationBillRow, SyncAllAccountBalancesResult,
 };
 pub use budgets::postgres_reads::{
     create_postgres_budget, create_postgres_budget_execution_snapshots, delete_postgres_budget,

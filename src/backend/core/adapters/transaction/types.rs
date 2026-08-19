@@ -155,6 +155,7 @@ pub struct ReconciliationBill {
     pub date: String,
     pub transaction_type: Option<TransactionType>,
     pub amount: Money,
+    pub destination_amount: Option<Money>,
     pub source_account_id: Option<i64>,
     pub destination_account_id: Option<i64>,
 }

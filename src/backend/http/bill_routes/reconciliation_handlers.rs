@@ -90,8 +90,8 @@ async fn reconciliation_statement_payload_postgres(
         reconciliation_opening_balance(params, account.initial_balance, &opening_snapshots);
     let reconciliation_bills = bills
         .iter()
-        .map(record_to_reconciliation_bill)
-        .collect::<bill_analyser_db::DbResult<Vec<_>>>()?;
+        .map(|row| row.ledger_bill.clone())
+        .collect::<Vec<_>>();
     let summary = calculate_reconciliation_summary(
         params.account_id_int,
         opening_balance,
@@ -100,12 +100,12 @@ async fn reconciliation_statement_payload_postgres(
     .map_err(runtime_error)?;
     let mut frontend_transactions = Vec::with_capacity(summary.balance_history.len());
     for bill in bills {
-        let bill_id = record_i64(&bill, "id").unwrap_or_default();
+        let bill_id = bill.bill_id;
         if summary.balance_history.contains_key(&bill_id.to_string()) {
             let tags = get_postgres_bill_tags(pool, user_id.get() as i64, bill_id).await?;
-            let category_id = value_string(bill.get("category_id"));
+            let category_id = value_string(bill.frontend_record.get("category_id"));
             frontend_transactions.push(record_to_frontend_value_with_related(
-                bill,
+                bill.frontend_record,
                 tags,
                 category_id,
             )?);
@@ -122,17 +122,23 @@ async fn query_postgres_reconciliation_bill_records(
     pool: &PostgresPool,
     user_id: UserId,
     filters: &BillFilters,
-) -> bill_analyser_db::DbResult<Vec<BillRecord>> {
+) -> bill_analyser_db::DbResult<Vec<PostgresReconciliationBillRow>> {
     let mut bills = Vec::new();
     let mut page = 1;
     while bills.len() < RECONCILIATION_QUERY_LIMIT {
         let remaining = RECONCILIATION_QUERY_LIMIT - bills.len();
         let page_size = remaining.min(RECONCILIATION_QUERY_PAGE_SIZE);
-        let bill_page =
-            query_postgres_bills(pool, user_id.get() as i64, page, page_size, filters).await?;
-        let fetched = bill_page.bills.len();
+        let bill_page = query_postgres_reconciliation_bills(
+            pool,
+            user_id.get() as i64,
+            page,
+            page_size,
+            filters,
+        )
+        .await?;
+        let fetched = bill_page.rows.len();
         let total = usize::try_from(bill_page.total.max(0)).unwrap_or(usize::MAX);
-        bills.extend(bill_page.bills);
+        bills.extend(bill_page.rows);
         if fetched == 0 || fetched < page_size || bills.len() >= total {
             break;
         }
@@ -165,8 +171,8 @@ async fn load_postgres_reconciliation_opening_snapshots(
     }
     let reconciliation_bills = previous_bills
         .iter()
-        .map(record_to_reconciliation_bill)
-        .collect::<bill_analyser_db::DbResult<Vec<_>>>()?;
+        .map(|row| row.ledger_bill.clone())
+        .collect::<Vec<_>>();
     let summary = calculate_reconciliation_summary(
         params.account_id_int,
         initial_balance,
@@ -176,16 +182,4 @@ async fn load_postgres_reconciliation_opening_snapshots(
     Ok(vec![ReconciliationOpeningBalanceSnapshot {
         account_balance: summary.closing_balance,
     }])
-}
-fn record_to_reconciliation_bill(
-    record: &BillRecord,
-) -> bill_analyser_db::DbResult<ReconciliationBill> {
-    Ok(ReconciliationBill {
-        id: record_i64(record, "id").unwrap_or_default().to_string(),
-        date: record_text(record, "date"),
-        transaction_type: frontend_transaction_type_from_backend(&record_text(record, "type")).ok(),
-        amount: money_from_record(record, "amount_cents")?,
-        source_account_id: positive_record_i64(record, "source_account_id"),
-        destination_account_id: positive_record_i64(record, "destination_account_id"),
-    })
 }

@@ -820,6 +820,7 @@ fn reconciliation_summary_transactions_and_payload_pin_current_balance_trace() {
             date: "2026-03-02 08:00:00".to_string(),
             transaction_type: Some(TransactionType::Expense),
             amount: money("-8.00"),
+            destination_amount: None,
             source_account_id: Some(account_id),
             destination_account_id: None,
         },
@@ -828,6 +829,7 @@ fn reconciliation_summary_transactions_and_payload_pin_current_balance_trace() {
             date: "2026-03-01 08:00:00".to_string(),
             transaction_type: Some(TransactionType::Income),
             amount: money("12.00"),
+            destination_amount: None,
             source_account_id: Some(account_id),
             destination_account_id: None,
         },
@@ -836,6 +838,7 @@ fn reconciliation_summary_transactions_and_payload_pin_current_balance_trace() {
             date: "2026-03-03 08:00:00".to_string(),
             transaction_type: Some(TransactionType::Transfer),
             amount: money("5.00"),
+            destination_amount: None,
             source_account_id: Some(9),
             destination_account_id: Some(account_id),
         },
@@ -844,6 +847,7 @@ fn reconciliation_summary_transactions_and_payload_pin_current_balance_trace() {
             date: "2026-03-04 08:00:00".to_string(),
             transaction_type: Some(TransactionType::Transfer),
             amount: money("99.00"),
+            destination_amount: None,
             source_account_id: Some(8),
             destination_account_id: Some(9),
         },
@@ -852,6 +856,7 @@ fn reconciliation_summary_transactions_and_payload_pin_current_balance_trace() {
             date: "2026-03-05 08:00:00".to_string(),
             transaction_type: Some(TransactionType::Investment),
             amount: money("7.00"),
+            destination_amount: None,
             source_account_id: Some(8),
             destination_account_id: Some(9),
         },
@@ -860,6 +865,7 @@ fn reconciliation_summary_transactions_and_payload_pin_current_balance_trace() {
             date: "2026-03-06 08:00:00".to_string(),
             transaction_type: None,
             amount: money("99.00"),
+            destination_amount: None,
             source_account_id: Some(account_id),
             destination_account_id: None,
         },
@@ -881,18 +887,7 @@ fn reconciliation_summary_transactions_and_payload_pin_current_balance_trace() {
     assert_eq!(summary.balance_history["expense"].closing.to_cents(), 2400);
     assert!(!summary.balance_history.contains_key("transfer-mismatch"));
     assert!(!summary.balance_history.contains_key("unknown"));
-    assert_eq!(
-        summary.balance_history["investment-mismatch"]
-            .opening
-            .to_cents(),
-        2900
-    );
-    assert_eq!(
-        summary.balance_history["investment-mismatch"]
-            .closing
-            .to_cents(),
-        2900
-    );
+    assert!(!summary.balance_history.contains_key("investment-mismatch"));
 
     let same_date_summary = calculate_reconciliation_summary(
         account_id,
@@ -903,6 +898,7 @@ fn reconciliation_summary_transactions_and_payload_pin_current_balance_trace() {
                 date: "2026-03-07 08:00:00".to_string(),
                 transaction_type: Some(TransactionType::Income),
                 amount: money("1.00"),
+                destination_amount: None,
                 source_account_id: Some(account_id),
                 destination_account_id: None,
             },
@@ -911,6 +907,7 @@ fn reconciliation_summary_transactions_and_payload_pin_current_balance_trace() {
                 date: "2026-03-07 08:00:00".to_string(),
                 transaction_type: Some(TransactionType::Expense),
                 amount: money("2.00"),
+                destination_amount: None,
                 source_account_id: Some(account_id),
                 destination_account_id: None,
             },
@@ -941,12 +938,11 @@ fn reconciliation_summary_transactions_and_payload_pin_current_balance_trace() {
             json!({"id": "income", "time": 10}),
             json!({"id": "expense", "time": 30}),
             json!({"id": "transfer-in", "time": 20}),
-            json!({"id": "investment-mismatch", "time": 5}),
             json!({"id": "transfer-mismatch", "time": 100}),
         ],
         &summary.balance_history,
     );
-    assert_eq!(transactions.len(), 4);
+    assert_eq!(transactions.len(), 3);
     assert_eq!(transactions[0]["id"], "expense");
     assert_eq!(transactions[0]["accountOpeningBalanceCents"], 3200);
     assert_eq!(transactions[0]["accountClosingBalanceCents"], 2400);
@@ -966,7 +962,7 @@ fn reconciliation_summary_transactions_and_payload_pin_current_balance_trace() {
     assert_eq!(payload["totalInflowsCents"], 1700);
     assert_eq!(payload["totalOutflowsCents"], 800);
     assert_eq!(payload["netFlowCents"], 900);
-    assert_eq!(payload["itemCount"], 4);
+    assert_eq!(payload["itemCount"], 3);
     assert_eq!(payload["transactions"][0]["id"], "expense");
 
     let response =
