@@ -86,7 +86,7 @@ pub fn apply_preview_learning_decision(
             );
             return Ok(preview_decision_not_found());
         };
-        let mut preview = preview_from_pg_row(&row)?;
+        let preview = preview_from_pg_row(&row)?;
         if preview.session_id != session_id {
             transaction.rollback().await?;
             tracing::warn!(
@@ -227,41 +227,18 @@ pub fn apply_preview_learning_decision(
         }
 
         let session_db_id: i64 = row.try_get("session_id")?;
-        let mut payload = row
+        let payload = row
             .try_get::<Value, _>("preview_payload")
             .unwrap_or_else(|_| json!({}));
-        for (field, value) in &patch.changes {
-            apply_patch_value_to_preview(&mut preview, &mut payload, *field, value.clone())?;
-        }
-        if patch.clear_learning_decision {
-            clear_feedback_key(&mut preview.preview_matching_feedback, "learning");
-        }
         let identity_maps =
             load_import_identity_maps_in_transaction(&mut transaction, user_id).await?;
-        apply_identity_validation_to_preview(&mut preview, &mut payload, &identity_maps);
-        payload_set(
-            &mut payload,
-            "preview_matching_feedback",
-            preview.preview_matching_feedback.clone(),
-        );
-        let amount_cents = preview
-            .preview_amount_cents
-            .checked_abs()
-            .ok_or_else(|| {
-                DbError::InvalidOperation("invalid preview amount_cents".to_string())
-            })?;
-        let direction = if preview.preview_type == "收入" || preview.preview_type == "income" {
-            "income"
-        } else {
-            "expense"
-        };
-        let signal_projection = import_preview_signal_projection_from_payload(&payload)?;
+        let projection = project_preview_patch(preview, payload, &patch, &identity_maps)?;
         let mut update = build_preview_row_update_query(
-            &preview,
-            payload.to_string(),
-            signal_projection,
-            amount_cents,
-            direction,
+            &projection.preview,
+            projection.payload.to_string(),
+            projection.signal_projection,
+            projection.amount_cents,
+            projection.direction,
             PreviewRowUpdateTarget {
                 preview_id,
                 session_db_id,

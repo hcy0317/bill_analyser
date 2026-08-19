@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "date": "2026-08-19",
+  "cyanflow_slice": "C6h-a PreviewPatchProjection",
+  "status": "local_audit_green_public_contract_unchanged",
+  "source": {
+    "base_head": "45126f4389c8f0a3bc0cc9001b8b7568a1c23142",
+    "implementation_commit": "7b36224e81bea9ab3cf4475a2a4bad090f3893c1",
+    "database_policy": "focused and full coverage used a fresh exact-name database; no production target backfill, target audit, read-source switch or business confirm was executed"
+  },
+  "ownership": {
+    "pure_projection_owner": "project_preview_patch",
+    "generic_adapter": "apply_preview_patch_on_tx",
+    "confirm_adapter": "apply_confirm_preview_patch_on_tx",
+    "learning_adapter": "apply_preview_learning_decision",
+    "sql_writer": "existing shared preview update query builder",
+    "production_writer_count_changed": false,
+    "new_port_or_trait": false,
+    "unit_of_work_added": false,
+    "public_http_payload_changed": false,
+    "schema_changed": false,
+    "durable_receipt_changed": false,
+    "production_config_changed": false
+  },
+  "projection_contract": {
+    "patch_field_count": 21,
+    "invalid_field_value_behavior": "fail_closed_invalid_operation",
+    "manual_ownership_centralized": true,
+    "identity_validation_centralized": true,
+    "signal_projection_centralized": true,
+    "sql_in_projection": false,
+    "transaction_in_projection": false,
+    "generic_row_cas_preserved": true,
+    "confirm_session_lock_and_effect_order_preserved": true,
+    "learning_lifecycle_and_row_cas_preserved": true,
+    "telemetry_labels_preserved": ["preview_patch", "confirm_preview_patch", "learning_decision"]
+  },
+  "tdd": {
+    "red": [
+      "project_preview_patch was intentionally referenced before implementation",
+      "invalid Date plus Bool initially returned a successful projection",
+      "source architecture contract failed until confirm and learning delegated to the shared kernel"
+    ],
+    "green": {
+      "focused_projection_unit": {"passed": 7, "failed": 0},
+      "import_staging_db_lib": {"passed": 102, "failed": 0},
+      "import_staging_real_postgres": {"passed": 36, "failed": 0, "skipped": 0},
+      "focused_real_postgres_contracts": {"passed": 4, "failed": 0, "skipped": 0},
+      "workspace_format": "pass",
+      "workspace_clippy_all_targets": "pass",
+      "rust_backend_structure": {"status": "pass", "files_scanned": 619, "baseline_entries": 3},
+      "rust_only_source_tree": {"status": "pass", "tracked_paths": 2063},
+      "backend_doc_map": "pass",
+      "git_diff_check": "pass",
+      "workspace_line_coverage": {"lines_found": 76856, "lines_hit": 51761, "percent": 67.35},
+      "changed_line_coverage": {"executable_lines": 289, "covered_lines": 281, "percent": 97.23},
+      "new_projection_module_line_coverage_percent": 96.97,
+      "generic_adapter_changed_line_coverage_percent": 100.0,
+      "confirm_adapter_changed_line_coverage_percent": 100.0,
+      "learning_adapter_changed_line_coverage_percent": 100.0
+    }
+  },
+  "review": {
+    "base_ref": "45126f4389c8f0a3bc0cc9001b8b7568a1c23142",
+    "standards_axis_final": "passed_no_findings",
+    "spec_axis_final": "passed_no_findings",
+    "new_endpoint_or_request_input": false,
+    "parameterized_sql_changed": false,
+    "user_scope_changed": false,
+    "sensitive_log_fields_absent": true
+  },
+  "cleanup": {
+    "coverage_database": "bill_analyser_c6h_cov_20260819_01",
+    "coverage_database_removed": true,
+    "workspace_lcov_tracked": false,
+    "changed_diff_artifact_tracked": false
+  },
+  "next": "deliver C6h-a through exact-head Gitea CI and squash merge, then let Cyanflow select the next evidence-backed slice without activating typed_v1 or production target operations"
+}

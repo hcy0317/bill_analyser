@@ -68,6 +68,7 @@ include!("import_staging/confirm_receipt_backfill.rs");
 include!("import_staging/confirm_receipt_read_audit.rs");
 include!("import_staging/materialization_ledger.rs");
 include!("import_staging/row_mapping.rs");
+include!("import_staging/preview_patch_projection.rs");
 include!("import_staging/patch_payload_helpers.rs");
 include!("import_staging/filter_matching.rs");
 #[cfg(test)]
@@ -92,3 +93,5 @@ include!("import_staging/tests_preview_performance_selection.rs");
 include!("import_staging/tests_standard_rows.rs");
 #[cfg(test)]
 include!("import_staging/tests_patch_lookup.rs");
+#[cfg(test)]
+include!("import_staging/tests_preview_patch_projection.rs");

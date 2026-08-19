@@ -335,43 +335,17 @@ async fn apply_confirm_preview_patch_on_tx(
     else {
         return Ok(false);
     };
-    let mut preview = preview_from_pg_row(&row)?;
-    let mut payload = row
+    let preview = preview_from_pg_row(&row)?;
+    let payload = row
         .try_get::<Value, _>("preview_payload")
         .unwrap_or_else(|_| json!({}));
-    for (field, value) in &patch.changes {
-        apply_patch_value_to_preview(&mut preview, &mut payload, *field, value.clone())?;
-    }
-    if patch.clear_transfer_decision {
-        clear_feedback_key(&mut preview.preview_matching_feedback, "transfer");
-    }
-    if patch.clear_learning_decision {
-        clear_feedback_key(&mut preview.preview_matching_feedback, "learning");
-    }
-    if patch.clear_llm_decision {
-        clear_feedback_key(&mut preview.preview_matching_feedback, "llm");
-    }
-    apply_identity_validation_to_preview(&mut preview, &mut payload, identity_maps);
-    payload_set(
-        &mut payload,
-        "preview_matching_feedback",
-        preview.preview_matching_feedback.clone(),
-    );
-    let amount_cents = preview.preview_amount_cents.checked_abs().ok_or_else(|| {
-        DbError::InvalidOperation("invalid preview amount".to_string())
-    })?;
-    let direction = if matches!(preview.preview_type.as_str(), "收入" | "income") {
-        "income"
-    } else {
-        "expense"
-    };
-    let signal_projection = import_preview_signal_projection_from_payload(&payload)?;
+    let projection = project_preview_patch(preview, payload, patch, identity_maps)?;
     let mut query = build_preview_row_update_query(
-        &preview,
-        payload.to_string(),
-        signal_projection,
-        amount_cents,
-        direction,
+        &projection.preview,
+        projection.payload.to_string(),
+        projection.signal_projection,
+        projection.amount_cents,
+        projection.direction,
         PreviewRowUpdateTarget {
             preview_id: patch.preview_id,
             session_db_id,
