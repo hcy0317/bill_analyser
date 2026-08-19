@@ -27,7 +27,8 @@ fn category_rule_from_postgres_row(row: PgRow) -> DbResult<CategoryRuleRecord> {
         .try_get::<Option<String>, _>("path")?
         .unwrap_or_default();
     let category_name: String = row.try_get("category_name")?;
-    let (main_category, sub_category) = category_names_from_path(&path, &category_name);
+    let (main_category, sub_category) =
+        category_names_from_postgres_path(Some(path.as_str()), &category_name);
     let rule_expression_json: Value = row.try_get("rule_expression")?;
     let enabled: bool = row.try_get("enabled")?;
     let mut record = Map::new();
@@ -227,7 +228,8 @@ fn category_from_postgres_row(row: PgRow) -> DbResult<CategoryRecord> {
         .try_get::<Option<String>, _>("path")?
         .unwrap_or_default();
     let name: String = row.try_get("name")?;
-    let (main_category, sub_category) = category_names_from_path(&path, &name);
+    let (main_category, sub_category) =
+        category_names_from_postgres_path(Some(path.as_str()), &name);
     let is_active: bool = row.try_get("is_active")?;
 
     let mut category = Map::new();
@@ -400,19 +402,6 @@ fn template_from_postgres_row(row: PgRow) -> DbResult<TemplateRecord> {
         ))),
     );
     Ok(template)
-}
-
-fn category_names_from_path(path: &str, name: &str) -> (String, String) {
-    let parts = path
-        .split('/')
-        .map(str::trim)
-        .filter(|part| !part.is_empty())
-        .collect::<Vec<_>>();
-    match parts.as_slice() {
-        [] => (name.to_string(), String::new()),
-        [main] => ((*main).to_string(), String::new()),
-        [main, rest @ ..] => ((*main).to_string(), rest.join("/")),
-    }
 }
 
 fn metadata_value_or_default(metadata: &Value, key: &str, default: Value) -> Value {

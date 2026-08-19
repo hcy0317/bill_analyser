@@ -118,7 +118,7 @@ fn preview_category_lookup_helpers_preserve_type_path_and_sql_contract() {
     assert_eq!(fallback.main_category, "未分类");
     assert!(fallback.sub_category.is_empty());
 
-    let single = preview_category_names_from_path("理财", "理财");
+    let single = category_names_from_postgres_path(Some("理财"), "理财");
     assert_eq!(single, ("理财".to_string(), String::new()));
 }
 

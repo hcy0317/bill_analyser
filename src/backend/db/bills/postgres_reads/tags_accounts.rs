@@ -63,7 +63,7 @@ pub async fn resolve_postgres_category_by_id(
     row.map(|row| {
         let path: Option<String> = row.try_get("path")?;
         let name: String = row.try_get("name")?;
-        Ok(category_names_from_path(path.as_deref(), &name))
+        Ok(category_names_from_postgres_path(path.as_deref(), &name))
     })
     .transpose()
 }
@@ -118,7 +118,8 @@ pub async fn list_postgres_reconciliation_categories(
         .map(|row| {
             let path: Option<String> = row.try_get("path")?;
             let name: String = row.try_get("name")?;
-            let (main_category, sub_category) = category_names_from_path(path.as_deref(), &name);
+            let (main_category, sub_category) =
+                category_names_from_postgres_path(path.as_deref(), &name);
             Ok(ReconciliationCategoryRecord {
                 id: row.try_get("id")?,
                 main_category,

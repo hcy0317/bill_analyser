@@ -15,6 +15,7 @@ pub mod backup;
 pub mod backup_postgres;
 pub mod bills;
 pub mod budgets;
+mod category_path;
 pub mod error;
 pub mod import_config;
 pub mod import_stage2;

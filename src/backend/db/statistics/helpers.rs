@@ -16,20 +16,6 @@ fn canonical_postgres_transaction_type(value: &str) -> String {
     .to_string()
 }
 
-fn postgres_category_names_from_path(path: Option<&str>, name: &str) -> (String, String) {
-    let parts = path
-        .unwrap_or_default()
-        .split('/')
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .collect::<Vec<_>>();
-    match parts.as_slice() {
-        [] => (name.to_string(), String::new()),
-        [main] => ((*main).to_string(), String::new()),
-        [main, rest @ ..] => ((*main).to_string(), rest.join("/")),
-    }
-}
-
 fn postgres_value_to_f64(value: &Value) -> Option<f64> {
     match value {
         Value::Number(number) => number.as_f64(),

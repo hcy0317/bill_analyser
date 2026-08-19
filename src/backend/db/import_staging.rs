@@ -30,8 +30,9 @@ use serde_json::{json, Map, Value};
 use sqlx::{postgres::PgRow, Postgres, QueryBuilder, Row};
 
 use crate::{
-    bills::postgres_reads::batch_create_postgres_bills_in_transaction, BillCreateDraft, BillRecord,
-    DbError, DbResult, PostgresPool,
+    bills::postgres_reads::batch_create_postgres_bills_in_transaction,
+    category_path::category_names_from_postgres_path, BillCreateDraft, BillRecord, DbError,
+    DbResult, PostgresPool,
 };
 
 const LLM_MEMORY_PROMPT_TEXT_MAX_BYTES: usize = 16_384;

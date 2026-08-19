@@ -99,7 +99,8 @@ async fn load_postgres_category_context_values(
         .map(|row| {
             let path: Option<String> = row.try_get("path")?;
             let name: String = row.try_get("name")?;
-            let (main_category, sub_category) = category_names_from_path(&path, &name);
+            let (main_category, sub_category) =
+                category_names_from_postgres_path(path.as_deref(), &name);
             Ok(json!({
                 "id": row.try_get::<i64, _>("id")?,
                 "type": row
@@ -134,7 +135,7 @@ async fn load_postgres_category_filter(
     .map(|row| {
         let path: Option<String> = row.try_get("path")?;
         let name: String = row.try_get("name")?;
-        Ok(category_names_from_path(&path, &name))
+        Ok(category_names_from_postgres_path(path.as_deref(), &name))
     })
     .transpose()
 }

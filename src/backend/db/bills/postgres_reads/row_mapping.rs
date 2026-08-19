@@ -1,5 +1,12 @@
 fn bill_record_from_postgres_row(row: PgRow) -> DbResult<BillRecord> {
     let standard_payload: Value = row.try_get("standard_payload")?;
+    let category_path: Option<String> = row.try_get("category_path")?;
+    let category_name: Option<String> = row.try_get("category_name")?;
+    let (main_category, sub_category) = bill_category_names(
+        &standard_payload,
+        category_path.as_deref(),
+        category_name.as_deref().unwrap_or_default(),
+    );
     let amount_cents: i64 = row.try_get("amount_cents")?;
     let destination_amount_cents = destination_amount_cents(&standard_payload);
     let source_account_id = first_positive([
@@ -34,11 +41,11 @@ fn bill_record_from_postgres_row(row: PgRow) -> DbResult<BillRecord> {
     );
     record.insert(
         "main_category".to_string(),
-        optional_string_value(row.try_get::<Option<String>, _>("main_category")?),
+        optional_string_value(Some(main_category)),
     );
     record.insert(
         "sub_category".to_string(),
-        optional_string_value(row.try_get::<Option<String>, _>("sub_category")?),
+        optional_string_value(Some(sub_category)),
     );
     record.insert(
         "batch_id".to_string(),
@@ -76,6 +83,26 @@ fn bill_record_from_postgres_row(row: PgRow) -> DbResult<BillRecord> {
         record.insert(key.to_string(), payload_i64_value(&standard_payload, key));
     }
     Ok(record)
+}
+
+fn bill_category_names(
+    standard_payload: &Value,
+    category_path: Option<&str>,
+    category_name: &str,
+) -> (String, String) {
+    let (path_main, path_sub) =
+        category_names_from_postgres_path(category_path, category_name);
+    let main_category = standard_payload
+        .get("main_category")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .map_or(path_main, ToOwned::to_owned);
+    let sub_category = standard_payload
+        .get("sub_category")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .map_or(path_sub, ToOwned::to_owned);
+    (main_category, sub_category)
 }
 
 fn bill_page_from_postgres_rows((rows, total): (Vec<PgRow>, i64)) -> DbResult<BillPage> {

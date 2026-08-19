@@ -20,6 +20,10 @@ use chrono::{DateTime, Datelike, Duration, Local, NaiveDate, Utc};
 use serde_json::{json, Value};
 use sqlx::{Postgres, QueryBuilder, Row};
 
+use crate::category_path::{
+    category_names_from_postgres_path, push_postgres_bill_main_category_expr,
+    push_postgres_bill_sub_category_expr,
+};
 use crate::{DbError, DbResult, PostgresPool, UserScope};
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]

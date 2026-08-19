@@ -12,6 +12,10 @@ use chrono::{DateTime, Utc};
 use serde_json::{json, Map, Number, Value};
 use sqlx::{postgres::PgRow, Postgres, QueryBuilder, Row, Transaction};
 
+use crate::category_path::{
+    category_names_from_postgres_path, push_postgres_bill_main_category_expr,
+    push_postgres_bill_sub_category_expr,
+};
 use crate::{
     auth_registration::{
         RegisterDefaultSeedSummary, DEFAULT_DAILY_CATEGORIES, DEFAULT_DAILY_CATEGORY_RULES,

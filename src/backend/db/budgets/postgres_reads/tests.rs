@@ -5,13 +5,13 @@ mod tests {
     use std::{env, error::Error};
 
     #[test]
-    fn category_names_from_path_splits_main_and_subcategory() {
+    fn category_names_from_postgres_path_splits_main_and_subcategory() {
         assert_eq!(
-            category_names_from_path(&Some("Food/Lunch".to_string()), "Lunch"),
+            category_names_from_postgres_path(Some("Food/Lunch"), "Lunch"),
             ("Food".to_string(), "Lunch".to_string())
         );
         assert_eq!(
-            category_names_from_path(&None, "Food"),
+            category_names_from_postgres_path(None, "Food"),
             ("Food".to_string(), String::new())
         );
     }

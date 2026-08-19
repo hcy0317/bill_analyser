@@ -15,15 +15,16 @@ use chrono::{DateTime, Utc};
 use serde_json::{json, Map, Number, Value};
 use sqlx::{postgres::PgRow, Postgres, QueryBuilder, Row};
 
+use crate::category_path::{
+    category_names_from_postgres_path, push_postgres_bill_main_category_expr,
+    push_postgres_bill_sub_category_expr,
+};
 use crate::{
     calculate_bill_hash_from_record, AccountBalanceDiscrepancy, BatchUpdateBillsResult,
     BillCategoryFilter, BillCreateDraft, BillFilters, BillPage, BillRecord, BillUpdateDraft,
     DbError, DbResult, PostgresPool, PostgresReconciliationBillPage, PostgresReconciliationBillRow,
     SyncAllAccountBalancesResult,
 };
-
-const MAIN_CATEGORY_EXPR: &str = "COALESCE(NULLIF(b.standard_payload->>'main_category', ''), NULLIF(split_part(c.path, '/', 1), ''), c.name, '')";
-const SUB_CATEGORY_EXPR: &str = "COALESCE(NULLIF(b.standard_payload->>'sub_category', ''), CASE WHEN position('/' in COALESCE(c.path, '')) > 0 THEN substring(c.path from position('/' in c.path) + 1) ELSE '' END, '')";
 
 include!("postgres_reads/types.rs");
 include!("postgres_reads/category_queries.rs");

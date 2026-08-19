@@ -7,7 +7,9 @@ use bill_analyser_core::{UserDataStatisticsContract, UserId};
 use serde_json::Value;
 use sqlx::{Postgres, QueryBuilder, Row};
 
-use crate::{bills, DbResult, PostgresPool, UserScope};
+use crate::{
+    bills, category_path::category_names_from_postgres_path, DbResult, PostgresPool, UserScope,
+};
 
 const POSTGRES_CLEAR_ALL_DELETE_TABLES: &[&str] = &[
     "llm_memory_events",
@@ -143,7 +145,8 @@ pub async fn list_postgres_user_data_categories(
             let id: i64 = row.try_get("id")?;
             let path: Option<String> = row.try_get("path")?;
             let name: String = row.try_get("name")?;
-            let (main_category, sub_category) = postgres_category_names(path.as_deref(), &name);
+            let (main_category, sub_category) =
+                category_names_from_postgres_path(path.as_deref(), &name);
             Ok(UserDataExportCategory {
                 id,
                 main_category,
@@ -341,21 +344,6 @@ async fn delete_postgres_user_rows(
         .execute(&mut **transaction)
         .await?;
     Ok(())
-}
-
-// 中文说明：把分类 path/name 拆成主分类和子分类展示名，兼容只有 name 的旧数据。
-fn postgres_category_names(path: Option<&str>, name: &str) -> (String, String) {
-    let parts = path
-        .unwrap_or_default()
-        .split('/')
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .collect::<Vec<_>>();
-    match parts.as_slice() {
-        [] => (name.to_string(), String::new()),
-        [main] => ((*main).to_string(), String::new()),
-        [main, rest @ ..] => ((*main).to_string(), rest.join("/")),
-    }
 }
 
 #[tracing::instrument(level = "debug", skip_all)]

@@ -118,10 +118,10 @@ async fn get_postgres_bill_for_update_on_tx(
     user_id: i64,
     bill_id: i64,
 ) -> DbResult<Option<LockedPostgresBill>> {
-    let row = sqlx::query(&format!(
+    let row = sqlx::query(
         r#"SELECT b.id, b.user_id, b.occurred_at, b.transaction_type, b.amount_cents,
             b.merchant, b.description, b.payment_method,
-            {MAIN_CATEGORY_EXPR} AS main_category, {SUB_CATEGORY_EXPR} AS sub_category,
+            c.path AS category_path, c.name AS category_name,
             b.standard_payload, b.source_hash, b.created_at, b.updated_at,
             b.account_id, b.source_account_id, b.target_account_id,
             b.transfer_target_account_id, b.category_id, b.version
@@ -129,7 +129,7 @@ async fn get_postgres_bill_for_update_on_tx(
            LEFT JOIN categories c ON c.user_id=b.user_id AND c.id=b.category_id
            WHERE b.user_id=$1 AND b.id=$2 AND b.is_deleted=false
            FOR UPDATE OF b"#
-    ))
+    )
     .bind(user_id)
     .bind(bill_id)
     .fetch_optional(&mut **tx)
@@ -154,10 +154,10 @@ async fn get_postgres_bills_for_update_on_tx(
     if bill_ids.is_empty() {
         return Ok(Vec::new());
     }
-    let rows = sqlx::query(&format!(
+    let rows = sqlx::query(
         r#"SELECT b.id, b.user_id, b.occurred_at, b.transaction_type, b.amount_cents,
             b.merchant, b.description, b.payment_method,
-            {MAIN_CATEGORY_EXPR} AS main_category, {SUB_CATEGORY_EXPR} AS sub_category,
+            c.path AS category_path, c.name AS category_name,
             b.standard_payload, b.source_hash, b.created_at, b.updated_at,
             b.account_id, b.source_account_id, b.target_account_id,
             b.transfer_target_account_id, b.category_id, b.version
@@ -166,7 +166,7 @@ async fn get_postgres_bills_for_update_on_tx(
            WHERE b.user_id=$1 AND b.id=ANY($2) AND b.is_deleted=false
            ORDER BY b.id
            FOR UPDATE OF b"#
-    ))
+    )
     .bind(user_id)
     .bind(bill_ids)
     .fetch_all(&mut **tx)

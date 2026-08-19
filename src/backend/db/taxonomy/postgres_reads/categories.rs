@@ -219,13 +219,10 @@ pub async fn query_postgres_category_statistics(
     end_date: Option<&str>,
     user_id: i64,
 ) -> DbResult<Vec<CategoryStatistic>> {
-    const MAIN_CATEGORY_EXPR: &str = "COALESCE(NULLIF(b.standard_payload->>'main_category', ''), NULLIF(split_part(c.path, '/', 1), ''), c.name, '')";
-    const SUB_CATEGORY_EXPR: &str = "COALESCE(NULLIF(b.standard_payload->>'sub_category', ''), CASE WHEN position('/' in COALESCE(c.path, '')) > 0 THEN substring(c.path from position('/' in c.path) + 1) ELSE '' END, '')";
-
     let mut builder = QueryBuilder::<Postgres>::new("SELECT ");
-    builder.push(MAIN_CATEGORY_EXPR);
+    push_postgres_bill_main_category_expr(&mut builder);
     builder.push(" AS main_category, ");
-    builder.push(SUB_CATEGORY_EXPR);
+    push_postgres_bill_sub_category_expr(&mut builder);
     builder.push(
         r#" AS sub_category,
             COUNT(*)::BIGINT AS count,
@@ -236,7 +233,7 @@ pub async fn query_postgres_category_statistics(
     );
     builder.push_bind(user_id);
     builder.push(" AND b.is_deleted = false AND ");
-    builder.push(MAIN_CATEGORY_EXPR);
+    push_postgres_bill_main_category_expr(&mut builder);
     builder.push(" <> ''");
 
     if let Some(value) = start_date.filter(|value| !value.trim().is_empty()) {
@@ -251,9 +248,9 @@ pub async fn query_postgres_category_statistics(
     }
 
     builder.push(" GROUP BY ");
-    builder.push(MAIN_CATEGORY_EXPR);
+    push_postgres_bill_main_category_expr(&mut builder);
     builder.push(", ");
-    builder.push(SUB_CATEGORY_EXPR);
+    push_postgres_bill_sub_category_expr(&mut builder);
     builder.push(" ORDER BY total_amount_cents DESC, main_category ASC, sub_category ASC");
 
     let rows = builder.build().fetch_all(pool).await?;

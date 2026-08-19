@@ -32,13 +32,13 @@ fn push_bill_filters(
     }
     if let Some(value) = text_filter(filters.main_category.as_deref()) {
         builder.push(" AND ");
-        builder.push(MAIN_CATEGORY_EXPR);
+        push_postgres_bill_main_category_expr(builder);
         builder.push(" = ");
         builder.push_bind(value);
     }
     if let Some(value) = text_filter(filters.sub_category.as_deref()) {
         builder.push(" AND ");
-        builder.push(SUB_CATEGORY_EXPR);
+        push_postgres_bill_sub_category_expr(builder);
         builder.push(" = ");
         builder.push_bind(value);
     }
@@ -121,12 +121,12 @@ fn push_category_filters(builder: &mut QueryBuilder<'_, Postgres>, filters: &Bil
             builder.push(" OR ");
         }
         builder.push("(");
-        builder.push(MAIN_CATEGORY_EXPR);
+        push_postgres_bill_main_category_expr(builder);
         builder.push(" = ");
         builder.push_bind(main);
         if let Some(sub) = sub {
             builder.push(" AND ");
-            builder.push(SUB_CATEGORY_EXPR);
+            push_postgres_bill_sub_category_expr(builder);
             builder.push(" = ");
             builder.push_bind(sub);
         }

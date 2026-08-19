@@ -6,7 +6,7 @@ use chrono::{DateTime, SecondsFormat, Utc};
 use serde_json::{json, Value};
 use sqlx::{postgres::PgRow, Row};
 
-use crate::{DbError, DbResult, PostgresPool};
+use crate::{category_path::category_names_from_postgres_path, DbError, DbResult, PostgresPool};
 
 use super::{MatchingResult, MatchingRuntimeError};
 
@@ -501,17 +501,10 @@ fn category_names_from_payload(
         );
     }
 
-    let path = category_path.unwrap_or_default();
-    let parts = path
-        .split('/')
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .collect::<Vec<_>>();
-    match parts.as_slice() {
-        [] => (category_name.unwrap_or_default(), String::new()),
-        [main] => ((*main).to_string(), String::new()),
-        [main, rest @ ..] => ((*main).to_string(), rest.join("/")),
-    }
+    category_names_from_postgres_path(
+        category_path.as_deref(),
+        category_name.as_deref().unwrap_or_default(),
+    )
 }
 
 fn optional_account_id(row: &PgRow, prefix: &str, field: &str) -> MatchingResult<Option<i64>> {

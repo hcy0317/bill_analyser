@@ -8,8 +8,10 @@ async fn load_postgres_statistics_bills(
     let mut builder = QueryBuilder::<Postgres>::new(
         "SELECT b.id, b.occurred_at, b.transaction_type, b.amount_cents, b.payment_method, b.account_id, b.source_account_id, b.target_account_id, b.transfer_target_account_id, b.standard_payload, ",
     );
-    builder.push("COALESCE(NULLIF(b.standard_payload->>'main_category', ''), NULLIF(split_part(c.path, '/', 1), ''), c.name, '') AS main_category, ");
-    builder.push("COALESCE(NULLIF(b.standard_payload->>'sub_category', ''), CASE WHEN position('/' in COALESCE(c.path, '')) > 0 THEN substring(c.path from position('/' in c.path) + 1) ELSE '' END, '') AS sub_category, ");
+    push_postgres_bill_main_category_expr(&mut builder);
+    builder.push(" AS main_category, ");
+    push_postgres_bill_sub_category_expr(&mut builder);
+    builder.push(" AS sub_category, ");
     builder.push("b.merchant, b.description FROM bills b LEFT JOIN categories c ON c.user_id = b.user_id AND c.id = b.category_id WHERE b.user_id = ");
     builder.push_bind(user_id);
     builder.push(" AND b.is_deleted = false");
@@ -103,7 +105,7 @@ async fn load_postgres_statistics_categories(
             let path: Option<String> = row.try_get("path")?;
             let name: String = row.try_get("name")?;
             let (main_category, sub_category) =
-                postgres_category_names_from_path(path.as_deref(), &name);
+                category_names_from_postgres_path(path.as_deref(), &name);
             Ok(StatisticsCategoryInput {
                 id: row.try_get("id")?,
                 main_category,

@@ -2,13 +2,16 @@ use std::error::Error;
 
 use bill_analyser_core::{LedgerListQuery, Money, TransactionType, UserId};
 use bill_analyser_db::taxonomy::postgres_reads::{
-    clear_postgres_account_transactions, move_all_postgres_account_transactions,
+    clear_postgres_account_transactions, list_postgres_categories,
+    move_all_postgres_account_transactions, query_postgres_category_statistics,
 };
 use bill_analyser_db::{
     batch_create_postgres_bills, batch_update_postgres_bills, create_postgres_bill,
-    delete_postgres_bill, get_postgres_bill_by_id, get_postgres_bill_tags, query_postgres_bills,
-    sync_all_postgres_account_balances, update_postgres_bill, BillCategoryFilter, BillCreateDraft,
-    BillFilters, BillUpdateDraft, PostgresLedgerQueries, PostgresPool,
+    delete_postgres_bill, get_postgres_bill_by_id, get_postgres_bill_tags,
+    list_postgres_reconciliation_categories, list_postgres_user_data_categories,
+    query_postgres_bills, resolve_postgres_category_by_id, sync_all_postgres_account_balances,
+    update_postgres_bill, BillCategoryFilter, BillCreateDraft, BillFilters, BillUpdateDraft,
+    PostgresLedgerQueries, PostgresPool,
 };
 use serde_json::{json, Value};
 use sqlx::Row;
@@ -107,6 +110,123 @@ async fn ledger_queries_list_returns_typed_page_with_cents_tags_and_user_scope(
     assert!(empty_page.items.is_empty());
     assert_eq!(empty_page.page, 1);
     assert_eq!(empty_page.page_size, 500);
+
+    test_db.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn category_path_projection_is_shared_across_ledger_taxonomy_and_export_adapters(
+) -> Result<(), Box<dyn Error>> {
+    let test_db = required_isolated_postgres_database("category_path_projection").await?;
+    let user_id = insert_user(&test_db.pool, "category-path-projection").await?;
+    let principal = UserId::new(u64::try_from(user_id)?)?;
+    let account_id = insert_account(&test_db.pool, user_id, "分类投影账户").await?;
+    let category_id = insert_category(
+        &test_db.pool,
+        user_id,
+        "午餐 fallback",
+        "\t\u{a0}餐饮\u{a0} //\n 工作日 / 午餐\u{3000}\t",
+    )
+    .await?;
+    let bill_id = insert_bill(
+        &test_db.pool,
+        user_id,
+        "2026-08-19T12:00:00Z",
+        "expense",
+        "expense",
+        2_500,
+        account_id,
+        None,
+        category_id,
+        "午餐",
+        "分类路径投影合同",
+        json!({}),
+        false,
+    )
+    .await?;
+
+    let ledger = PostgresLedgerQueries::new(&test_db.pool)
+        .list(principal, LedgerListQuery::default())
+        .await?;
+    let ledger_entry = ledger
+        .items
+        .iter()
+        .find(|entry| entry.id == bill_id)
+        .expect("ledger entry");
+    assert_eq!(ledger_entry.main_category, "餐饮");
+    assert_eq!(ledger_entry.sub_category, "工作日/午餐");
+
+    let filtered_ledger = PostgresLedgerQueries::new(&test_db.pool)
+        .list(
+            principal,
+            LedgerListQuery {
+                main_category: Some("餐饮".to_string()),
+                sub_category: Some("工作日/午餐".to_string()),
+                ..LedgerListQuery::default()
+            },
+        )
+        .await?;
+    assert_eq!(
+        filtered_ledger
+            .items
+            .iter()
+            .map(|entry| entry.id)
+            .collect::<Vec<_>>(),
+        vec![bill_id]
+    );
+
+    let taxonomy = list_postgres_categories(&test_db.pool, user_id).await?;
+    let taxonomy_entry = taxonomy
+        .iter()
+        .find(|entry| entry.get("id").and_then(Value::as_i64) == Some(category_id))
+        .expect("taxonomy category");
+    assert_eq!(
+        taxonomy_entry.get("main_category").and_then(Value::as_str),
+        Some("餐饮")
+    );
+    assert_eq!(
+        taxonomy_entry.get("sub_category").and_then(Value::as_str),
+        Some("工作日/午餐")
+    );
+
+    let exported = list_postgres_user_data_categories(&test_db.pool, principal).await?;
+    let export_entry = exported
+        .iter()
+        .find(|entry| entry.id == category_id)
+        .expect("export category");
+    assert_eq!(export_entry.main_category, "餐饮");
+    assert_eq!(export_entry.sub_category, "工作日/午餐");
+
+    assert_eq!(
+        resolve_postgres_category_by_id(&test_db.pool, user_id, category_id).await?,
+        Some(("餐饮".to_string(), "工作日/午餐".to_string()))
+    );
+    let reconciliation_categories =
+        list_postgres_reconciliation_categories(&test_db.pool, user_id).await?;
+    let reconciliation_category = reconciliation_categories
+        .iter()
+        .find(|entry| entry.id == category_id)
+        .expect("reconciliation category");
+    assert_eq!(reconciliation_category.main_category, "餐饮");
+    assert_eq!(reconciliation_category.sub_category, "工作日/午餐");
+
+    let statistics = query_postgres_category_statistics(
+        &test_db.pool,
+        Some("2026-08-19"),
+        Some("2026-08-19"),
+        user_id,
+    )
+    .await?;
+    assert_eq!(
+        statistics,
+        vec![bill_analyser_db::taxonomy::categories::CategoryStatistic {
+            main_category: "餐饮".to_string(),
+            sub_category: "工作日/午餐".to_string(),
+            count: 1,
+            total_amount_cents: 2_500,
+        }]
+    );
 
     test_db.cleanup().await?;
     Ok(())

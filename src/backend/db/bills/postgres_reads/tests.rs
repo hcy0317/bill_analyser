@@ -111,6 +111,26 @@ mod tests {
     }
 
     #[test]
+    fn bill_category_names_keep_payload_precedence_over_shared_path_projection() {
+        assert_eq!(
+            bill_category_names(
+                &json!({"main_category": "自定义", "sub_category": "覆盖"}),
+                Some(" 餐饮 // 工作日 / 午餐 "),
+                "fallback",
+            ),
+            ("自定义".to_string(), "覆盖".to_string())
+        );
+        assert_eq!(
+            bill_category_names(
+                &json!({"main_category": "", "sub_category": ""}),
+                Some(" 餐饮 // 工作日 / 午餐 "),
+                "fallback",
+            ),
+            ("餐饮".to_string(), "工作日/午餐".to_string())
+        );
+    }
+
+    #[test]
     fn bill_mutation_rejects_i64_min_amount_without_panicking() {
         let fields = BillRecord::from_iter([
             ("date".to_string(), json!("2026-07-16 10:00:00")),

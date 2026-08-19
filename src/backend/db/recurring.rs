@@ -9,8 +9,8 @@ use serde_json::{json, Map, Value};
 use sqlx::{postgres::PgRow, Row};
 
 use crate::{
-    get_postgres_bill_by_id, BillRecord, BillRecurringBindResult, BillRecurringCandidates, DbError,
-    DbResult, PostgresPool,
+    category_path::category_names_from_postgres_path, get_postgres_bill_by_id, BillRecord,
+    BillRecurringBindResult, BillRecurringCandidates, DbError, DbResult, PostgresPool,
 };
 
 include!("recurring/types.rs");

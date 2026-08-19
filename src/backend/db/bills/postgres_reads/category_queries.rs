@@ -20,7 +20,7 @@ pub async fn postgres_category_filters_for_ids(
         .map(|row| {
             let path: Option<String> = row.try_get("path")?;
             let name: String = row.try_get("name")?;
-            let (main, sub) = category_names_from_path(path.as_deref(), &name);
+            let (main, sub) = category_names_from_postgres_path(path.as_deref(), &name);
             Ok(BillCategoryFilter {
                 main,
                 sub: (!sub.trim().is_empty()).then_some(sub),

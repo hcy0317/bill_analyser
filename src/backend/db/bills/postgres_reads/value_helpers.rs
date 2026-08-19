@@ -9,20 +9,6 @@ fn canonical_transaction_type(value: &str) -> String {
     .to_string()
 }
 
-fn category_names_from_path(path: Option<&str>, name: &str) -> (String, String) {
-    let parts = path
-        .unwrap_or_default()
-        .split('/')
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .collect::<Vec<_>>();
-    match parts.as_slice() {
-        [] => (name.to_string(), String::new()),
-        [main] => ((*main).to_string(), String::new()),
-        [main, rest @ ..] => ((*main).to_string(), rest.join("/")),
-    }
-}
-
 fn destination_amount_cents(payload: &Value) -> Option<i64> {
     payload
         .get("destination_amount_cents")

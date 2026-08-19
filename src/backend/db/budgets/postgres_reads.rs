@@ -14,6 +14,10 @@ use chrono::{DateTime, Datelike, NaiveDate, SecondsFormat, Utc};
 use serde_json::{json, Map, Number, Value};
 use sqlx::{postgres::PgRow, Postgres, QueryBuilder, Row, Transaction};
 
+use crate::category_path::{
+    category_names_from_postgres_path, push_postgres_bill_main_category_expr,
+    push_postgres_bill_sub_category_expr,
+};
 use crate::{DbError, DbResult, PostgresPool};
 
 use super::{

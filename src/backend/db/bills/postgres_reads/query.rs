@@ -50,10 +50,7 @@ async fn query_postgres_bill_rows(
     let mut list_builder = QueryBuilder::<Postgres>::new(
         "SELECT b.id, b.user_id, b.occurred_at, b.transaction_type, b.amount_cents, b.merchant, b.description, b.payment_method, ",
     );
-    list_builder.push(MAIN_CATEGORY_EXPR);
-    list_builder.push(" AS main_category, ");
-    list_builder.push(SUB_CATEGORY_EXPR);
-    list_builder.push(" AS sub_category, b.standard_payload, b.source_hash, b.created_at, b.updated_at, b.account_id, b.source_account_id, b.target_account_id, b.transfer_target_account_id, b.category_id FROM bills b LEFT JOIN categories c ON c.user_id = b.user_id AND c.id = b.category_id WHERE b.user_id = ");
+    list_builder.push("c.path AS category_path, c.name AS category_name, b.standard_payload, b.source_hash, b.created_at, b.updated_at, b.account_id, b.source_account_id, b.target_account_id, b.transfer_target_account_id, b.category_id FROM bills b LEFT JOIN categories c ON c.user_id = b.user_id AND c.id = b.category_id WHERE b.user_id = ");
     list_builder.push_bind(user_id);
     list_builder.push(" AND b.is_deleted = false");
     push_bill_filters(&mut list_builder, user_id, filters);
@@ -73,12 +70,11 @@ pub async fn get_postgres_bill_by_id(
     user_id: i64,
     bill_id: i64,
 ) -> DbResult<Option<BillRecord>> {
-    let row = sqlx::query(&format!(
+    let row = sqlx::query(
         r#"
         SELECT b.id, b.user_id, b.occurred_at, b.transaction_type, b.amount_cents,
             b.merchant, b.description, b.payment_method,
-            {MAIN_CATEGORY_EXPR} AS main_category,
-            {SUB_CATEGORY_EXPR} AS sub_category,
+            c.path AS category_path, c.name AS category_name,
             b.standard_payload, b.source_hash, b.created_at, b.updated_at,
             b.account_id, b.source_account_id, b.target_account_id,
             b.transfer_target_account_id, b.category_id
@@ -86,7 +82,7 @@ pub async fn get_postgres_bill_by_id(
         LEFT JOIN categories c ON c.user_id = b.user_id AND c.id = b.category_id
         WHERE b.user_id = $1 AND b.id = $2 AND b.is_deleted = false
         "#
-    ))
+    )
     .bind(user_id)
     .bind(bill_id)
     .fetch_optional(pool)

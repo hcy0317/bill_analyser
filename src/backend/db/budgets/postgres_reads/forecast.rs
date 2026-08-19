@@ -9,7 +9,7 @@ async fn query_postgres_budget_forecast_rows(
     let mut builder = QueryBuilder::<Postgres>::new("SELECT ");
     builder.push(group_by);
     builder.push(" AS period, ");
-    builder.push(postgres_bill_main_category_expr());
+    push_postgres_bill_main_category_expr(&mut builder);
     builder.push(" AS main_category, COALESCE(SUM(ABS(b.amount_cents)), 0)::BIGINT AS total_cents FROM bills b LEFT JOIN categories c ON c.user_id = b.user_id AND c.id = b.category_id WHERE b.user_id = ");
     builder.push_bind(user_id);
     builder.push(" AND b.is_deleted = false");
@@ -33,7 +33,7 @@ async fn query_postgres_budget_forecast_rows(
     builder.push(" GROUP BY ");
     builder.push(group_by);
     builder.push(", ");
-    builder.push(postgres_bill_main_category_expr());
+    push_postgres_bill_main_category_expr(&mut builder);
     builder.push(" ORDER BY period DESC, total_cents DESC");
 
     let rows = builder.build().fetch_all(pool).await?;

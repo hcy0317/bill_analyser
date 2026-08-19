@@ -10,14 +10,6 @@ fn postgres_budget_forecast_group_expr(period_type: &str) -> &'static str {
     }
 }
 
-fn postgres_bill_main_category_expr() -> &'static str {
-    "COALESCE(NULLIF(b.standard_payload->>'main_category', ''), NULLIF(split_part(c.path, '/', 1), ''), c.name, '')"
-}
-
-fn postgres_bill_sub_category_expr() -> &'static str {
-    "COALESCE(NULLIF(b.standard_payload->>'sub_category', ''), CASE WHEN position('/' in COALESCE(c.path, '')) > 0 THEN substring(c.path from position('/' in c.path) + 1) ELSE '' END, '')"
-}
-
 fn canonical_budget_transaction_type(type_name: &str) -> String {
     match type_name.trim().to_ascii_lowercase().as_str() {
         "收入" | "income" | "2" => "income".to_string(),
@@ -62,21 +54,6 @@ fn budget_record_from_postgres_row(row: PgRow) -> DbResult<BudgetRecord> {
     insert_timestamp(&mut record, "created_at", row.try_get("created_at")?);
     insert_timestamp(&mut record, "updated_at", row.try_get("updated_at")?);
     Ok(record)
-}
-
-fn category_names_from_path(path: &Option<String>, name: &str) -> (String, String) {
-    let parts = path
-        .as_deref()
-        .unwrap_or_default()
-        .split('/')
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .collect::<Vec<_>>();
-    match parts.as_slice() {
-        [] => (name.to_string(), String::new()),
-        [main] => ((*main).to_string(), String::new()),
-        [main, rest @ ..] => ((*main).to_string(), rest.join("/")),
-    }
 }
 
 fn record_value<'a>(record: &'a BudgetRecord, key: &str) -> Option<&'a Value> {

@@ -97,15 +97,5 @@ fn category_names_from_postgres_values(
             payload_sub.unwrap_or_default(),
         );
     }
-    let parts = category_path
-        .unwrap_or_default()
-        .split('/')
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .collect::<Vec<_>>();
-    match parts.as_slice() {
-        [] => (category_name.unwrap_or_default().to_string(), String::new()),
-        [main] => ((*main).to_string(), String::new()),
-        [main, rest @ ..] => ((*main).to_string(), rest.join("/")),
-    }
+    category_names_from_postgres_path(category_path, category_name.unwrap_or_default())
 }

@@ -72,7 +72,7 @@ fn resolve_llm_suggested_category(
                 }
             }
             let (candidate_main, candidate_sub) =
-                preview_category_names_from_path(path.as_deref().unwrap_or_default(), &name);
+                category_names_from_postgres_path(path.as_deref(), &name);
             if let Some(suggested_category_id) = suggested_category_id {
                 if id == suggested_category_id {
                     return Ok(Some(ImportPreviewLlmCategoryMatch {

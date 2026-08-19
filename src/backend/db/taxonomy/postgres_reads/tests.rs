@@ -7,15 +7,15 @@ mod tests {
     #[test]
     fn category_names_from_postgres_path_preserve_current_main_and_sub_fields() {
         assert_eq!(
-            category_names_from_path("餐饮/午餐", "午餐"),
+            category_names_from_postgres_path(Some("餐饮/午餐"), "午餐"),
             ("餐饮".to_string(), "午餐".to_string())
         );
         assert_eq!(
-            category_names_from_path("餐饮", "餐饮"),
+            category_names_from_postgres_path(Some("餐饮"), "餐饮"),
             ("餐饮".to_string(), String::new())
         );
         assert_eq!(
-            category_names_from_path("", "未分类"),
+            category_names_from_postgres_path(Some(""), "未分类"),
             ("未分类".to_string(), String::new())
         );
     }

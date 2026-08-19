@@ -50,13 +50,13 @@ async fn get_postgres_budget_spent_amount(
     builder.push(")");
     if let Some(category) = text_filter(Some(record_text(budget, "category").as_str())) {
         builder.push(" AND ");
-        builder.push(postgres_bill_main_category_expr());
+        push_postgres_bill_main_category_expr(&mut builder);
         builder.push(" = ");
         builder.push_bind(category);
     }
     if let Some(sub_category) = text_filter(Some(record_text(budget, "sub_category").as_str())) {
         builder.push(" AND ");
-        builder.push(postgres_bill_sub_category_expr());
+        push_postgres_bill_sub_category_expr(&mut builder);
         builder.push(" = ");
         builder.push_bind(sub_category);
     }

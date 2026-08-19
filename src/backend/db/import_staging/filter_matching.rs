@@ -102,25 +102,13 @@ fn import_preview_category_lookup_from_values(
     path: &str,
     category_type: Option<&str>,
 ) -> ImportPreviewCategoryLookup {
-    let (main_category, sub_category) = preview_category_names_from_path(path, name);
+    let (main_category, sub_category) =
+        category_names_from_postgres_path(Some(path), name);
     let type_code = category_type.and_then(preview_category_type_code);
     ImportPreviewCategoryLookup {
         type_code,
         main_category,
         sub_category,
-    }
-}
-
-fn preview_category_names_from_path(path: &str, name: &str) -> (String, String) {
-    let parts = path
-        .split('/')
-        .map(str::trim)
-        .filter(|part| !part.is_empty())
-        .collect::<Vec<_>>();
-    match parts.as_slice() {
-        [] => (name.to_string(), String::new()),
-        [main] => ((*main).to_string(), String::new()),
-        [main, rest @ ..] => ((*main).to_string(), rest.join("/")),
     }
 }
 
