@@ -1,6 +1,9 @@
 use std::error::Error;
 
 use bill_analyser_core::{LedgerListQuery, Money, TransactionType, UserId};
+use bill_analyser_db::taxonomy::postgres_reads::{
+    clear_postgres_account_transactions, move_all_postgres_account_transactions,
+};
 use bill_analyser_db::{
     batch_create_postgres_bills, batch_update_postgres_bills, create_postgres_bill,
     delete_postgres_bill, get_postgres_bill_by_id, get_postgres_bill_tags, query_postgres_bills,
@@ -215,6 +218,275 @@ async fn account_balance_sync_replays_authoritative_bills_with_user_scope(
     assert_eq!(
         account_balance_cents(&test_db.pool, other_account_id).await?,
         0
+    );
+
+    test_db.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn account_transaction_move_rewrites_active_user_scoped_references_only(
+) -> Result<(), Box<dyn Error>> {
+    let test_db = required_isolated_postgres_database("account_transaction_move").await?;
+    let fixture = seed_bills_fixture(&test_db.pool).await?;
+
+    sqlx::query("UPDATE accounts SET balance_cents = CASE WHEN id = $1 THEN 111 ELSE 222 END WHERE id = ANY($2)")
+        .bind(fixture.wallet_account_id)
+        .bind(vec![fixture.wallet_account_id, fixture.bank_account_id])
+        .execute(&test_db.pool)
+        .await?;
+
+    let result = move_all_postgres_account_transactions(
+        &test_db.pool,
+        fixture.wallet_account_id,
+        fixture.bank_account_id,
+        fixture.user_id,
+    )
+    .await?;
+
+    assert!(result.success);
+    assert_eq!(result.message, "Transactions moved successfully");
+    assert_eq!(result.moved_count, 3);
+
+    let active_rows = sqlx::query_as::<_, (i64, i64, Option<i64>, Option<i64>, Option<i64>, i64)>(
+        r#"
+        SELECT id, account_id, source_account_id, target_account_id,
+               transfer_target_account_id, version
+        FROM bills
+        WHERE user_id = $1 AND is_deleted = false
+        ORDER BY id
+        "#,
+    )
+    .bind(fixture.user_id)
+    .fetch_all(&test_db.pool)
+    .await?;
+    assert_eq!(active_rows.len(), 3);
+    for (
+        id,
+        account_id,
+        source_account_id,
+        target_account_id,
+        transfer_target_account_id,
+        version,
+    ) in &active_rows
+    {
+        assert_eq!(*account_id, fixture.bank_account_id, "bill {id} account");
+        assert_eq!(
+            *source_account_id,
+            Some(fixture.bank_account_id),
+            "bill {id} source"
+        );
+        if *id == fixture.transfer_bill_id {
+            assert_eq!(*target_account_id, Some(fixture.bank_account_id));
+            assert_eq!(*transfer_target_account_id, Some(fixture.bank_account_id));
+        } else {
+            assert_eq!(*target_account_id, None);
+            assert_eq!(*transfer_target_account_id, None);
+        }
+        assert_eq!(*version, 2, "bill {id} version");
+    }
+
+    let deleted_row = sqlx::query_as::<_, (i64, Option<i64>, i64)>(
+        "SELECT account_id, source_account_id, version FROM bills WHERE id = $1",
+    )
+    .bind(fixture.deleted_bill_id)
+    .fetch_one(&test_db.pool)
+    .await?;
+    assert_eq!(
+        deleted_row,
+        (
+            fixture.wallet_account_id,
+            Some(fixture.wallet_account_id),
+            1
+        )
+    );
+    let other_user_source: Option<i64> =
+        sqlx::query_scalar("SELECT source_account_id FROM bills WHERE id = $1")
+            .bind(fixture.other_user_bill_id)
+            .fetch_one(&test_db.pool)
+            .await?;
+    assert_ne!(other_user_source, Some(fixture.bank_account_id));
+
+    let balances = sqlx::query_as::<_, (i64, i64)>(
+        "SELECT id, balance_cents FROM accounts WHERE id = ANY($1) ORDER BY id",
+    )
+    .bind(vec![fixture.wallet_account_id, fixture.bank_account_id])
+    .fetch_all(&test_db.pool)
+    .await?;
+    assert_eq!(
+        balances,
+        vec![
+            (fixture.wallet_account_id, 111),
+            (fixture.bank_account_id, 222)
+        ]
+    );
+
+    let same_account = move_all_postgres_account_transactions(
+        &test_db.pool,
+        fixture.bank_account_id,
+        fixture.bank_account_id,
+        fixture.user_id,
+    )
+    .await?;
+    assert_eq!(
+        same_account.message,
+        "Source and target accounts must be different"
+    );
+    assert_eq!(same_account.moved_count, 0);
+
+    let missing_source = move_all_postgres_account_transactions(
+        &test_db.pool,
+        i64::MAX,
+        fixture.bank_account_id,
+        fixture.user_id,
+    )
+    .await?;
+    assert_eq!(missing_source.message, "Source account not found");
+    assert_eq!(missing_source.moved_count, 0);
+
+    let missing_target = move_all_postgres_account_transactions(
+        &test_db.pool,
+        fixture.bank_account_id,
+        i64::MAX,
+        fixture.user_id,
+    )
+    .await?;
+    assert_eq!(missing_target.message, "Target account not found");
+    assert_eq!(missing_target.moved_count, 0);
+
+    let versions_after_failures = sqlx::query_as::<_, (i64, i64)>(
+        "SELECT id, version FROM bills WHERE user_id = $1 AND is_deleted = false ORDER BY id",
+    )
+    .bind(fixture.user_id)
+    .fetch_all(&test_db.pool)
+    .await?;
+    assert_eq!(
+        versions_after_failures,
+        active_rows
+            .iter()
+            .map(|(id, _, _, _, _, version)| (*id, *version))
+            .collect::<Vec<_>>()
+    );
+
+    test_db.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn account_transaction_clear_soft_deletes_active_user_scoped_bills_and_tags(
+) -> Result<(), Box<dyn Error>> {
+    let test_db = required_isolated_postgres_database("account_transaction_clear").await?;
+    let fixture = seed_bills_fixture(&test_db.pool).await?;
+
+    sqlx::query("UPDATE accounts SET balance_cents = CASE WHEN id = $1 THEN 333 ELSE 444 END WHERE id = ANY($2)")
+        .bind(fixture.wallet_account_id)
+        .bind(vec![fixture.wallet_account_id, fixture.bank_account_id])
+        .execute(&test_db.pool)
+        .await?;
+    let affected_before = sqlx::query_as::<_, (i64, i64)>(
+        r#"
+        SELECT id, version
+        FROM bills
+        WHERE user_id = $1 AND is_deleted = false
+          AND (
+              account_id = $2 OR source_account_id = $2 OR target_account_id = $2
+              OR transfer_target_account_id = $2
+          )
+        ORDER BY id
+        "#,
+    )
+    .bind(fixture.user_id)
+    .bind(fixture.wallet_account_id)
+    .fetch_all(&test_db.pool)
+    .await?;
+    assert_eq!(affected_before.len(), 3);
+
+    let result = clear_postgres_account_transactions(
+        &test_db.pool,
+        fixture.wallet_account_id,
+        fixture.user_id,
+    )
+    .await?;
+
+    assert!(result.success);
+    assert_eq!(result.message, "Transactions deleted successfully");
+    assert_eq!(result.deleted_count, 3);
+    let affected_after = sqlx::query_as::<_, (i64, bool, i64)>(
+        "SELECT id, is_deleted, version FROM bills WHERE id = ANY($1) ORDER BY id",
+    )
+    .bind(
+        affected_before
+            .iter()
+            .map(|(id, _)| *id)
+            .collect::<Vec<_>>(),
+    )
+    .fetch_all(&test_db.pool)
+    .await?;
+    assert_eq!(affected_after.len(), 3);
+    for ((before_id, before_version), (after_id, is_deleted, after_version)) in
+        affected_before.iter().zip(&affected_after)
+    {
+        assert_eq!(before_id, after_id);
+        assert!(*is_deleted);
+        assert_eq!(*after_version, *before_version + 1);
+    }
+
+    let coffee_tag_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*)::BIGINT FROM bill_tags WHERE bill_id = $1")
+            .bind(fixture.coffee_bill_id)
+            .fetch_one(&test_db.pool)
+            .await?;
+    assert_eq!(coffee_tag_count, 0);
+    let prior_deleted =
+        sqlx::query_as::<_, (bool, i64)>("SELECT is_deleted, version FROM bills WHERE id = $1")
+            .bind(fixture.deleted_bill_id)
+            .fetch_one(&test_db.pool)
+            .await?;
+    assert_eq!(prior_deleted, (true, 1));
+    let other_user_row =
+        sqlx::query_as::<_, (bool, i64)>("SELECT is_deleted, version FROM bills WHERE id = $1")
+            .bind(fixture.other_user_bill_id)
+            .fetch_one(&test_db.pool)
+            .await?;
+    assert_eq!(other_user_row, (false, 1));
+
+    let balances = sqlx::query_as::<_, (i64, i64)>(
+        "SELECT id, balance_cents FROM accounts WHERE id = ANY($1) ORDER BY id",
+    )
+    .bind(vec![fixture.wallet_account_id, fixture.bank_account_id])
+    .fetch_all(&test_db.pool)
+    .await?;
+    assert_eq!(
+        balances,
+        vec![
+            (fixture.wallet_account_id, 333),
+            (fixture.bank_account_id, 444)
+        ]
+    );
+
+    let missing =
+        clear_postgres_account_transactions(&test_db.pool, i64::MAX, fixture.user_id).await?;
+    assert!(!missing.success);
+    assert_eq!(missing.message, "Account not found");
+    assert_eq!(missing.deleted_count, 0);
+
+    let versions_after_failure = sqlx::query_as::<_, (i64, i64)>(
+        "SELECT id, version FROM bills WHERE id = ANY($1) ORDER BY id",
+    )
+    .bind(
+        affected_after
+            .iter()
+            .map(|(id, _, _)| *id)
+            .collect::<Vec<_>>(),
+    )
+    .fetch_all(&test_db.pool)
+    .await?;
+    assert_eq!(
+        versions_after_failure,
+        affected_after
+            .iter()
+            .map(|(id, _, version)| (*id, *version))
+            .collect::<Vec<_>>()
     );
 
     test_db.cleanup().await?;

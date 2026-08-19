@@ -86,6 +86,50 @@ fn gitea_ci_provisions_isolated_postgres_without_manual_docker_commands() {
 }
 
 #[test]
+fn account_transaction_mutations_keep_sql_and_transactions_out_of_http_handlers() {
+    let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+    let handler_facade = repo_root.join("src/backend/http/taxonomy_routes/account_handlers.rs");
+    let handler_dir = repo_root.join("src/backend/http/taxonomy_routes/account_handlers");
+    let mut handler_sources =
+        vec![fs::read_to_string(handler_facade).expect("account handler facade is readable")];
+    for entry in fs::read_dir(handler_dir).expect("account handler directory is readable") {
+        let path = entry.expect("account handler entry is readable").path();
+        if path.extension().and_then(|value| value.to_str()) == Some("rs") {
+            handler_sources.push(
+                fs::read_to_string(&path)
+                    .unwrap_or_else(|error| panic!("{} is readable: {error}", path.display())),
+            );
+        }
+    }
+    let handler_source = handler_sources.join("\n");
+    for forbidden in [
+        "sqlx::",
+        ".begin().await",
+        "UPDATE bills",
+        "DELETE FROM bill_tags",
+    ] {
+        assert!(
+            !handler_source.contains(forbidden),
+            "account HTTP handlers must delegate PostgreSQL ownership to the DB repository: {forbidden}"
+        );
+    }
+
+    let repository = fs::read_to_string(
+        repo_root.join("src/backend/db/taxonomy/postgres_reads/account_transactions.rs"),
+    )
+    .expect("account transaction repository is readable");
+    for required in [
+        "pub async fn move_all_postgres_account_transactions",
+        "pub async fn clear_postgres_account_transactions",
+    ] {
+        assert!(
+            repository.contains(required),
+            "DB repository keeps the concrete account transaction mutation entry: {required}"
+        );
+    }
+}
+
+#[test]
 fn governance_tests_verified_paths_exist() {
     let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
 

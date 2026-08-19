@@ -18,7 +18,10 @@ use crate::{
     },
     taxonomy::{
         account_rules::AccountRuleRecord,
-        accounts::{AccountDisplayOrder, AccountRecord},
+        accounts::{
+            AccountDisplayOrder, AccountRecord, AccountTransactionsClearResult,
+            AccountTransactionsMoveResult,
+        },
         categories::{CategoryRecord, CategoryStatistic},
         category_rules::CategoryRuleRecord,
         tags::{TagDisplayOrder, TagRecord},
@@ -28,6 +31,7 @@ use crate::{
 };
 
 include!("postgres_reads/accounts.rs");
+include!("postgres_reads/account_transactions.rs");
 include!("postgres_reads/categories.rs");
 include!("postgres_reads/category_rules.rs");
 include!("postgres_reads/learning_rules.rs");

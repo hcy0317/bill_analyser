@@ -7,4 +7,3 @@ include!("account_handlers/display_order.rs");
 include!("account_handlers/balance_sync.rs");
 include!("account_handlers/move_transactions.rs");
 include!("account_handlers/clear_transactions.rs");
-include!("account_handlers/helpers.rs");
