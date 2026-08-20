@@ -38,7 +38,7 @@ async fn move_account_transactions_handler(
 
     let password_valid = match verify_sensitive_account_operation_password_postgres(
         runtime.pool(),
-        user_id_value,
+        user_id,
         password.trim(),
     )
     .await
@@ -50,7 +50,7 @@ async fn move_account_transactions_handler(
         create_account_audit_log_best_effort_postgres(
             runtime.pool(),
             user_id_value,
-            AccountAuditLogDraft {
+            AccountAuditEventDraft {
                 operation_type: "move_transactions",
                 target_id: account_id,
                 details: json!({
@@ -82,7 +82,7 @@ async fn move_account_transactions_handler(
             create_account_audit_log_best_effort_postgres(
                 runtime.pool(),
                 user_id_value,
-                AccountAuditLogDraft {
+                AccountAuditEventDraft {
                     operation_type: "move_transactions",
                     target_id: account_id,
                     details: json!({
@@ -111,7 +111,7 @@ async fn move_account_transactions_handler(
             create_account_audit_log_best_effort_postgres(
                 runtime.pool(),
                 user_id_value,
-                AccountAuditLogDraft {
+                AccountAuditEventDraft {
                     operation_type: "move_transactions",
                     target_id: account_id,
                     details: json!({

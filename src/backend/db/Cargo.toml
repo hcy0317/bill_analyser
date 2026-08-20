@@ -107,6 +107,10 @@ name = "bills_postgres"
 path = "../../../tests/backend/db/bills_postgres.rs"
 
 [[test]]
+name = "account_audit_postgres"
+path = "../../../tests/backend/db/account_audit_postgres.rs"
+
+[[test]]
 name = "postgres_embedded_migrations"
 path = "../../../tests/backend/db/postgres_embedded_migrations.rs"
 

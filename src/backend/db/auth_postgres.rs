@@ -461,8 +461,11 @@ fn json_value_to_setting_string(value: &Value) -> String {
 fn json_setting_string(value: &Value) -> Option<String> {
     match value {
         Value::String(text) => Some(text.clone()),
-        Value::Null => None,
-        other => Some(other.to_string()),
+        Value::Object(object) => object
+            .get("value")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned),
+        _ => None,
     }
 }
 

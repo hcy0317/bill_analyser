@@ -1,3 +1,15 @@
+#[derive(Debug, Clone, PartialEq)]
+pub struct AccountAuditEventDraft {
+    pub operation_type: &'static str,
+    pub target_id: i64,
+    pub details: Value,
+    pub affected_count: i64,
+    pub status: &'static str,
+    pub error_message: Option<String>,
+    pub ip_address: String,
+    pub user_agent: String,
+}
+
 #[tracing::instrument(level = "debug", skip_all)]
 // 中文说明：把一个账户在账单表中的所有账户引用迁移到目标账户，覆盖普通、转账和投资相关字段。
 pub async fn move_all_postgres_account_transactions(
@@ -119,6 +131,39 @@ pub async fn clear_postgres_account_transactions(
         message: "Transactions deleted successfully".to_string(),
         deleted_count: affected,
     })
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+/// 中文说明：写入账户迁移或清理审计事件；是否忽略写入失败由调用方决定。
+pub async fn create_postgres_account_audit_event(
+    pool: &PostgresPool,
+    user_id: i64,
+    draft: AccountAuditEventDraft,
+) -> DbResult<i64> {
+    let row = sqlx::query(
+        r#"
+        INSERT INTO business_audit_events (
+            user_id, entity_type, entity_id, action, actor,
+            before_payload, after_payload, metadata
+        )
+        VALUES ($1, 'account', $2, $3, 'runtime', '{}'::jsonb, '{}'::jsonb, $4)
+        RETURNING id
+        "#,
+    )
+    .bind(user_id)
+    .bind(draft.target_id.to_string())
+    .bind(draft.operation_type)
+    .bind(json!({
+        "details": draft.details,
+        "affected_count": draft.affected_count,
+        "status": draft.status,
+        "error_message": draft.error_message,
+        "ip_address": draft.ip_address,
+        "user_agent": draft.user_agent,
+    }))
+    .fetch_one(pool)
+    .await?;
+    row.try_get("id").map_err(Into::into)
 }
 
 async fn postgres_account_exists(

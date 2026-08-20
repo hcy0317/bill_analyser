@@ -90,6 +90,8 @@ fn account_transaction_mutations_keep_sql_and_transactions_out_of_http_handlers(
     let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
     let handler_facade = repo_root.join("src/backend/http/taxonomy_routes/account_handlers.rs");
     let handler_dir = repo_root.join("src/backend/http/taxonomy_routes/account_handlers");
+    let audit_helpers =
+        repo_root.join("src/backend/http/taxonomy_routes/audit_and_rules_helpers.rs");
     let mut handler_sources =
         vec![fs::read_to_string(handler_facade).expect("account handler facade is readable")];
     for entry in fs::read_dir(handler_dir).expect("account handler directory is readable") {
@@ -114,6 +116,20 @@ fn account_transaction_mutations_keep_sql_and_transactions_out_of_http_handlers(
         );
     }
 
+    let audit_helper_source =
+        fs::read_to_string(audit_helpers).expect("account audit helper is readable");
+    for forbidden in [
+        "sqlx::",
+        "SELECT password_hash FROM users",
+        "SELECT value FROM settings",
+        "INSERT INTO business_audit_events",
+    ] {
+        assert!(
+            !audit_helper_source.contains(forbidden),
+            "account security and audit SQL must be owned by DB repositories: {forbidden}"
+        );
+    }
+
     let repository = fs::read_to_string(
         repo_root.join("src/backend/db/taxonomy/postgres_reads/account_transactions.rs"),
     )
@@ -121,6 +137,7 @@ fn account_transaction_mutations_keep_sql_and_transactions_out_of_http_handlers(
     for required in [
         "pub async fn move_all_postgres_account_transactions",
         "pub async fn clear_postgres_account_transactions",
+        "pub async fn create_postgres_account_audit_event",
     ] {
         assert!(
             repository.contains(required),

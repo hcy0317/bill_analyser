@@ -2,36 +2,24 @@
 // 维护重点：handler 只编排请求到 core/db 的调用，复杂 SQL、事务和跨表规则应下沉到 repository 或业务合同层。
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
-struct AccountAuditLogDraft {
-    operation_type: &'static str,
-    target_id: i64,
-    details: Value,
-    affected_count: i64,
-    status: &'static str,
-    error_message: Option<String>,
-    ip_address: String,
-    user_agent: String,
-}
-
 #[tracing::instrument(level = "debug", skip_all)]
 /// 校验敏感账户操作密码，按用户密码、环境变量、旧 settings 密码的顺序兼容历史配置。
 async fn verify_sensitive_account_operation_password_postgres(
     pool: &PostgresPool,
-    user_id: i64,
+    user_id: UserId,
     password: &str,
 ) -> bill_analyser_db::DbResult<bool> {
     if password.is_empty() {
         return Ok(false);
     }
 
-    let password_hash: Option<String> =
-        sqlx::query_scalar("SELECT password_hash FROM users WHERE id = $1")
-            .bind(user_id)
-            .fetch_optional(pool)
-            .await?;
-    if password_hash
-        .filter(|value| !value.is_empty())
-        .is_some_and(|hash| bcrypt::verify(password, &hash).unwrap_or(false))
+    let current_password_matches = get_postgres_login_user_by_id(pool, user_id)
+        .await?
+        .is_some_and(|user| {
+            !user.password_hash.is_empty()
+                && bcrypt::verify(password, &user.password_hash).unwrap_or(false)
+        });
+    if current_password_matches
     {
         return Ok(true);
     }
@@ -43,17 +31,18 @@ async fn verify_sensitive_account_operation_password_postgres(
         return Ok(password == env_password);
     }
 
-    let stored_password: Option<Value> =
-        sqlx::query_scalar("SELECT value FROM settings WHERE user_id = $1 AND key = $2")
-            .bind(user_id)
-            .bind("operation_password")
-            .fetch_optional(pool)
-            .await?;
-    let stored_password = stored_password.as_ref().and_then(json_setting_string);
-    Ok(match stored_password.as_deref().filter(|value| !value.is_empty()) {
-        Some(value) => password == value,
-        None => true,
-    })
+    let stored_password = get_postgres_operation_password(pool, user_id).await?;
+    Ok(stored_account_operation_password_matches(
+        password,
+        stored_password.as_deref(),
+    ))
+}
+
+fn stored_account_operation_password_matches(password: &str, stored: Option<&str>) -> bool {
+    stored
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .is_some_and(|value| password == value)
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -61,30 +50,9 @@ async fn verify_sensitive_account_operation_password_postgres(
 async fn create_account_audit_log_best_effort_postgres(
     pool: &PostgresPool,
     user_id: i64,
-    draft: AccountAuditLogDraft,
+    draft: AccountAuditEventDraft,
 ) {
-    let _ = sqlx::query(
-        r#"
-        INSERT INTO business_audit_events (
-            user_id, entity_type, entity_id, action, actor,
-            before_payload, after_payload, metadata
-        )
-        VALUES ($1, 'account', $2, $3, 'runtime', '{}'::jsonb, '{}'::jsonb, $4)
-        "#,
-    )
-    .bind(user_id)
-    .bind(draft.target_id.to_string())
-    .bind(draft.operation_type)
-    .bind(json!({
-        "details": draft.details,
-        "affected_count": draft.affected_count,
-        "status": draft.status,
-        "error_message": draft.error_message,
-        "ip_address": draft.ip_address,
-        "user_agent": draft.user_agent,
-    }))
-    .execute(pool)
-    .await;
+    let _ = create_postgres_account_audit_event(pool, user_id, draft).await;
 }
 
 /// 从代理链优先提取审计 IP，缺失时返回空字符串避免伪造默认值。
@@ -118,18 +86,6 @@ fn header_string(headers: &HeaderMap, name: &str) -> String {
         .to_string()
 }
 
-/// 兼容 settings 表中字符串或 `{ value }` 形式的旧操作密码配置。
-fn json_setting_string(value: &Value) -> Option<String> {
-    match value {
-        Value::String(text) => Some(text.clone()),
-        Value::Object(object) => object
-            .get("value")
-            .and_then(Value::as_str)
-            .map(ToOwned::to_owned),
-        _ => None,
-    }
-}
-
 fn optional_json_body(body: Bytes) -> Option<Value> {
     if body.is_empty() {
         return None;
@@ -139,6 +95,27 @@ fn optional_json_body(body: Bytes) -> Option<Value> {
 
 fn value_as_i64_or(value: Option<&Value>, default: i64) -> i64 {
     value.and_then(value_as_i64).unwrap_or(default)
+}
+
+#[cfg(test)]
+mod sensitive_account_operation_password_tests {
+    use super::stored_account_operation_password_matches;
+
+    #[test]
+    fn missing_or_blank_operation_password_fails_closed() {
+        assert!(!stored_account_operation_password_matches(
+            "wrong-current-password",
+            None
+        ));
+        assert!(!stored_account_operation_password_matches(
+            "wrong-current-password",
+            Some("  ")
+        ));
+        assert!(stored_account_operation_password_matches(
+            "legacy-secret",
+            Some("legacy-secret")
+        ));
+    }
 }
 
 /// 解析分类规则列表查询的 enabled_only 默认值，默认只返回启用规则。

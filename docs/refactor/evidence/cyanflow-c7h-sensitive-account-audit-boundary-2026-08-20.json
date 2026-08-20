@@ -1,0 +1,166 @@
+{
+  "schema_version": "cyanflow-slice-evidence.v1",
+  "slice": "C7h",
+  "work_id": "bill-analyser-cyanflow-c7h-sensitive-account-audit-boundary-20260820",
+  "base_commit": "eee7154cd8c07e291460e80b280c5aff26a611f7",
+  "branch": "codex/c7h-sensitive-account-audit-boundary",
+  "objective": "Move sensitive account-operation password reads and account audit writes out of taxonomy HTTP SQL helpers, while correcting the missing-operation-password fallback to fail closed.",
+  "architecture": {
+    "read_owner": "src/backend/db/auth_postgres/audit_events.rs",
+    "write_owner": "src/backend/db/taxonomy/postgres_reads/account_transactions.rs",
+    "public_facade": "bill_analyser_db",
+    "production_callers": [
+      "src/backend/http/taxonomy_routes/account_handlers/clear_transactions.rs",
+      "src/backend/http/taxonomy_routes/account_handlers/move_transactions.rs"
+    ],
+    "http_owned_policy": [
+      "bcrypt verification",
+      "current password -> configured environment operation password -> stored operation password precedence",
+      "header, IP, and user-agent projection",
+      "existing HTTP response mapping",
+      "best-effort account audit behavior"
+    ],
+    "unchanged_boundaries": [
+      "user-scoped account move and clear mutations",
+      "repository transaction ownership",
+      "post-commit independent account balance synchronization",
+      "success audit only after successful balance synchronization",
+      "REST, schema, configuration, session, and cents contracts"
+    ],
+    "intentional_behavior_change": "A wrong current password with no configured environment or stored operation password now returns 401 instead of accepting any non-empty password.",
+    "rejected_expansion": [
+      "repository trait",
+      "UnitOfWork or service layer",
+      "generic audit repository",
+      "password source aggregate",
+      "cache, compatibility writer, second writer, or new transaction"
+    ]
+  },
+  "tdd": {
+    "red": [
+      {
+        "command": "cargo test -p bill-analyser-core --test runtime_governance_contracts account_transaction_mutations_keep_sql_and_transactions_out_of_http_handlers -- --exact --nocapture",
+        "result": "failed before migration because taxonomy HTTP still contained SQLx-owned auth and audit SQL"
+      },
+      {
+        "command": "cargo test -p bill-analyser-db --test account_audit_postgres --no-run",
+        "result": "failed before implementation because AccountAuditEventDraft and create_postgres_account_audit_event were unresolved"
+      },
+      {
+        "command": "cargo test -p bill-analyser-http taxonomy_routes::sensitive_account_operation_password_tests::missing_or_blank_operation_password_fails_closed --no-run",
+        "result": "failed before implementation because the fail-closed policy helper did not exist"
+      },
+      {
+        "command": "cargo test -p bill-analyser-db --test account_audit_postgres operation_password_read_supports_only_documented_legacy_shapes -- --exact --nocapture",
+        "result": "failed before parser correction because the legacy object was serialized instead of projecting its value field"
+      },
+      {
+        "command": "$env:BILL_ANALYSER_OPERATION_PASSWORD='ci-test-operation-password'; cargo test -p bill-analyser-http --test account_sensitive_operations_contract -- --nocapture",
+        "result": "failed on exact-head Gitea run 16256 / backend job 19424 because both contracts rejected the runner's configured operation-password environment before exercising the handler"
+      }
+    ],
+    "green": [
+      {
+        "command": "cargo test -p bill-analyser-db --test account_audit_postgres",
+        "discovered": 2,
+        "executed": 2,
+        "failed": 0,
+        "skipped": 0,
+        "database": "fresh isolated PostgreSQL databases"
+      },
+      {
+        "command": "cargo test -p bill-analyser-http --test account_sensitive_operations_contract",
+        "discovered": 2,
+        "executed": 2,
+        "failed": 0,
+        "skipped": 0,
+        "database": "fresh isolated PostgreSQL databases"
+      },
+      {
+        "command": "$env:BILL_ANALYSER_OPERATION_PASSWORD='ci-test-operation-password'; cargo test -p bill-analyser-http --test account_sensitive_operations_contract -- --nocapture",
+        "discovered": 2,
+        "executed": 2,
+        "isolated_child_executions": 2,
+        "failed": 0,
+        "skipped": 0,
+        "result": "the parent harness preserved the CI environment while each contract re-executed in an exact child process with only BILL_ANALYSER_OPERATION_PASSWORD removed"
+      },
+      {
+        "command": "cargo test -p bill-analyser-core --test runtime_governance_contracts account_transaction_mutations_keep_sql_and_transactions_out_of_http_handlers -- --exact --nocapture",
+        "discovered": 1,
+        "executed": 1,
+        "failed": 0,
+        "skipped": 0
+      },
+      {
+        "command": "cargo test -p bill-analyser-http taxonomy_routes::sensitive_account_operation_password_tests::missing_or_blank_operation_password_fails_closed -- --exact --nocapture",
+        "discovered": 1,
+        "executed": 1,
+        "failed": 0,
+        "skipped": 0
+      },
+      {
+        "command": "cargo test -p bill-analyser-http auth_routes::sensitive_auth_contract_tests::wrong_password_does_not_pass_when_operation_password_is_unset -- --exact --nocapture",
+        "discovered": 1,
+        "executed": 1,
+        "failed": 0,
+        "skipped": 0
+      }
+    ]
+  },
+  "verification": {
+    "cargo_fmt_check": "passed",
+    "cargo_clippy_workspace_all_targets_deny_warnings": "passed",
+    "git_diff_check": "passed",
+    "cargo_test_workspace": {
+      "result": "passed on a fresh PostgreSQL database using the live container port with the CI operation-password environment configured",
+      "discovered": 846,
+      "executed": 846,
+      "failed": 0,
+      "skipped": 0
+    },
+    "cargo_llvm_cov_workspace": {
+      "command": "cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 35",
+      "result": "passed on a fresh PostgreSQL database with the CI operation-password environment configured",
+      "executable_lines": 80931,
+      "covered_lines": 54554,
+      "line_coverage_percent": 67.41
+    },
+    "changed_line_coverage": {
+      "command": "node scripts/governance-normalizers.mjs changed-coverage --lcov workspace.lcov --diff .git/ai/c7h-rust-changed.diff --threshold 90 --require-matched-files --require-executable-lines --allow-no-business-files",
+      "business_files": 7,
+      "matched_coverage_files": 3,
+      "executable_changed_lines": 36,
+      "covered_changed_lines": 36,
+      "coverage_percent": 100,
+      "strict_threshold_percent": 90,
+      "status": "passed"
+    },
+    "ci_environment_compatibility": {
+      "initial_exact_head_run_id": 16256,
+      "backend_job_id": 19424,
+      "initial_failure": "the integration-test guard required BILL_ANALYSER_OPERATION_PASSWORD to be globally unset even though the canonical CI workflow intentionally configures it",
+      "remediation": "rerun only the two environment-sensitive contracts in exact child test processes with that one inherited variable removed; production password precedence remains unchanged",
+      "local_revalidation": "focused contracts, cargo test --workspace, and cargo llvm-cov all passed with the canonical CI operation-password environment configured"
+    },
+    "review": {
+      "base_ref": "eee7154cd8c07e291460e80b280c5aff26a611f7",
+      "head_ref": "working tree on codex/c7h-sensitive-account-audit-boundary",
+      "standards_axis": "passed with no findings",
+      "spec_axis": "passed with no findings",
+      "security_axis": "passed: parameterized SQL, authentication before destructive mutation, one trusted user scope, skip_all password redaction, generic database errors, and best-effort audit ordering are preserved",
+      "residual_risk": "The environment operation-password precedence and best-effort audit failure policy are intentionally preserved compatibility contracts; audit write availability is therefore observable only through repository errors and database records."
+    }
+  },
+  "environment_diagnostics": [
+    "An initial workspace run against the long-lived development database failed closed on migration checksum VersionMismatch(25); the final gate used a fresh database and did not migrate or clear the long-lived database.",
+    "A discarded fresh-database attempt used stale host port 55432 and timed out; the final gates derived the live Docker port 54321 before execution.",
+    "Exact-head run 16256 restored the Rust toolchain and Cargo caches but the backend coverage job still exceeded ten minutes; this is tracked as separate CI test-topology debt and was not mixed into C7h."
+  ],
+  "environment_hygiene": {
+    "long_lived_development_database": "not migrated, cleared, or used by the passing full gates",
+    "fresh_test_databases_removed": true,
+    "workspace_lcov_removed_after_measurement": true,
+    "changed_diff_artifact_removed_after_measurement": true
+  }
+}

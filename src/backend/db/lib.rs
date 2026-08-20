@@ -244,12 +244,14 @@ pub use statistics::{
 pub use taxonomy::account_rules::AccountRuleRecord;
 pub use taxonomy::category_rules::CategoryRuleRecord;
 pub use taxonomy::postgres_reads::{
-    create_postgres_account, create_postgres_category, create_postgres_category_rule,
-    delete_postgres_account, delete_postgres_categories_by_main_category, delete_postgres_category,
+    create_postgres_account, create_postgres_account_audit_event, create_postgres_category,
+    create_postgres_category_rule, delete_postgres_account,
+    delete_postgres_categories_by_main_category, delete_postgres_category,
     get_postgres_account_by_id, get_postgres_category_by_id, get_postgres_category_by_name,
     get_postgres_sub_accounts, list_postgres_category_rules, update_postgres_account,
     update_postgres_account_display_orders, update_postgres_category,
     update_postgres_category_display_order, update_postgres_main_category_name,
+    AccountAuditEventDraft,
 };
 pub use user_data::{
     clear_postgres_user_data, clear_postgres_user_transactions,

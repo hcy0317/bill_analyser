@@ -76,6 +76,10 @@ name = "runtime_route_ownership_contract"
 path = "../../../tests/backend/http/runtime_route_ownership_contract.rs"
 
 [[test]]
+name = "account_sensitive_operations_contract"
+path = "../../../tests/backend/http/account_sensitive_operations_contract.rs"
+
+[[test]]
 name = "bill_route_input_contract"
 path = "../../../tests/backend/http/bill_route_input_contract.rs"
 
