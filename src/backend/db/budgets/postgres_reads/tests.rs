@@ -58,6 +58,45 @@ mod tests {
         assert!(amount_cents_from_record(&BudgetRecord::new(), "amount_cents").is_err());
     }
 
+    #[test]
+    fn budget_period_group_keys_require_category_and_start_date() {
+        let mut budget = BudgetRecord::new();
+        budget.insert("category".to_string(), json!("餐饮"));
+        budget.insert("sub_category".to_string(), json!("午餐"));
+
+        assert!(build_postgres_budget_period_group_key(
+            &budget,
+            BudgetPeriodKind::Quarterly,
+            "",
+            7,
+        )
+        .is_none());
+
+        budget.insert("category".to_string(), json!("   "));
+        assert!(build_postgres_budget_period_group_key(
+            &budget,
+            BudgetPeriodKind::Yearly,
+            "2026-01-01",
+            7,
+        )
+        .is_none());
+
+        budget.insert("category".to_string(), json!("餐饮"));
+        let key = build_postgres_budget_period_group_key(
+            &budget,
+            BudgetPeriodKind::Quarterly,
+            "2026-04-01",
+            7,
+        )
+        .expect("complete group key");
+        assert_eq!(key.category, "餐饮");
+        assert_eq!(key.sub_category, "午餐");
+        assert_eq!(key.period_kind, BudgetPeriodKind::Quarterly);
+        assert_eq!(key.period_type(), "quarterly");
+        assert_eq!(key.start_date, "2026-04-01");
+        assert_eq!(key.user_id, 7);
+    }
+
     #[tokio::test]
     async fn postgres_row_projectors_emit_explicit_cents_when_database_available(
     ) -> Result<(), Box<dyn Error>> {

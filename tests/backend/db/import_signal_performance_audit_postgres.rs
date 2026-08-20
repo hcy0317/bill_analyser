@@ -139,9 +139,9 @@ async fn performance_audit_measures_real_query_paths_and_rolls_back_temporary_wr
         )
         .await?;
 
-        assert_eq!(report.expected_migration_version, 27);
-        assert_eq!(report.actual_migration_version, 27);
-        assert_eq!(report.migration_count, 27);
+        assert_eq!(report.expected_migration_version, 28);
+        assert_eq!(report.actual_migration_version, 28);
+        assert_eq!(report.migration_count, 28);
         assert!(!report.snapshot_token.is_empty());
         assert_eq!(report.corpus_sessions, 1);
         assert_eq!(report.query_cases.len(), 7);

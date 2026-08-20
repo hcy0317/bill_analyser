@@ -3,26 +3,16 @@ async fn synchronize_postgres_budget_period_hierarchy(
     budget: &BudgetRecord,
     user_id: i64,
 ) -> DbResult<()> {
-    let period_type = record_text(budget, "period_type");
-    let parent_period_types = match period_type.as_str() {
-        "monthly" => &["quarterly", "yearly"][..],
-        "quarterly" => &["yearly"][..],
-        _ => return Ok(()),
-    };
-    for parent_period_type in parent_period_types {
-        let Some(parent_period) = resolve_parent_budget_period(
-            &period_type,
-            &record_text(budget, "start_date"),
-            parent_period_type,
-        )
-        .map_err(DbError::InvalidOperation)?
-        else {
-            continue;
-        };
+    let period_kind = budget_period_kind(budget)?;
+    let child_start = parse_date_prefix(&record_text(budget, "start_date"))?;
+    for &parent_period_kind in period_kind.rollup_parent_kinds() {
+        let parent_period = parent_period_kind
+            .containing(child_start)
+            .map_err(DbError::InvalidOperation)?;
         let mut reference_data = budget.clone();
         reference_data.insert(
             "period_type".to_string(),
-            Value::String((*parent_period_type).to_string()),
+            Value::String(parent_period_kind.as_str().to_string()),
         );
         reference_data.insert(
             "start_date".to_string(),
@@ -36,7 +26,7 @@ async fn synchronize_postgres_budget_period_hierarchy(
             tx,
             build_postgres_budget_period_group_key(
                 budget,
-                parent_period_type,
+                parent_period_kind,
                 &parent_period.start_date,
                 user_id,
             ),
@@ -46,7 +36,7 @@ async fn synchronize_postgres_budget_period_hierarchy(
         .await?;
         synchronize_postgres_primary_budget_for_group(
             tx,
-            build_postgres_budget_group_key(&reference_data, user_id),
+            build_postgres_budget_group_key(&reference_data, user_id)?,
             Some(&reference_data),
         )
         .await?;
@@ -74,6 +64,7 @@ async fn synchronize_postgres_period_parent_budget_for_group(
     if let Some(parent_budget) = parent_budget {
         update_postgres_parent_budget_floor(tx, &parent_budget, child_total, period_end).await?;
     } else {
+        let period_type = group_key.period_type().to_string();
         let mut payload = reference_data.cloned().unwrap_or_default();
         payload.insert("category".to_string(), Value::String(group_key.category));
         payload.insert(
@@ -82,7 +73,7 @@ async fn synchronize_postgres_period_parent_budget_for_group(
         );
         payload.insert(
             "period_type".to_string(),
-            Value::String(group_key.period_type),
+            Value::String(period_type),
         );
         payload.insert("amount_cents".to_string(), json_i64(child_total));
         payload.insert(
@@ -128,6 +119,7 @@ async fn synchronize_postgres_primary_budget_for_group(
         update_postgres_parent_budget_floor(tx, &primary_budget, sub_total, &expected_end_date)
             .await?;
     } else {
+        let period_type = group_key.period_type().to_string();
         let reference = reference_data.cloned().unwrap_or_default();
         let mut payload = BudgetRecord::new();
         payload.insert(
@@ -141,7 +133,7 @@ async fn synchronize_postgres_primary_budget_for_group(
         payload.insert("sub_category".to_string(), Value::String(String::new()));
         payload.insert(
             "period_type".to_string(),
-            Value::String(group_key.period_type),
+            Value::String(period_type),
         );
         payload.insert("amount_cents".to_string(), json_i64(sub_total));
         payload.insert(
@@ -191,7 +183,7 @@ async fn get_postgres_primary_category_budget(
         "#,
     )
     .bind(&group_key.category)
-    .bind(&group_key.period_type)
+    .bind(group_key.period_type())
     .bind(parse_date_prefix(&group_key.start_date)?)
     .bind(group_key.user_id)
     .fetch_optional(&mut **tx)
@@ -221,7 +213,7 @@ async fn get_postgres_period_parent_budget(
             "#,
         )
         .bind(&group_key.category)
-        .bind(&group_key.period_type)
+        .bind(group_key.period_type())
         .bind(parse_date_prefix(&group_key.start_date)?)
         .bind(group_key.user_id)
         .fetch_optional(&mut **tx)
@@ -244,7 +236,7 @@ async fn get_postgres_period_parent_budget(
         )
         .bind(&group_key.category)
         .bind(&group_key.sub_category)
-        .bind(&group_key.period_type)
+        .bind(group_key.period_type())
         .bind(parse_date_prefix(&group_key.start_date)?)
         .bind(group_key.user_id)
         .fetch_optional(&mut **tx)
@@ -270,7 +262,7 @@ async fn get_postgres_sub_category_budgets_total(
         "#,
     )
     .bind(&group_key.category)
-    .bind(&group_key.period_type)
+    .bind(group_key.period_type())
     .bind(parse_date_prefix(&group_key.start_date)?)
     .bind(group_key.user_id)
     .fetch_one(&mut **tx)
@@ -283,31 +275,37 @@ async fn get_postgres_period_child_budgets_total(
     group_key: &BudgetPeriodGroupKey,
     period_end: &str,
 ) -> DbResult<i64> {
-    match group_key.period_type.as_str() {
-        "quarterly" => {
-            sum_postgres_budget_period_children(tx, group_key, "monthly", period_end).await
+    match group_key.period_kind {
+        BudgetPeriodKind::Quarterly => {
+            sum_postgres_budget_period_children(
+                tx,
+                group_key,
+                BudgetPeriodKind::Monthly,
+                period_end,
+            )
+            .await
         }
-        "yearly" => sum_postgres_yearly_budget_period_children(tx, group_key, period_end).await,
-        _ => Ok(0),
+        BudgetPeriodKind::Yearly => {
+            sum_postgres_yearly_budget_period_children(tx, group_key, period_end).await
+        }
+        BudgetPeriodKind::Daily | BudgetPeriodKind::Weekly | BudgetPeriodKind::Monthly => Ok(0),
     }
 }
 
 async fn sum_postgres_budget_period_children(
     tx: &mut Transaction<'_, Postgres>,
     group_key: &BudgetPeriodGroupKey,
-    child_period_type: &str,
+    child_period_kind: BudgetPeriodKind,
     period_end: &str,
 ) -> DbResult<i64> {
-    Ok(get_postgres_budget_period_child_amounts_by_start(
+    let amounts = get_postgres_budget_period_child_amounts_by_start(
         tx,
         group_key,
-        child_period_type,
+        child_period_kind,
         period_end,
     )
-    .await?
-    .values()
-    .copied()
-    .sum())
+    .await?;
+    Ok(amounts.values().copied().sum())
 }
 
 async fn sum_postgres_yearly_budget_period_children(
@@ -315,12 +313,20 @@ async fn sum_postgres_yearly_budget_period_children(
     group_key: &BudgetPeriodGroupKey,
     period_end: &str,
 ) -> DbResult<i64> {
-    let quarterly_amounts =
-        get_postgres_budget_period_child_amounts_by_start(tx, group_key, "quarterly", period_end)
-            .await?;
-    let monthly_amounts =
-        get_postgres_budget_period_child_amounts_by_start(tx, group_key, "monthly", period_end)
-            .await?;
+    let quarterly_amounts = get_postgres_budget_period_child_amounts_by_start(
+        tx,
+        group_key,
+        BudgetPeriodKind::Quarterly,
+        period_end,
+    )
+    .await?;
+    let monthly_amounts = get_postgres_budget_period_child_amounts_by_start(
+        tx,
+        group_key,
+        BudgetPeriodKind::Monthly,
+        period_end,
+    )
+    .await?;
     let mut monthly_totals_by_quarter: BTreeMap<u32, i64> = BTreeMap::new();
     for (monthly_start, amount) in monthly_amounts {
         let Ok(date) =
@@ -361,7 +367,7 @@ async fn sum_postgres_yearly_budget_period_children(
 async fn get_postgres_budget_period_child_amounts_by_start(
     tx: &mut Transaction<'_, Postgres>,
     group_key: &BudgetPeriodGroupKey,
-    child_period_type: &str,
+    child_period_kind: BudgetPeriodKind,
     period_end: &str,
 ) -> DbResult<BTreeMap<String, i64>> {
     let rows = if group_key.sub_category.is_empty() {
@@ -378,7 +384,7 @@ async fn get_postgres_budget_period_child_amounts_by_start(
             "#,
         )
         .bind(&group_key.category)
-        .bind(child_period_type)
+        .bind(child_period_kind.as_str())
         .bind(parse_date_prefix(&group_key.start_date)?)
         .bind(parse_date_prefix(period_end)?)
         .bind(group_key.user_id)
@@ -399,7 +405,7 @@ async fn get_postgres_budget_period_child_amounts_by_start(
         )
         .bind(&group_key.category)
         .bind(&group_key.sub_category)
-        .bind(child_period_type)
+        .bind(child_period_kind.as_str())
         .bind(parse_date_prefix(&group_key.start_date)?)
         .bind(parse_date_prefix(period_end)?)
         .bind(group_key.user_id)
@@ -420,7 +426,7 @@ async fn get_postgres_budgets_for_sync_group_on_tx(
     tx: &mut Transaction<'_, Postgres>,
     user_id: i64,
     category: &str,
-    period_type: &str,
+    period_kind: BudgetPeriodKind,
     start_date: &str,
 ) -> DbResult<Vec<BudgetRecord>> {
     let rows = sqlx::query(
@@ -436,7 +442,7 @@ async fn get_postgres_budgets_for_sync_group_on_tx(
         "#,
     )
     .bind(category)
-    .bind(period_type)
+    .bind(period_kind.as_str())
     .bind(parse_date_prefix(start_date)?)
     .bind(user_id)
     .fetch_all(&mut **tx)
@@ -508,42 +514,50 @@ async fn update_postgres_parent_budget_floor(
 fn collect_postgres_budget_sync_group_keys<'a>(
     user_id: i64,
     budgets: impl IntoIterator<Item = &'a BudgetRecord>,
-) -> BTreeSet<BudgetGroupKey> {
+) -> DbResult<BTreeSet<BudgetGroupKey>> {
     budgets
         .into_iter()
-        .filter_map(|budget| build_postgres_budget_group_key(budget, user_id))
-        .collect()
+        .map(|budget| build_postgres_budget_group_key(budget, user_id))
+        .collect::<DbResult<Vec<_>>>()
+        .map(|keys| keys.into_iter().flatten().collect())
 }
 
-fn build_postgres_budget_group_key(budget: &BudgetRecord, user_id: i64) -> Option<BudgetGroupKey> {
+fn budget_period_kind(budget: &BudgetRecord) -> DbResult<BudgetPeriodKind> {
+    BudgetPeriodKind::parse(record_text(budget, "period_type").trim())
+        .map_err(DbError::InvalidOperation)
+}
+
+fn build_postgres_budget_group_key(
+    budget: &BudgetRecord,
+    user_id: i64,
+) -> DbResult<Option<BudgetGroupKey>> {
     let category = record_text(budget, "category");
-    let period_type = record_text(budget, "period_type");
     let start_date = record_text(budget, "start_date");
-    if category.trim().is_empty() || period_type.trim().is_empty() || start_date.trim().is_empty() {
-        return None;
+    if category.trim().is_empty() || start_date.trim().is_empty() {
+        return Ok(None);
     }
-    Some(BudgetGroupKey {
+    Ok(Some(BudgetGroupKey {
         category,
-        period_type,
+        period_kind: budget_period_kind(budget)?,
         start_date,
         user_id,
-    })
+    }))
 }
 
 fn build_postgres_budget_period_group_key(
     budget: &BudgetRecord,
-    period_type: &str,
+    period_kind: BudgetPeriodKind,
     start_date: &str,
     user_id: i64,
 ) -> Option<BudgetPeriodGroupKey> {
     let category = record_text(budget, "category");
-    if category.trim().is_empty() || period_type.trim().is_empty() || start_date.trim().is_empty() {
+    if category.trim().is_empty() || start_date.trim().is_empty() {
         return None;
     }
     Some(BudgetPeriodGroupKey {
         category,
         sub_category: normalize_sub_category(budget.get("sub_category")),
-        period_type: period_type.to_string(),
+        period_kind,
         start_date: start_date.to_string(),
         user_id,
     })

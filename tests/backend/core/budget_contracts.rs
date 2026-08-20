@@ -11,11 +11,11 @@ use bill_analyser_core::budgets::{
     normalize_budget_query_end_date, parse_budget_csv_int_list, parse_budget_json_int_list,
     resolve_budget_category_info, resolve_budget_category_type, resolve_budget_period_range,
     resolve_forecast_budget_amount_cents, resolve_forecast_confidence, resolve_forecast_trend,
-    resolve_parent_budget_period, rollup_parent_amount_cents, rollup_yearly_child_total_cents,
-    select_budget_detail_items, select_budget_summary_items, validate_budget_date_range,
-    validate_budget_period_args, validate_import_budget_item, BudgetForecastItemInput,
-    BudgetHistoryFilterSummaryInput, BudgetPeriodKind, BudgetPeriodScopeInput, BudgetRouteFilters,
-    BUDGET_TYPE_EXPENSE, BUDGET_TYPE_INVESTMENT,
+    rollup_parent_amount_cents, rollup_yearly_child_total_cents, select_budget_detail_items,
+    select_budget_summary_items, validate_budget_date_range, validate_budget_period_args,
+    validate_import_budget_item, BudgetForecastItemInput, BudgetHistoryFilterSummaryInput,
+    BudgetPeriodKind, BudgetPeriodScopeInput, BudgetRouteFilters, BUDGET_TYPE_EXPENSE,
+    BUDGET_TYPE_INVESTMENT,
 };
 use bill_analyser_core::TransactionType;
 use chrono::NaiveDate;
@@ -452,14 +452,24 @@ fn date_helpers_pin_query_end_window_history_and_parent_rollup_semantics() {
     assert_eq!(forecast_window.start_date, "2025-12-01");
     assert_eq!(forecast_window.end_date, "2026-05-31");
 
-    let quarterly_parent = resolve_parent_budget_period("monthly", "2026-05-18", "quarterly")
-        .expect("parent")
+    assert_eq!(
+        BudgetPeriodKind::Monthly.rollup_parent_kinds(),
+        &[BudgetPeriodKind::Quarterly, BudgetPeriodKind::Yearly]
+    );
+    assert_eq!(
+        BudgetPeriodKind::Quarterly.rollup_parent_kinds(),
+        &[BudgetPeriodKind::Yearly]
+    );
+    assert!(BudgetPeriodKind::Weekly.rollup_parent_kinds().is_empty());
+
+    let quarterly_parent = BudgetPeriodKind::Quarterly
+        .containing(date("2026-05-18"))
         .expect("quarterly parent");
     assert_eq!(quarterly_parent.start_date, "2026-04-01");
     assert_eq!(quarterly_parent.end_date, "2026-06-30");
 
-    let yearly_parent = resolve_parent_budget_period("quarterly", "2026-04-01", "yearly")
-        .expect("parent")
+    let yearly_parent = BudgetPeriodKind::Yearly
+        .containing(date("2026-04-01"))
         .expect("yearly parent");
     assert_eq!(yearly_parent.start_date, "2026-01-01");
     assert_eq!(yearly_parent.end_date, "2026-12-31");
@@ -769,10 +779,7 @@ fn history_and_forecast_edge_branches_are_pinned() {
     assert_eq!(BudgetPeriodKind::Daily.bucket_key(sample_day), "2026-05-07");
     assert_eq!(BudgetPeriodKind::Weekly.bucket_key(sample_day), "2026-18");
     assert_eq!(BudgetPeriodKind::Yearly.bucket_key(sample_day), "2026");
-    assert_eq!(
-        resolve_parent_budget_period("daily", "2026-05-07", "monthly").expect("parent"),
-        None
-    );
+    assert_eq!(BudgetPeriodKind::Daily.rollup_parent_kinds(), &[]);
 
     assert!(iter_budget_history_period_ranges(
         BudgetPeriodKind::Monthly,

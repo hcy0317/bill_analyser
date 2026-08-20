@@ -409,4 +409,11 @@ const POSTGRES_MIGRATION_MANIFEST: &[PostgresMigrationDescriptor] = &[
         required_tables: IMPORT_CONFIRM_RECEIPT_EXPAND_TABLES,
         required_indexes: IMPORT_CONFIRM_RECEIPT_EXPAND_INDEXES,
     },
+    PostgresMigrationDescriptor {
+        version: 28,
+        file_name: "0028_budget_period_type_constraint.sql",
+        description: "fail closed unknown budget period types at the PostgreSQL boundary",
+        required_tables: BUDGET_TABLES,
+        required_indexes: BUDGET_INDEXES,
+    },
 ];

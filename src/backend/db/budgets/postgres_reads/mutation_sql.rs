@@ -170,49 +170,14 @@ async fn import_postgres_budget_row_on_tx(
             .map(|row| row.try_get::<i64, _>("id"))
             .transpose()?;
     if let Some(existing_id) = existing_id {
-        sqlx::query(
-            r#"
-            UPDATE budgets SET
-                category = $1,
-                sub_category = $2,
-                period_type = $3,
-                amount_cents = $4,
-                start_date = $5,
-                end_date = $6,
-                alert_threshold = $7,
-                enabled = $8,
-                updated_at = now()
-            WHERE id = $9 AND user_id = $10
-            "#,
-        )
-        .bind(optional_text(budget.get("category")))
-        .bind(normalize_sub_category(budget.get("sub_category")))
-        .bind(optional_text(budget.get("period_type")).unwrap_or_else(|| "monthly".to_string()))
-        .bind(amount_cents_from_record(budget, "amount_cents")?)
-        .bind(required_date(budget, "start_date")?)
-        .bind(optional_date(budget.get("end_date"))?)
-        .bind(i32_value(budget.get("alert_threshold")).unwrap_or(80))
-        .bind(bool_value(budget.get("enabled")).unwrap_or(true))
-        .bind(existing_id)
-        .bind(user_id)
-        .execute(&mut **tx)
-        .await?;
+        let mut update_payload = budget.clone();
+        update_payload.remove("name");
+        update_payload.insert("updated_at".to_string(), Value::Null);
+        update_postgres_budget_on_tx(tx, user_id, existing_id, &update_payload).await?;
         Ok(ImportBudgetRowAction::Updated)
     } else {
         let mut payload = budget.clone();
         payload.insert("name".to_string(), Value::String(name));
-        payload
-            .entry("period_type".to_string())
-            .or_insert_with(|| Value::String("monthly".to_string()));
-        payload
-            .entry("sub_category".to_string())
-            .or_insert_with(|| Value::String(String::new()));
-        payload
-            .entry("alert_threshold".to_string())
-            .or_insert_with(|| json_i64(80));
-        payload
-            .entry("enabled".to_string())
-            .or_insert_with(|| Value::Bool(true));
         insert_postgres_budget_on_tx(tx, user_id, &payload).await?;
         Ok(ImportBudgetRowAction::Created)
     }

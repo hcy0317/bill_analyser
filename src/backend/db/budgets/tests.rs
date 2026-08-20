@@ -73,6 +73,56 @@ mod tests {
     }
 
     #[test]
+    fn budget_write_normalizers_reject_unknown_periods_and_canonicalize_valid_values() {
+        let create = normalize_create_payload(
+            &budget_record([
+                ("category", json!("餐饮")),
+                ("period_type", json!(" monthly ")),
+                ("amount_cents", json!(12_345)),
+                ("start_date", json!("2026-06-01")),
+            ]),
+            "2026-06-12 12:00:00",
+        )
+        .expect("trimmed monthly period");
+        assert_eq!(create.get("period_type"), Some(&json!("monthly")));
+
+        let invalid_create = normalize_create_payload(
+            &budget_record([
+                ("category", json!("餐饮")),
+                ("period_type", json!("fortnight")),
+                ("amount_cents", json!(12_345)),
+                ("start_date", json!("2026-06-01")),
+            ]),
+            "2026-06-12 12:00:00",
+        );
+        assert!(matches!(
+            invalid_create,
+            Err(DbError::InvalidOperation(message))
+                if message == "Invalid period_type: fortnight"
+        ));
+
+        let invalid_update = normalize_update_payload(
+            &BudgetRecord::new(),
+            &budget_record([("period_type", json!("fortnight"))]),
+        );
+        assert!(matches!(
+            invalid_update,
+            Err(DbError::InvalidOperation(message))
+                if message == "Invalid period_type: fortnight"
+        ));
+
+        let missing_update = normalize_update_payload(
+            &BudgetRecord::new(),
+            &budget_record([("period_type", json!("   "))]),
+        );
+        assert!(matches!(
+            missing_update,
+            Err(DbError::InvalidOperation(message))
+                if message == "missing required budget field: period_type"
+        ));
+    }
+
+    #[test]
     fn budget_execution_helpers_use_cents_for_selection_and_output() {
         let lower = budget_record([
             ("id", json!(1)),

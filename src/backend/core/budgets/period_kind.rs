@@ -2,7 +2,7 @@
 // 维护重点：字符串只在 adapter 边界解析一次；下游 read model 只传 typed period。
 // 不变式：weekly 使用周一为首日、首个周一前属于 00 周的 POSIX `%W` 合同。
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum BudgetPeriodKind {
     Daily,
     Weekly,
@@ -30,6 +30,14 @@ impl BudgetPeriodKind {
             Self::Monthly => "monthly",
             Self::Quarterly => "quarterly",
             Self::Yearly => "yearly",
+        }
+    }
+
+    pub const fn rollup_parent_kinds(self) -> &'static [Self] {
+        match self {
+            Self::Monthly => &[Self::Quarterly, Self::Yearly],
+            Self::Quarterly => &[Self::Yearly],
+            Self::Daily | Self::Weekly | Self::Yearly => &[],
         }
     }
 

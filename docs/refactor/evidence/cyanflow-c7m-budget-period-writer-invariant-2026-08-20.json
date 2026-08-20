@@ -1,0 +1,131 @@
+{
+  "schema_version": "cyanflow-slice-evidence.v1",
+  "slice": "C7m",
+  "work_id": "bill-analyser-cyanflow-c7m-budget-period-writer-invariant-20260820",
+  "base_commit": "854715b9245375b3b3297936c64f4cd7e60ed48b",
+  "branch": "codex/c7m-budget-period-writer-invariant",
+  "objective": "Make BudgetPeriodKind authoritative for budget writers and hierarchy synchronization, remove the duplicate bulk UPDATE, and fail closed unknown persisted periods with a PostgreSQL CHECK.",
+  "architecture": {
+    "owner": "bill_analyser_core::budgets::BudgetPeriodKind with DB-private normalization and SQL adapters",
+    "production_surface": [
+      "budget create and update payload normalization",
+      "budget bulk import row validation and existing-row update",
+      "CRUD parent-period and primary-category hierarchy synchronization",
+      "PostgreSQL budgets.period_type persistence invariant"
+    ],
+    "deleted_boundaries": [
+      "raw-string resolve_parent_budget_period helper",
+      "raw-string hierarchy group-key branch and secondary parse",
+      "bulk import's independent existing-row UPDATE statement"
+    ],
+    "unchanged_boundaries": [
+      "REST DTOs, paths, user scope, and integer-cent money contracts",
+      "CRUD transaction ownership and hierarchy synchronization behavior",
+      "bulk import single transaction, per-row error count, valid-row commit, and name-only upsert",
+      "bulk import does not trigger hierarchy synchronization"
+    ],
+    "rejected_expansion": [
+      "new public Draft, trait, service, UnitOfWork, cache, transaction owner, or second writer",
+      "bulk hierarchy synchronization before durable import identity is defined",
+      "backfill or coercion of unknown legacy period values"
+    ]
+  },
+  "target_audit": {
+    "database": "long-lived local Bill Analyser PostgreSQL target, read-only audit",
+    "period_counts": {
+      "monthly": 24,
+      "quarterly": 3,
+      "yearly": 2
+    },
+    "invalid_period_count": 0,
+    "constraint_present_before_delivery": false,
+    "latest_applied_migration_before_delivery": 25,
+    "duplicate_user_name_groups": 2,
+    "cross_business_key_duplicate_user_name_groups": 1,
+    "decision": "The target is eligible for migration 0028, but bulk hierarchy synchronization remains blocked by ambiguous name-only identity."
+  },
+  "tdd": {
+    "red": {
+      "command": "cargo test -p bill-analyser-db budget_write_normalizers_reject_unknown_periods_and_canonicalize_valid_values --lib",
+      "result": "failed because a create payload retained the non-canonical value ' monthly '"
+    },
+    "green": [
+      {
+        "command": "cargo test -p bill-analyser-db budget_period_group_keys_require_category_and_start_date --lib",
+        "executed": 1,
+        "failed": 0,
+        "skipped": 0
+      },
+      {
+        "command": "cargo test --test budget_period_postgres -- --test-threads=1",
+        "executed": 5,
+        "failed": 0,
+        "skipped": 0,
+        "database": "fresh isolated PostgreSQL database"
+      }
+    ]
+  },
+  "migration": {
+    "version": 28,
+    "file": "0028_budget_period_type_constraint.sql",
+    "constraint": "chk_budgets_period_type",
+    "allowed_values": [
+      "daily",
+      "weekly",
+      "monthly",
+      "quarterly",
+      "yearly"
+    ],
+    "strategy": "ADD CHECK NOT VALID, then VALIDATE; no backfill",
+    "fresh_1_to_28": "passed through isolated database creation",
+    "valid_27_to_28": "passed",
+    "dirty_history": "failed closed as required",
+    "raw_unknown_sqlstate": "23514"
+  },
+  "verification": {
+    "cargo_fmt_check": "passed",
+    "cargo_clippy_workspace_all_targets_deny_warnings": "passed",
+    "git_diff_check": "passed",
+    "raw_hierarchy_string_hits": 0,
+    "bulk_direct_update_hits": 0,
+    "cargo_llvm_cov_workspace": {
+      "command": "cargo llvm-cov --no-clean --workspace --lcov --output-path workspace.lcov --fail-under-lines 35 --quiet -- --test-threads=1",
+      "result": "passed against a fresh isolated PostgreSQL database with zero failed or ignored test cases",
+      "executable_lines": 80898,
+      "covered_lines": 55741,
+      "line_coverage_percent": 68.90
+    },
+    "changed_line_coverage": {
+      "business_files": 10,
+      "matched_files": 6,
+      "missing_lcov_files": 0,
+      "executable_changed_lines": 124,
+      "covered_changed_lines": 122,
+      "coverage_percent": 98.39,
+      "strict_threshold_percent": 90,
+      "status": "passed"
+    },
+    "review": {
+      "base_ref": "854715b9245375b3b3297936c64f4cd7e60ed48b",
+      "head_ref": "working tree on codex/c7m-budget-period-writer-invariant",
+      "standards_axis": "approved",
+      "spec_axis": "approved after group keys were changed from raw String to BudgetPeriodKind and the secondary parse was deleted",
+      "initial_findings": 1,
+      "open_findings": 0,
+      "verdict": "APPROVE"
+    },
+    "money_review": "No amount field or conversion changed; all budget amounts remain integer cents.",
+    "delivery_evidence": "The Gitea PR and exact-head Actions run remain the authoritative external delivery evidence and are added after this commit is pushed."
+  },
+  "residual_risks": [
+    "The name-only bulk upsert identity remains ambiguous and must be resolved before bulk hierarchy synchronization.",
+    "Adding and validating the CHECK can wait on a PostgreSQL table lock and should be observed during deployment.",
+    "A code rollback does not remove an already-applied CHECK; the invariant should normally remain in place."
+  ],
+  "environment_hygiene": {
+    "long_lived_database": "read-only audit only; it was not migrated or mutated",
+    "test_database_strategy": "focused and coverage gates used explicit isolated PostgreSQL databases",
+    "temporary_database_residue": "none after cleanup",
+    "secrets": "The existing local PostgreSQL credential was held only in process-local environment variables and was not added to source or evidence."
+  }
+}

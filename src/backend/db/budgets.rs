@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, BTreeSet};
 pub(crate) use bill_analyser_core::budgets::normalize_budget_query_end_date;
 use bill_analyser_core::budgets::{
     budget_overlaps_period, build_budget_history_filter_summary, resolve_budget_category_info,
-    resolve_budget_category_type, BudgetHistoryFilterSummaryInput,
+    resolve_budget_category_type, BudgetHistoryFilterSummaryInput, BudgetPeriodKind,
 };
 use chrono::Utc;
 use serde_json::{json, Map, Number, Value};
@@ -57,21 +57,33 @@ pub struct BudgetForecastFilters {
     pub history_periods: i64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct BudgetGroupKey {
     category: String,
-    period_type: String,
+    period_kind: BudgetPeriodKind,
     start_date: String,
     user_id: i64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Default)]
+impl BudgetGroupKey {
+    fn period_type(&self) -> &'static str {
+        self.period_kind.as_str()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct BudgetPeriodGroupKey {
     category: String,
     sub_category: String,
-    period_type: String,
+    period_kind: BudgetPeriodKind,
     start_date: String,
     user_id: i64,
+}
+
+impl BudgetPeriodGroupKey {
+    fn period_type(&self) -> &'static str {
+        self.period_kind.as_str()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]

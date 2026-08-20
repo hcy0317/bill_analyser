@@ -37,31 +37,6 @@ pub fn expand_forecast_history_window(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-pub fn resolve_parent_budget_period(
-    child_period_type: &str,
-    child_start_date: &str,
-    parent_period_type: &str,
-) -> Result<Option<BudgetPeriodRange>, String> {
-    let child_start = parse_budget_date_prefix(child_start_date)?;
-    match (child_period_type, parent_period_type) {
-        ("monthly", "quarterly") => {
-            let quarter = ((child_start.month() - 1) / 3) + 1;
-            let start_month = ((quarter - 1) * 3) + 1;
-            let end_month = start_month + 2;
-            Ok(Some(BudgetPeriodRange {
-                start_date: format_date(make_date(child_start.year(), start_month, 1)?),
-                end_date: format_date(last_day_of_month(child_start.year(), end_month)?),
-            }))
-        }
-        ("monthly", "yearly") | ("quarterly", "yearly") => Ok(Some(BudgetPeriodRange {
-            start_date: format_date(make_date(child_start.year(), 1, 1)?),
-            end_date: format_date(make_date(child_start.year(), 12, 31)?),
-        })),
-        _ => Ok(None),
-    }
-}
-
-#[tracing::instrument(level = "debug", skip_all)]
 pub fn rollup_parent_amount_cents(existing_parent_amount_cents: i64, child_total_cents: i64) -> i64 {
     existing_parent_amount_cents.max(child_total_cents)
 }

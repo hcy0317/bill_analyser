@@ -27,6 +27,7 @@ fn normalize_create_payload(fields: &BudgetRecord, now: &str) -> DbResult<Budget
             )));
         }
     }
+    canonicalize_budget_period_type(&mut payload, None)?;
     validate_budget_amount_cents(&payload)?;
     Ok(payload)
 }
@@ -61,7 +62,49 @@ fn normalize_update_payload(
     if payload.contains_key("amount_cents") {
         validate_budget_amount_cents(&payload)?;
     }
+    if payload.contains_key("period_type") {
+        canonicalize_budget_period_type(&mut payload, None)?;
+    }
     Ok(payload)
+}
+
+fn normalize_import_payload(fields: &BudgetRecord) -> DbResult<BudgetRecord> {
+    let mut payload = fields.clone();
+    canonicalize_budget_period_type(&mut payload, Some(BudgetPeriodKind::Monthly))?;
+    payload
+        .entry("category".to_string())
+        .or_insert(Value::Null);
+    payload
+        .entry("sub_category".to_string())
+        .or_insert_with(|| Value::String(String::new()));
+    payload.entry("end_date".to_string()).or_insert(Value::Null);
+    payload
+        .entry("alert_threshold".to_string())
+        .or_insert_with(|| json_i64(80));
+    payload
+        .entry("enabled".to_string())
+        .or_insert_with(|| Value::Bool(true));
+    Ok(payload)
+}
+
+fn canonicalize_budget_period_type(
+    payload: &mut BudgetRecord,
+    missing_default: Option<BudgetPeriodKind>,
+) -> DbResult<BudgetPeriodKind> {
+    let period_text = record_text(payload, "period_type");
+    let trimmed = period_text.trim();
+    let period_kind = if trimmed.is_empty() {
+        missing_default.ok_or_else(|| {
+            DbError::InvalidOperation("missing required budget field: period_type".to_string())
+        })?
+    } else {
+        BudgetPeriodKind::parse(trimmed).map_err(DbError::InvalidOperation)?
+    };
+    payload.insert(
+        "period_type".to_string(),
+        Value::String(period_kind.as_str().to_string()),
+    );
+    Ok(period_kind)
 }
 
 fn validate_budget_amount_cents(payload: &BudgetRecord) -> DbResult<()> {

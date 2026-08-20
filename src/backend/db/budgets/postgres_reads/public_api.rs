@@ -39,7 +39,7 @@ pub async fn create_postgres_budget(
         .ok_or_else(|| DbError::InvalidOperation("created budget not found".to_string()))?;
     synchronize_postgres_primary_budget_for_group(
         &mut tx,
-        build_postgres_budget_group_key(&effective_budget, user_id),
+        build_postgres_budget_group_key(&effective_budget, user_id)?,
         Some(&effective_budget),
     )
     .await?;
@@ -75,7 +75,7 @@ pub async fn update_postgres_budget(
         .await?
         .ok_or_else(|| DbError::InvalidOperation("updated budget not found".to_string()))?;
     for group_key in
-        collect_postgres_budget_sync_group_keys(user_id, [&existing_budget, &updated_budget])
+        collect_postgres_budget_sync_group_keys(user_id, [&existing_budget, &updated_budget])?
     {
         synchronize_postgres_primary_budget_for_group(
             &mut tx,
@@ -103,7 +103,7 @@ pub async fn delete_postgres_budget(
         return Ok(false);
     };
     let category = record_text(&budget, "category");
-    let period_type = record_text(&budget, "period_type");
+    let period_kind = budget_period_kind(&budget)?;
     let start_date = record_text(&budget, "start_date");
     let sub_category = normalize_sub_category(record_value(&budget, "sub_category"));
     let affected_budgets = if sub_category.is_empty() {
@@ -111,7 +111,7 @@ pub async fn delete_postgres_budget(
             &mut tx,
             user_id,
             &category,
-            &period_type,
+            period_kind,
             &start_date,
         )
         .await?
@@ -130,7 +130,7 @@ pub async fn delete_postgres_budget(
             "#,
         )
         .bind(category)
-        .bind(period_type)
+        .bind(period_kind.as_str())
         .bind(parse_date_prefix(&start_date)?)
         .bind(user_id)
         .execute(&mut *tx)
@@ -145,7 +145,7 @@ pub async fn delete_postgres_budget(
             .rows_affected();
         synchronize_postgres_primary_budget_for_group(
             &mut tx,
-            build_postgres_budget_group_key(&budget, user_id),
+            build_postgres_budget_group_key(&budget, user_id)?,
             Some(&budget),
         )
         .await?;
@@ -204,7 +204,15 @@ pub async fn import_postgres_budgets(
             error_count += 1;
             continue;
         }
-        match import_postgres_budget_row_on_tx(&mut tx, user_id, budget).await {
+        let normalized = match super::normalize_import_payload(budget) {
+            Ok(normalized) => normalized,
+            Err(error) => {
+                errors.push(format!("第{row_number}条: {error}"));
+                error_count += 1;
+                continue;
+            }
+        };
+        match import_postgres_budget_row_on_tx(&mut tx, user_id, &normalized).await {
             Ok(ImportBudgetRowAction::Created) => created_count += 1,
             Ok(ImportBudgetRowAction::Updated) => updated_count += 1,
             Err(error) => {
