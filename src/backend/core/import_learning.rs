@@ -5,7 +5,7 @@
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value};
 
 pub const FEATURE_SCHEMA_VERSION: &str = "import-learning-features-v1";
 pub const DEFAULT_FEATURE_DIMENSION: usize = 96;
@@ -24,13 +24,11 @@ mod features;
 mod llm_memory;
 mod model_registry;
 mod policy;
-mod route_response;
 
 pub use features::*;
 pub use llm_memory::*;
 pub use model_registry::*;
 pub use policy::*;
-pub use route_response::*;
 
 /// 将指定字段的归一化文本拆成完整值、分词和二元字符 token，供学习特征向量使用。
 fn iter_text_tokens(field: &str, value: &str) -> Vec<String> {
@@ -132,34 +130,6 @@ fn value_to_i64(value: &Value) -> i64 {
         Value::String(text) => text.trim().parse::<i64>().unwrap_or_default(),
         Value::Bool(true) => 1,
         _ => 0,
-    }
-}
-
-/// 按 Python int() 风格转换 JSON 值并返回兼容错误文案，供学习合同测试锁定边界。
-fn coerce_json_int(value: &Value) -> Result<i64, String> {
-    match value {
-        Value::Number(number) => number
-            .as_i64()
-            .or_else(|| number.as_u64().and_then(|value| i64::try_from(value).ok()))
-            .or_else(|| number.as_f64().map(|value| value as i64))
-            .ok_or_else(|| "cannot convert value to int".to_string()),
-        Value::String(text) => text
-            .trim()
-            .parse::<i64>()
-            .map_err(|_| format!("invalid literal for int() with base 10: '{}'", text)),
-        Value::Bool(value) => Ok(if *value { 1 } else { 0 }),
-        Value::Null => Err(
-            "int() argument must be a string, a bytes-like object or a real number, not 'NoneType'"
-                .to_string(),
-        ),
-        Value::Array(_) => Err(
-            "int() argument must be a string, a bytes-like object or a real number, not 'list'"
-                .to_string(),
-        ),
-        Value::Object(_) => Err(
-            "int() argument must be a string, a bytes-like object or a real number, not 'dict'"
-                .to_string(),
-        ),
     }
 }
 

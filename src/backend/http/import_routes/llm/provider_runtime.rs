@@ -91,11 +91,7 @@ fn llm_contract_error_response(
     code: &str,
     status_code: u16,
 ) -> ImportV2RouteResponse {
-    let response = build_llm_contract_error_response(message, code, status_code);
-    ImportV2RouteResponse {
-        status_code: response.status_code,
-        body: response.body,
-    }
+    build_llm_contract_error_response(message, code, status_code)
 }
 
 fn rule_synthesis_empty_response(knowledge_pack: Value) -> ImportV2RouteResponse {

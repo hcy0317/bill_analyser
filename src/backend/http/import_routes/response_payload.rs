@@ -8,14 +8,8 @@ fn route_response(response: ImportV2RouteResponse) -> Response {
     (status, Json(response.body)).into_response()
 }
 
-fn ai_route_response(response: AiRouteResponse) -> Response {
-    let status =
-        StatusCode::from_u16(response.status_code).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
-    (status, Json(response.body)).into_response()
-}
-
 /// 将 provider 内部失败一次性投影为既有 OCR HTTP 错误合同。
-fn ocr_provider_failure_response(failure: OcrProviderFailure) -> AiRouteResponse {
+fn ocr_provider_failure_response(failure: OcrProviderFailure) -> ImportV2RouteResponse {
     let (code, message) = match failure {
         OcrProviderFailure::Unavailable { message } => ("provider_unconfigured", message),
         OcrProviderFailure::TimedOut { message } => ("timeout", message),

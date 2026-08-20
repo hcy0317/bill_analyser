@@ -259,7 +259,7 @@ pub async fn llm_config_get_runtime_handler(
             Err(error) => return route_response(db_error_response(error)),
         }
     };
-    ai_route_response(build_llm_config_get_response(&config))
+    route_response(build_llm_config_get_response(&config))
 }
 
 /// 更新当前用户临时 runtime LLM 配置，不直接写入 saved config 表。

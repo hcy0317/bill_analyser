@@ -27,25 +27,22 @@ use bill_analyser_core::{
     attach_import_preview_state_snapshot_to_canonical_row, build_composite_match_features,
     build_import_learning_recommendation_key, build_import_learning_vector_recall_queries,
     build_import_preview_filter_index_item, build_learning_rule_result_summary,
-    build_llm_account_rule_induction_prompt, build_llm_candidate_list_response,
-    build_llm_candidate_reject_response, build_llm_category_rule_induction_prompt,
-    build_llm_classification_prompt, build_llm_config_get_response,
-    build_llm_contract_error_response, build_llm_import_preview_recommendation_prompt,
+    build_llm_account_rule_induction_prompt, build_llm_category_rule_induction_prompt,
+    build_llm_classification_prompt, build_llm_import_preview_recommendation_prompt,
     build_llm_provider_config, build_llm_rule_expression_synthesis_prompt,
-    build_ocr_config_success_response, build_ocr_error_response,
-    build_ocr_recognition_success_response_with_context,
-    build_runtime_llm_config_from_saved_config, build_unknown_ocr_provider_response,
+    build_receipt_transaction_draft, build_runtime_llm_config_from_saved_config,
     category_rules::{
         select_category_rule_candidate, CategoryRuleCandidate, CategoryRuleCandidateDraft,
     },
     coerce_preview_selected_value, composite_hash_from_features, copy_runtime_llm_config,
-    find_import_reconciliation_candidates, normalize_history_operation,
+    find_import_reconciliation_candidates, llm_available_providers, normalize_history_operation,
     normalize_import_preview_page_query, normalize_provider_auth_config,
-    normalize_weaviate_transaction_type_scope, parse_llm_json_array_response,
-    provider_auth_access_token, provider_auth_has_refresh_credential, provider_auth_is_expired,
-    provider_auth_refresh_token, render_llm_prompt_template, safe_llm_config_payload,
-    score_learning_rule_similarity, validate_llm_vision_base_url, AccountLookup, AiRouteResponse,
-    CategoryLookup, DedupBill, DuplicateGroup, ImportLearningRecommendationKeyInput,
+    normalize_weaviate_transaction_type_scope, ocr_available_providers_with_disabled,
+    parse_llm_json_array_response, parse_payment_screenshot_text, provider_auth_access_token,
+    provider_auth_has_refresh_credential, provider_auth_is_expired, provider_auth_refresh_token,
+    redact_provider_auth_config, redact_secrets_in_value, render_llm_prompt_template,
+    safe_llm_config_payload, score_learning_rule_similarity, validate_llm_vision_base_url,
+    AccountLookup, CategoryLookup, DedupBill, DuplicateGroup, ImportLearningRecommendationKeyInput,
     ImportPreviewIndexData, ImportPreviewPageData, ImportSessionSummary, ImportStageConfirmData,
     ImportStageDedupData, ImportStageParseData, LlmProviderConfigContract, OcrConfigContract,
     OcrProviderTextResult, ReceiptDraftAccount, ReceiptDraftCategory, ReceiptDraftCategoryRule,
@@ -405,6 +402,7 @@ pub fn import_runtime_router() -> Router<HttpAppState> {
 mod ocr_security;
 
 include!("response_contract.rs");
+include!("ai_response_contract.rs");
 include!("stage_vector_recall.rs");
 include!("stage_json_helpers.rs");
 include!("stage_handlers.rs");
@@ -417,6 +415,7 @@ include!("ocr_learning_handlers.rs");
 include!("response_payload_parse_budget.rs");
 include!("response_payload.rs");
 include!("response_payload_tests.rs");
+include!("ai_response_contract_tests.rs");
 include!("response_payload_ledger.rs");
 include!("multipart_and_ocr.rs");
 include!("parser_mapping.rs");

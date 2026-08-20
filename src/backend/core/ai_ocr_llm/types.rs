@@ -61,12 +61,6 @@ pub struct PaymentScreenshotParseContract {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct AiRouteResponse {
-    pub status_code: u16,
-    pub body: Value,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct OcrProviderTextResult {
     pub text: String,
     pub confidence: f64,

@@ -216,6 +216,7 @@ fn llm_runtime_config_response_data(config: &Value, include_available_providers:
         json!(provider_config
             .and_then(|item| item.get("model"))
             .and_then(Value::as_str)
+            .map(str::trim)
             .unwrap_or_default()),
     );
     response.insert(
@@ -227,8 +228,15 @@ fn llm_runtime_config_response_data(config: &Value, include_available_providers:
     );
     if include_available_providers {
         response.insert(
+            "credential_config".to_string(),
+            copied
+                .get("credential_config")
+                .map(redact_provider_auth_config)
+                .unwrap_or_else(|| json!({})),
+        );
+        response.insert(
             "available_providers".to_string(),
-            build_llm_config_get_response(config).body["data"]["available_providers"].clone(),
+            json!(llm_available_providers()),
         );
     }
     Value::Object(response)

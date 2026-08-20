@@ -105,6 +105,7 @@ fn import_transport_response_owner_is_http_private() {
         rust_source_tree("src/backend/db")
     );
     let http_contract = source("src/backend/http/import_routes/response_contract.rs");
+    let http_routes = rust_source_tree("src/backend/http/import_routes");
 
     for transport_symbol in [
         "ImportV2RouteResponse",
@@ -120,6 +121,58 @@ fn import_transport_response_owner_is_http_private() {
         assert!(
             http_contract.contains(transport_symbol),
             "HTTP response contract must own transport symbol {transport_symbol}"
+        );
+    }
+
+    for transport_symbol in [
+        "AiRouteResponse",
+        "LearningRouteResponse",
+        "LlmMemoryEventContract",
+        "parse_preview_ids",
+        "parse_learning_suggestion_ids",
+        "learning_center_page_response",
+        "learning_rules_page_response",
+        "learning_batch_accept_response",
+        "llm_memory_events_success",
+        "llm_error_response",
+        "llm_review_endpoint_requires_live_provider",
+    ] {
+        assert!(
+            !non_http_sources.contains(transport_symbol),
+            "core and DB must not retain dead or HTTP-owned AI/learning transport symbol {transport_symbol}"
+        );
+    }
+
+    assert!(
+        !http_routes.contains("AiRouteResponse"),
+        "HTTP must reuse ImportV2RouteResponse instead of retaining an isomorphic AI carrier"
+    );
+    assert!(
+        !http_routes.contains("fn ai_route_response"),
+        "HTTP must use the single route_response Axum adapter"
+    );
+
+    for response_builder in [
+        "build_llm_analysis_response",
+        "build_llm_candidate_list_response",
+        "build_llm_candidate_reject_response",
+        "build_llm_contract_error_response",
+        "build_llm_preview_recommend_response",
+        "build_llm_config_get_response",
+        "build_ocr_config_response_payload",
+        "build_ocr_config_success_response",
+        "build_ocr_error_response",
+        "build_ocr_recognition_success_response_with_context",
+        "build_unknown_ocr_provider_response",
+        "ocr_error_http_status",
+    ] {
+        assert!(
+            !non_http_sources.contains(response_builder),
+            "core and DB must not own AI/OCR REST builder {response_builder}"
+        );
+        assert!(
+            http_routes.contains(response_builder),
+            "HTTP import route source tree must own AI/OCR REST builder {response_builder}"
         );
     }
 }

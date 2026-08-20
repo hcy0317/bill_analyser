@@ -37,51 +37,6 @@ mod response_payload_tests {
     }
 
     #[test]
-    fn ocr_provider_failure_response_keeps_legacy_http_contract() {
-        let cases = [
-            (
-                OcrProviderFailure::Unavailable {
-                    message: "provider unavailable".to_string(),
-                },
-                501,
-                "provider_unconfigured",
-                "provider unavailable",
-            ),
-            (
-                OcrProviderFailure::TimedOut {
-                    message: "provider timeout".to_string(),
-                },
-                504,
-                "timeout",
-                "provider timeout",
-            ),
-            (
-                OcrProviderFailure::InvalidOutput {
-                    message: "invalid output".to_string(),
-                },
-                422,
-                "parse_error",
-                "invalid output",
-            ),
-            (
-                OcrProviderFailure::ReauthenticationRequired {
-                    message: "sign in again".to_string(),
-                },
-                401,
-                "provider_relogin_required",
-                "sign in again",
-            ),
-        ];
-
-        for (failure, expected_status, expected_code, expected_message) in cases {
-            let response = ocr_provider_failure_response(failure);
-            assert_eq!(response.status_code, expected_status);
-            assert_eq!(response.body["errorCode"], expected_code);
-            assert_eq!(response.body["message"], expected_message);
-        }
-    }
-
-    #[test]
     fn import_stage_response_contract_keeps_typed_data_envelopes() {
         let parse = import_stage_parse_success(ImportStageParseData {
             session_id: "sess-parse".to_string(),

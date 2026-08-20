@@ -4,12 +4,8 @@
 
 use serde_json::{json, Map, Value};
 
-use super::llm_provider::llm_available_providers;
-use super::provider_auth::{
-    normalize_provider_auth_config, provider_auth_access_token, redact_provider_auth_config,
-};
+use super::provider_auth::{normalize_provider_auth_config, provider_auth_access_token};
 use super::secret_redaction::{object_has_non_empty_secret, redact_secrets_in_map};
-use super::types::AiRouteResponse;
 use super::value_helpers::string_field_or;
 
 const LLM_PROMPT_TEXT_LIMIT: usize = 12_000;
@@ -135,39 +131,6 @@ pub fn copy_runtime_llm_config(config: &Value) -> Value {
             .unwrap_or_else(|| Value::Object(Map::new())),
         "advanced_settings": Value::Object(normalize_llm_advanced_settings(advanced_source)),
     })
-}
-
-/// 构建 LLM 配置读取接口响应，确保 credential_config 已脱敏且 provider 列表同步返回。
-#[tracing::instrument(level = "debug", skip_all)]
-pub fn build_llm_config_get_response(config: &Value) -> AiRouteResponse {
-    let copied = copy_runtime_llm_config(config);
-    let copied_object = copied.as_object();
-    let provider_config = copied_object
-        .and_then(|item| item.get("provider_config"))
-        .and_then(Value::as_object);
-    AiRouteResponse {
-        status_code: 200,
-        body: json!({
-            "success": true,
-            "data": {
-                "enabled": copied_object
-                    .and_then(|item| item.get("enabled"))
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false),
-                "provider": string_field_or(copied_object, "provider", "openai"),
-                "model": string_field_or(provider_config, "model", ""),
-                "credential_config": copied
-                    .get("credential_config")
-                    .map(redact_provider_auth_config)
-                    .unwrap_or_else(|| json!({})),
-                "advanced_settings": copied
-                    .get("advanced_settings")
-                    .cloned()
-                    .unwrap_or_else(|| json!({})),
-                "available_providers": llm_available_providers(),
-            },
-        }),
-    }
 }
 
 fn decode_settings_object(settings: Option<&Value>) -> Map<String, Value> {

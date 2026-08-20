@@ -1,23 +1,14 @@
-use bill_analyser_core::account_rules::AccountRuleCandidate;
 use bill_analyser_core::ai_ocr_llm::{
-    build_llm_account_rule_induction_prompt, build_llm_analysis_response,
-    build_llm_candidate_list_response, build_llm_candidate_reject_response,
-    build_llm_category_rule_induction_prompt, build_llm_classification_prompt,
-    build_llm_config_get_response, build_llm_contract_error_response,
-    build_llm_import_preview_recommendation_prompt, build_llm_preview_recommend_response,
+    build_llm_account_rule_induction_prompt, build_llm_category_rule_induction_prompt,
+    build_llm_classification_prompt, build_llm_import_preview_recommendation_prompt,
     build_llm_provider_config, build_llm_rule_expression_synthesis_prompt,
-    build_llm_rule_induction_prompt, build_ocr_config_response_payload,
-    build_ocr_config_success_response, build_ocr_error_response,
-    build_ocr_recognition_success_response, build_ocr_recognition_success_response_with_context,
-    build_runtime_llm_config_from_saved_config, build_unknown_ocr_provider_response,
-    copy_runtime_llm_config, llm_available_providers, llm_review_endpoint_requires_live_provider,
-    normalize_llm_advanced_settings, normalize_llm_provider_name, normalize_ocr_config,
-    ocr_available_providers_with_disabled, ocr_error_http_status, parse_llm_json_array_response,
-    parse_payment_screenshot_text, render_llm_prompt_template, safe_llm_config_payload,
-    validate_llm_vision_base_url, OcrProviderTextLine, OcrProviderTextResult, ReceiptDraftAccount,
-    ReceiptDraftCategory, ReceiptDraftCategoryRule, ReceiptDraftContext, ReceiptDraftTag,
+    build_llm_rule_induction_prompt, build_runtime_llm_config_from_saved_config,
+    copy_runtime_llm_config, llm_available_providers, normalize_llm_advanced_settings,
+    normalize_llm_provider_name, normalize_ocr_config, ocr_available_providers_with_disabled,
+    parse_llm_json_array_response, parse_payment_screenshot_text, render_llm_prompt_template,
+    safe_llm_config_payload, validate_llm_vision_base_url,
 };
-use serde_json::{json, Value};
+use serde_json::json;
 use std::env;
 use std::sync::{Mutex, MutexGuard};
 
@@ -54,7 +45,7 @@ impl Drop for EnvVarRestore {
 }
 
 #[test]
-fn ocr_config_and_disabled_safe_errors_match_receipt_routes() {
+fn ocr_config_normalization_and_provider_catalog_match_receipt_routes() {
     let default_config = normalize_ocr_config(None);
     assert_eq!(default_config.provider, "disabled");
     assert_eq!(default_config.lang, "chi_sim+eng");
@@ -75,95 +66,12 @@ fn ocr_config_and_disabled_safe_errors_match_receipt_routes() {
             "llm_vision"
         ]
     );
-    assert_eq!(
-        build_ocr_config_response_payload(&configured),
-        json!({
-            "provider": "tesseract",
-            "lang": "eng+chi_sim",
-            "model": "",
-            "base_url": "",
-            "parameters": {},
-            "credential_config": {},
-            "available_providers": ["disabled", "cloud_stub", "tesseract", "local_json_ocr", "llm_vision"],
-            "configured": true,
-        })
-    );
-    assert_eq!(
-        build_ocr_config_success_response(&configured).body["result"]["configured"],
-        true
-    );
-
     let invalid = normalize_ocr_config(Some(&json!({
         "provider": "unknown-provider",
         "lang": "chi sim with spaces",
     })));
     assert_eq!(invalid.provider, "disabled");
     assert_eq!(invalid.lang, "chi_sim+eng");
-    assert_eq!(build_unknown_ocr_provider_response().status_code, 400);
-    assert_eq!(
-        build_unknown_ocr_provider_response().body["message"],
-        "Unknown OCR provider"
-    );
-
-    let disabled_error = build_ocr_error_response("provider_unconfigured", None);
-    assert_eq!(disabled_error.status_code, 501);
-    assert_eq!(disabled_error.body["errorCode"], "provider_unconfigured");
-    assert_eq!(
-        disabled_error.body["message"],
-        "Receipt recognition not implemented"
-    );
-    assert_eq!(
-        build_ocr_error_response("provider_unconfigured", Some("ocr provider not configured")).body
-            ["message"],
-        "ocr provider not configured"
-    );
-    assert_eq!(ocr_error_http_status("timeout"), 504);
-    assert_eq!(ocr_error_http_status("parse_error"), 422);
-    assert_eq!(ocr_error_http_status("cancelled"), 499);
-    assert_eq!(ocr_error_http_status("rate_limited"), 429);
-}
-
-#[test]
-fn ocr_config_response_redacts_parameters_and_credentials() {
-    let configured = normalize_ocr_config(Some(&json!({
-        "provider": "llm_vision",
-        "lang": "eng",
-        "model": "gpt-4o-mini",
-        "base_url": "https://api.openai.com/v1",
-        "parameters": {
-            "temperature": 0,
-            "api_key": "parameter-secret",
-            "headers": {
-                "Authorization": "Bearer nested-secret",
-                "safe_header": "visible"
-            }
-        },
-        "credential_config": {
-            "access_token": "credential-secret",
-            "refresh_headers": {
-                "x-api-key": "refresh-header-secret"
-            }
-        }
-    })));
-
-    let payload = build_ocr_config_response_payload(&configured);
-    let serialized = serde_json::to_string(&payload).expect("safe OCR config JSON");
-
-    assert!(!serialized.contains("parameter-secret"));
-    assert!(!serialized.contains("nested-secret"));
-    assert!(!serialized.contains("credential-secret"));
-    assert!(!serialized.contains("refresh-header-secret"));
-    assert_eq!(payload["parameters"]["api_key"], "********");
-    assert_eq!(
-        payload["parameters"]["headers"]["Authorization"],
-        "********"
-    );
-    assert_eq!(payload["parameters"]["headers"]["safe_header"], "visible");
-    assert_eq!(payload["credential_config"]["access_token"], "********");
-    assert_eq!(
-        payload["credential_config"]["refresh_headers"]["x-api-key"],
-        "********"
-    );
 }
 
 #[test]
@@ -255,136 +163,6 @@ fn payment_screenshot_parser_extracts_wechat_and_alipay_contract_fields() {
     assert_eq!(empty.description, None);
     assert_eq!(empty.payment_platform, None);
     assert_eq!(empty.confidence, 0.0);
-}
-
-#[test]
-fn ocr_recognition_success_response_matches_receipt_route_payload() {
-    let provider_result = OcrProviderTextResult {
-        text: "支付宝\n商品: 拿铁咖啡\n付款金额 12.34\n2025-01-02 10:30".to_string(),
-        confidence: 0.42,
-        model: "tesseract".to_string(),
-        raw_provider_response: json!({
-            "engine": "tesseract",
-            "lang": "chi_sim+eng",
-        }),
-        lines: Vec::new(),
-    };
-    let response =
-        build_ocr_recognition_success_response("tesseract", &provider_result, "rust-ocr-7");
-    assert_eq!(response.status_code, 200);
-    assert_eq!(response.body["success"], true);
-    assert_eq!(response.body["result"]["amount"], 12.34);
-    assert_eq!(response.body["result"]["trade_time"], "2025-01-02 10:30");
-    assert_eq!(response.body["result"]["description"], "拿铁咖啡");
-    assert_eq!(response.body["result"]["payment_platform"], "alipay");
-    assert_eq!(
-        response.body["result"]["provenance"]["provider"],
-        "tesseract"
-    );
-    assert_eq!(response.body["result"]["provenance"]["model"], "tesseract");
-    assert_eq!(
-        response.body["result"]["provenance"]["request_id"],
-        "rust-ocr-7"
-    );
-    assert_eq!(
-        response.body["result"]["raw_provider_response"]["engine"],
-        "tesseract"
-    );
-    assert_eq!(response.body["result"]["confidence"], 1.0);
-    assert_eq!(
-        response.body["result"]["draft"]["auto_fill"]["amount"]["unit"],
-        "yuan"
-    );
-    assert_eq!(
-        response.body["result"]["draft"]["auto_fill"]["type"]["value"],
-        "expense"
-    );
-    assert!(response.body["result"]["draft"]["auto_fill"]["category_id"].is_null());
-}
-
-#[test]
-fn ocr_recognition_success_response_maps_taxonomy_to_auto_fill_and_candidates() {
-    let provider_result = OcrProviderTextResult {
-        text: "支付宝\n付款方式 招商银行\n商品: 瑞幸咖啡 拿铁\n付款金额 12.34\n2025-01-02 10:30"
-            .to_string(),
-        confidence: 0.72,
-        model: "local-json-fixture".to_string(),
-        raw_provider_response: json!({"engine": "local_json_ocr"}),
-        lines: vec![
-            OcrProviderTextLine {
-                text: "付款方式 招商银行".to_string(),
-                confidence: Some(0.96),
-                bbox: None,
-            },
-            OcrProviderTextLine {
-                text: "商品: 瑞幸咖啡 拿铁".to_string(),
-                confidence: Some(0.95),
-                bbox: None,
-            },
-        ],
-    };
-    let context = ReceiptDraftContext {
-        categories: vec![
-            ReceiptDraftCategory {
-                id: "10".to_string(),
-                type_code: 3,
-                label: "餐饮 / 咖啡".to_string(),
-            },
-            ReceiptDraftCategory {
-                id: "11".to_string(),
-                type_code: 3,
-                label: "购物 / 超市".to_string(),
-            },
-        ],
-        category_rules: vec![ReceiptDraftCategoryRule {
-            id: "501".to_string(),
-            category_id: "10".to_string(),
-            category_type: 3,
-            label: "餐饮 / 咖啡".to_string(),
-            priority: 1,
-            rule_expression: "OR:瑞幸|拿铁".to_string(),
-            regex_enabled: false,
-        }],
-        account_rules: vec![AccountRuleCandidate {
-            rule_id: 601,
-            account_id: 200,
-            rule_expression: "OR={招商银行,招行}".to_string(),
-            regex_enabled: false,
-            enabled: true,
-            priority: 1,
-        }],
-        accounts: vec![ReceiptDraftAccount {
-            id: "200".to_string(),
-            name: "招商银行".to_string(),
-        }],
-        tags: vec![ReceiptDraftTag {
-            id: "7".to_string(),
-            name: "咖啡".to_string(),
-        }],
-    };
-    let response = build_ocr_recognition_success_response_with_context(
-        "local_json_ocr",
-        &provider_result,
-        "rust-ocr-8",
-        &context,
-    );
-    assert_eq!(response.status_code, 200);
-    assert_eq!(
-        response.body["result"]["draft"]["auto_fill"]["category_id"]["value"],
-        "10"
-    );
-    assert_eq!(
-        response.body["result"]["draft"]["auto_fill"]["source_account_id"]["value"],
-        "200"
-    );
-    assert_eq!(
-        response.body["result"]["draft"]["auto_fill"]["tag_ids"]["value"],
-        json!(["7"])
-    );
-    assert_eq!(
-        response.body["result"]["draft"]["auto_fill"]["amount"]["unit"],
-        "yuan"
-    );
 }
 
 #[test]
@@ -769,78 +547,6 @@ fn llm_advanced_settings_runtime_isolation_and_secret_redaction_are_pinned() {
         copied["advanced_settings"]["system_prompt"],
         "provider-local"
     );
-
-    let get_response = build_llm_config_get_response(&runtime);
-    assert_eq!(get_response.status_code, 200);
-    assert_eq!(get_response.body["data"]["provider"], "openai");
-    assert_eq!(get_response.body["data"]["model"], "gpt-test");
-    assert!(get_response.body["data"]["available_providers"]
-        .as_array()
-        .expect("providers")
-        .contains(&json!("openrouter")));
-}
-
-#[test]
-fn llm_preview_and_candidate_review_route_envelopes_preserve_live_provider_boundary() {
-    let disabled =
-        build_llm_contract_error_response("LLM service is not enabled", "LLM_DISABLED", 400);
-    assert_eq!(disabled.status_code, 400);
-    assert_eq!(disabled.body["code"], "LLM_DISABLED");
-    assert_eq!(disabled.body["error_code"], "LLM_DISABLED");
-
-    let suggestions = vec![json!({"matching": {"llm": {"review_status": "pending"}}})];
-    let preview = build_llm_preview_recommend_response("session-1", suggestions);
-    assert_eq!(preview["data"]["session_id"], "session-1");
-    assert_eq!(preview["data"]["count"], 1);
-
-    let candidate_list = build_llm_candidate_list_response(vec![json!({"id": 9})], 1);
-    assert_eq!(candidate_list["success"], true);
-    assert_eq!(candidate_list["total"], 1);
-    assert_eq!(
-        build_llm_candidate_reject_response(true),
-        json!({"success": true, "data": {"rejected": true}})
-    );
-
-    assert!(llm_review_endpoint_requires_live_provider(
-        "preview-recommend"
-    ));
-    assert!(llm_review_endpoint_requires_live_provider(
-        "analyze-transactions"
-    ));
-    assert!(llm_review_endpoint_requires_live_provider("rule-synthesis"));
-    assert!(!llm_review_endpoint_requires_live_provider(
-        "preview-recommend/accept"
-    ));
-    assert!(!llm_review_endpoint_requires_live_provider(
-        "preview-recommend/reject"
-    ));
-    assert!(!llm_review_endpoint_requires_live_provider(
-        "candidates/accept"
-    ));
-    assert!(!llm_review_endpoint_requires_live_provider(
-        "candidates/reject"
-    ));
-    assert!(!llm_review_endpoint_requires_live_provider(
-        "candidates/123/accept"
-    ));
-    assert!(!llm_review_endpoint_requires_live_provider(
-        "candidates/123/reject"
-    ));
-
-    let import_session = build_llm_analysis_response(
-        vec![json!({"id": 1})],
-        &json!({"session_id": "sess-a", "preview_ids": [3]}),
-    );
-    assert_eq!(import_session["data"]["mode"], "import_session");
-    assert_eq!(import_session["data"]["session_id"], "sess-a");
-    assert_eq!(import_session["total"], 1);
-
-    let persisted_selection =
-        build_llm_analysis_response(Vec::<Value>::new(), &json!({"bill_ids": [1, 2]}));
-    assert_eq!(persisted_selection["data"]["mode"], "persisted_selection");
-
-    let uncategorized = build_llm_analysis_response(Vec::<Value>::new(), &json!({}));
-    assert_eq!(uncategorized["data"]["mode"], "persisted_uncategorized");
 }
 
 #[test]

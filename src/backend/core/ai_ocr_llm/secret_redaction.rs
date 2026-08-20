@@ -37,7 +37,7 @@ pub(super) fn redact_secrets_in_map(object: &mut Map<String, Value>) {
 }
 
 /// 递归脱敏 JSON 值中的 secret 字段，覆盖数组和对象嵌套结构。
-pub(super) fn redact_secrets_in_value(value: &mut Value) {
+pub fn redact_secrets_in_value(value: &mut Value) {
     match value {
         Value::Object(object) => redact_secrets_in_map(object),
         Value::Array(items) => {

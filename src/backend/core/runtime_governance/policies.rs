@@ -90,11 +90,11 @@ pub(super) const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         retired_source_files: EMPTY_STRINGS,
         rust_owner_files: &[
             "src/backend/http/import_routes/mod.rs",
+            "src/backend/http/import_routes/ai_response_contract.rs",
             "src/backend/core/ai_ocr_llm/mod.rs",
             "src/backend/core/ai_ocr_llm/llm_config.rs",
             "src/backend/core/ai_ocr_llm/llm_prompts.rs",
             "src/backend/core/ai_ocr_llm/llm_provider.rs",
-            "src/backend/core/ai_ocr_llm/llm_responses.rs",
             "src/backend/core/import_learning.rs",
         ],
         tests_verified: &[

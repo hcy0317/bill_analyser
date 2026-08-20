@@ -1,0 +1,113 @@
+{
+  "schema_version": "cyanflow-slice-evidence.v1",
+  "slice": "C7o",
+  "work_id": "bill-analyser-cyanflow-c7o-ai-response-ownership-20260820",
+  "base_commit": "d55dcbf1118c14771595524dbdda0fb48a98a403",
+  "branch": "codex/c7o-ai-response-ownership",
+  "objective": "Make HTTP the only owner of AI, OCR, LLM, and import-learning transport responses while preserving every live REST contract and deleting unreachable core transport surfaces.",
+  "architecture": {
+    "owner": "crate-private import_routes/ai_response_contract.rs using the existing ImportV2RouteResponse and route_response",
+    "retained_core_capabilities": [
+      "OCR and LLM configuration normalization",
+      "provider catalog, authentication, allowlist, and secret redaction",
+      "payment screenshot parsing and receipt draft projection",
+      "prompt construction and provider-independent typed observations"
+    ],
+    "deleted_boundaries": [
+      "isomorphic core AiRouteResponse carrier and duplicate ai_route_response adapter",
+      "core AI, OCR, and LLM REST status and envelope builders",
+      "response-to-response field copying and response-body reverse extraction",
+      "the entire zero-production-caller core import-learning route-response surface"
+    ],
+    "unchanged_boundaries": [
+      "REST paths, status codes, success and error envelope fields",
+      "OCR errorCode and message values plus LLM code and error_code compatibility",
+      "OCR yuan input boundary, receipt draft, provenance, confidence, and raw provider response",
+      "provider SSRF, rate-limit, authentication, persistence, and invocation ordering",
+      "database schema, user scope, configuration storage, transaction, and writer contracts"
+    ],
+    "rejected_expansion": [
+      "AiOutcome or OcrOutcome god enum",
+      "response-builder trait, service, port, UnitOfWork, registry, cache, or new crate",
+      "a second transport carrier or compatibility re-export",
+      "moving OCR parsing or receipt-draft policy into HTTP"
+    ]
+  },
+  "tdd": {
+    "red": {
+      "command": "cargo test -p bill-analyser-http --test import_runtime_contract import_transport_response_owner_is_http_private -- --exact --nocapture",
+      "executed": 1,
+      "result": "failed because core still owned AiRouteResponse and the AI/OCR REST builders"
+    },
+    "green": [
+      {
+        "command": "cargo test -p bill-analyser-http --test import_runtime_contract",
+        "executed": 15,
+        "failed": 0,
+        "ignored": 0
+      },
+      {
+        "command": "cargo test -p bill-analyser-core --test ai_ocr_llm_contracts --test import_learning_contracts",
+        "executed": 13,
+        "failed": 0,
+        "ignored": 0
+      },
+      {
+        "command": "focused HTTP AI/OCR/LLM response projection tests",
+        "executed": 4,
+        "failed": 0,
+        "ignored": 0
+      }
+    ]
+  },
+  "verification": {
+    "cargo_fmt_check": "passed",
+    "cargo_clippy_workspace_all_targets_deny_warnings": "passed",
+    "cargo_test_workspace": "passed against a fresh isolated PostgreSQL database with zero failed or ignored test cases",
+    "git_diff_check": "passed",
+    "non_http_ai_ocr_rest_builder_hits": 0,
+    "legacy_transport_carrier_hits": 0,
+    "duplicate_axum_response_adapter_hits": 0,
+    "live_or_paid_provider_calls": 0,
+    "cargo_llvm_cov_workspace": {
+      "command": "cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 35 -- --test-threads=1",
+      "result": "passed against a fresh isolated PostgreSQL database with zero failed or ignored test cases",
+      "executable_lines": 80934,
+      "covered_lines": 56111,
+      "line_coverage_percent": 69.33
+    },
+    "changed_line_coverage": {
+      "command": "node scripts/governance-normalizers.mjs changed-coverage --lcov workspace.lcov --diff .git/ai/c7o-rust-changed.diff --threshold 90 --require-matched-files --require-executable-lines --allow-no-business-files",
+      "business_files": 17,
+      "matched_files": 5,
+      "missing_lcov_files": 0,
+      "executable_changed_lines": 173,
+      "covered_changed_lines": 173,
+      "coverage_percent": 100,
+      "status": "passed"
+    },
+    "review": {
+      "base_ref": "d55dcbf1118c14771595524dbdda0fb48a98a403",
+      "head_ref": "staged working tree on codex/c7o-ai-response-ownership",
+      "standards_axis": "APPROVE with P0=0, P1=0, and P2=0",
+      "spec_axis": "APPROVE with P0=0, P1=0, and P2=0",
+      "verdict": "APPROVE"
+    },
+    "money_review": "OCR extraction and receipt draft amount remain at the existing yuan external boundary; no cents storage or API amount field changed.",
+    "delivery_evidence": "Gitea PR, exact-head Actions, squash merge, and branch-deletion evidence are added after delivery."
+  },
+  "false_starts": [
+    "The first broad HTTP library test ran without BILL_ANALYSER_TEST_POSTGRES_URL; its only failure was the explicit fail-closed PostgreSQL environment contract. The authoritative runs used fresh isolated databases.",
+    "The first changed-line calculation used an unstaged diff and omitted the new untracked owner file; it was rejected and rerun from the staged exact-base diff, producing 172 of 172 covered executable lines."
+  ],
+  "residual_risks": [
+    "ImportV2RouteResponse remains a narrow historical name for the now shared private import, AI, OCR, and LLM transport carrier; renaming it would be broad mechanical churn and is intentionally deferred.",
+    "This ownership cutover does not complete import performance, signal lifecycle, LLM business policy, or CI topology work.",
+    "No live or paid provider was invoked; provider behavior remains covered by deterministic local and loopback fixtures."
+  ],
+  "environment_hygiene": {
+    "test_database_strategy": "workspace and coverage gates used dedicated c7o PostgreSQL databases rather than the user business database",
+    "provider_strategy": "no live or paid OCR or LLM endpoint was called",
+    "secrets": "database credentials remained process-local and are absent from committed evidence"
+  }
+}

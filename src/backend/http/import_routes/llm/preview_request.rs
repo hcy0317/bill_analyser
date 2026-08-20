@@ -79,7 +79,7 @@ pub async fn llm_preview_recommend_runtime_handler(
         if rows.is_empty() {
             return route_response(ImportV2RouteResponse {
                 status_code: 200,
-                body: bill_analyser_core::build_llm_preview_recommend_response(
+                body: build_llm_preview_recommend_response(
                     &session_id,
                     Vec::new(),
                 ),
@@ -89,7 +89,7 @@ pub async fn llm_preview_recommend_runtime_handler(
         if rows.is_empty() {
             return route_response(ImportV2RouteResponse {
                 status_code: 200,
-                body: bill_analyser_core::build_llm_preview_recommend_response(
+                body: build_llm_preview_recommend_response(
                     &session_id,
                     Vec::new(),
                 ),
@@ -223,7 +223,7 @@ pub async fn llm_preview_recommend_runtime_handler(
     }
     route_response(ImportV2RouteResponse {
         status_code: 200,
-        body: bill_analyser_core::build_llm_preview_recommend_response(
+        body: build_llm_preview_recommend_response(
             &prepared.session_id,
             suggestions,
         ),

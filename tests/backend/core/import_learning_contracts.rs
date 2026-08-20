@@ -7,24 +7,21 @@ use bill_analyser_core::{
     build_import_learning_recommendation_key, build_label_confirmation_counts,
     build_llm_preview_apply_plan, build_model_registry_payload, build_route_label,
     build_semantic_label, build_semantic_label_counts, evaluate_learning_policy,
-    import_learning_model_version, iter_feature_tokens, learning_batch_accept_response,
-    learning_center_page_response, learning_lifecycle_is_auto_eligible,
-    learning_lifecycle_signal_state, learning_rules_page_response, llm_error_response,
-    llm_memory_events_success, normalize_import_learning_suggestion_id,
+    import_learning_model_version, iter_feature_tokens, learning_lifecycle_is_auto_eligible,
+    learning_lifecycle_signal_state, normalize_import_learning_suggestion_id,
     normalize_import_learning_text, normalize_learning_text, normalize_llm_preview_review_decision,
-    parse_composite_match_value, parse_learning_suggestion_ids, parse_preview_ids,
-    parse_route_label, parse_semantic_label, prepare_training_samples,
+    parse_composite_match_value, parse_route_label, parse_semantic_label, prepare_training_samples,
     should_revert_llm_preview_application, transition_import_learning_lifecycle,
     ImportLearningLifecycleState, ImportLearningPrediction, ImportLearningRecommendationKeyInput,
-    LlmMemoryEventContract, LlmPreviewSnapshot, LlmPreviewSuggestion,
-    BLUE_ACCEPT_CONFIRMATION_THRESHOLD, BLUE_CONFIDENCE_THRESHOLD, BLUE_MARGIN_THRESHOLD,
-    DEFAULT_FEATURE_DIMENSION, FEATURE_SCHEMA_VERSION, GREEN_CONFIDENCE_THRESHOLD,
-    GREEN_MARGIN_THRESHOLD, HIDDEN_DIMENSION, LEARNING_LIFECYCLE_ACCEPTS_TO_GREEN,
-    LEARNING_LIFECYCLE_GREEN_REJECTS_TO_DOWNGRADE, LEARNING_LIFECYCLE_STATUS_AUTO_APPLIED,
-    LEARNING_LIFECYCLE_STATUS_DOWNGRADED, LEARNING_LIFECYCLE_STATUS_GREEN,
-    LEARNING_LIFECYCLE_STATUS_SUPPRESSED, LEARNING_LIFECYCLE_STATUS_YELLOW,
-    LEARNING_LIFECYCLE_YELLOW_REJECTS_TO_SUPPRESS, MIN_TRAINING_SAMPLES, MODEL_FAMILY, MODEL_KEY,
-    POLICY_VERSION, RECOMMENDATION_KEY_SCHEMA_VERSION,
+    LlmPreviewSnapshot, LlmPreviewSuggestion, BLUE_ACCEPT_CONFIRMATION_THRESHOLD,
+    BLUE_CONFIDENCE_THRESHOLD, BLUE_MARGIN_THRESHOLD, DEFAULT_FEATURE_DIMENSION,
+    FEATURE_SCHEMA_VERSION, GREEN_CONFIDENCE_THRESHOLD, GREEN_MARGIN_THRESHOLD, HIDDEN_DIMENSION,
+    LEARNING_LIFECYCLE_ACCEPTS_TO_GREEN, LEARNING_LIFECYCLE_GREEN_REJECTS_TO_DOWNGRADE,
+    LEARNING_LIFECYCLE_STATUS_AUTO_APPLIED, LEARNING_LIFECYCLE_STATUS_DOWNGRADED,
+    LEARNING_LIFECYCLE_STATUS_GREEN, LEARNING_LIFECYCLE_STATUS_SUPPRESSED,
+    LEARNING_LIFECYCLE_STATUS_YELLOW, LEARNING_LIFECYCLE_YELLOW_REJECTS_TO_SUPPRESS,
+    MIN_TRAINING_SAMPLES, MODEL_FAMILY, MODEL_KEY, POLICY_VERSION,
+    RECOMMENDATION_KEY_SCHEMA_VERSION,
 };
 use serde_json::json;
 
@@ -466,124 +463,4 @@ fn llm_preview_memory_only_fills_blank_fields_and_reject_revert_is_guarded() {
         Some(&plan.applied_preview_snapshot),
         &LlmPreviewSnapshot::default(),
     ));
-
-    let event = LlmMemoryEventContract {
-        id: Some(99),
-        user_id: 1,
-        session_id: Some("sess-llm".to_string()),
-        preview_id: Some(42),
-        event_type: "recommendation".to_string(),
-        decision: None,
-        prompt_text: Some("prompt".to_string()),
-        llm_response_raw: Some("response".to_string()),
-        llm_provider: Some("openai".to_string()),
-        llm_model: Some("gpt".to_string()),
-        suggested_main_category: Some("餐饮".to_string()),
-        suggested_sub_category: Some("早餐".to_string()),
-        suggested_source_account: Some("微信钱包".to_string()),
-        suggested_destination_account: None,
-        confidence: 0.81,
-        user_correction_category: None,
-        user_correction_account: None,
-        snapshot_before: Some(serde_json::to_string(&plan.previous_preview_snapshot).unwrap()),
-        snapshot_after: Some(serde_json::to_string(&plan.applied_preview_snapshot).unwrap()),
-        metadata: Some(json!({"applied_fields": plan.applied_fields}).to_string()),
-        created_at: Some("2026-05-01T00:00:00Z".to_string()),
-    };
-    let value = serde_json::to_value(&event).unwrap();
-    assert_eq!(value["session_id"], "sess-llm");
-    assert_eq!(value["event_type"], "recommendation");
-    assert_eq!(value["llm_response_raw"], "response");
-    assert!(value["metadata"]
-        .as_str()
-        .unwrap()
-        .contains("applied_fields"));
-    let memory_response = llm_memory_events_success(vec![event], 1);
-    assert_eq!(memory_response.body["data"][0]["id"], 99);
-    assert!(memory_response.body["data"][0]["metadata"].is_string());
-    assert_eq!(memory_response.body["total"], 1);
-}
-
-#[test]
-fn learning_and_llm_route_envelopes_preserve_error_and_paging_shapes() {
-    assert_eq!(parse_preview_ids(None).unwrap(), None);
-    assert_eq!(
-        parse_preview_ids(Some(&json!([3, 4]))).unwrap(),
-        Some(vec![3, 4])
-    );
-    assert_eq!(
-        parse_preview_ids(Some(&json!([]))).unwrap(),
-        Some(Vec::<i64>::new())
-    );
-    assert_eq!(
-        parse_preview_ids(Some(&json!("bad"))).unwrap_err(),
-        "previewIds must be an array"
-    );
-    assert_eq!(
-        parse_preview_ids(Some(&json!(["4"]))).unwrap_err(),
-        "previewIds must contain positive integers"
-    );
-    assert_eq!(
-        parse_preview_ids(Some(&json!([true]))).unwrap_err(),
-        "previewIds must contain positive integers"
-    );
-
-    let suggestions = learning_center_page_response(vec![json!({"id": 1})], 1, 2000, -3);
-    assert_eq!(suggestions.status_code, 200);
-    assert_eq!(suggestions.body["data"]["items"][0]["id"], 1);
-    assert_eq!(suggestions.body["data"]["limit"], 1000);
-    assert_eq!(suggestions.body["data"]["offset"], 0);
-    let all_suggestions = learning_center_page_response(Vec::new(), 0, -1, -3);
-    assert_eq!(all_suggestions.body["data"]["limit"], -1);
-    assert_eq!(all_suggestions.body["data"]["offset"], 0);
-
-    assert_eq!(
-        parse_learning_suggestion_ids(Some(&json!([3, "4", 3, true, false]))).unwrap(),
-        vec![3, 4, 1, 0]
-    );
-    assert_eq!(
-        parse_learning_suggestion_ids(Some(&json!([]))).unwrap_err(),
-        "suggestionIds must be a non-empty array"
-    );
-    assert_eq!(
-        parse_learning_suggestion_ids(Some(&json!(null))).unwrap_err(),
-        "suggestionIds must be a non-empty array"
-    );
-    assert_eq!(
-        parse_learning_suggestion_ids(Some(&json!((1..=101).collect::<Vec<i32>>()))).unwrap_err(),
-        "batch size must not exceed 100"
-    );
-    assert!(parse_learning_suggestion_ids(Some(&json!(["bad"])))
-        .unwrap_err()
-        .starts_with("Invalid suggestionIds:"));
-    let batch = learning_batch_accept_response(
-        vec![json!({"id": 3, "ruleId": 9})],
-        vec![json!({"id": 404, "error": "suggestion_not_found"})],
-    );
-    assert_eq!(batch.body["data"]["acceptedCount"], 1);
-    assert_eq!(batch.body["data"]["failedCount"], 1);
-
-    let rules = learning_rules_page_response(vec![json!({"id": 2})], 11, 2, 5);
-    assert_eq!(rules.body["result"][0]["id"], 2);
-    assert_eq!(rules.body["totalCount"], 11);
-    assert_eq!(rules.body["page"], 2);
-    assert_eq!(rules.body["pageSize"], 5);
-    assert_eq!(rules.body["totalPages"], 3);
-    let empty_rules = learning_rules_page_response(Vec::new(), 0, 5, 0);
-    assert_eq!(empty_rules.body["page"], 1);
-    assert_eq!(empty_rules.body["pageSize"], 100);
-    assert_eq!(empty_rules.body["totalPages"], 1);
-    let all_rules = learning_rules_page_response(Vec::new(), 0, 1, -1);
-    assert_eq!(all_rules.body["pageSize"], -1);
-    assert_eq!(all_rules.body["totalPages"], 1);
-
-    assert_eq!(
-        llm_error_response(404, "Import session not found", "IMPORT_SESSION_NOT_FOUND").body,
-        json!({
-            "success": false,
-            "error": "Import session not found",
-            "code": "IMPORT_SESSION_NOT_FOUND",
-            "error_code": "IMPORT_SESSION_NOT_FOUND"
-        })
-    );
 }

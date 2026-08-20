@@ -1182,6 +1182,12 @@ fn domain_policies_record_current_rust_runtime_state() {
     assert_eq!(ai_learning.blocked_status, RuntimeBlockedStatus::None);
     assert!(ai_learning.deletion_blockers.is_empty());
     assert!(ai_learning.unsupported_behavior.contains("rule synthesis"));
+    assert!(ai_learning
+        .rust_owner_files
+        .contains(&"src/backend/http/import_routes/ai_response_contract.rs"));
+    assert!(!ai_learning
+        .rust_owner_files
+        .contains(&"src/backend/core/ai_ocr_llm/llm_responses.rs"));
 
     let database_facade =
         find_domain_policy("database-facade").expect("database facade policy exists");
@@ -1251,6 +1257,21 @@ fn domain_policies_record_current_rust_runtime_state() {
     assert!(database_schema_writer
         .active_writer
         .contains("init_auth_security_schema"));
+}
+
+#[test]
+fn domain_governance_owner_paths_exist_in_the_repository() {
+    let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+
+    for policy in domain_governance_policies() {
+        for owner_path in policy.rust_owner_files {
+            assert!(
+                repo_root.join(owner_path).exists(),
+                "{} governance owner path does not exist: {owner_path}",
+                policy.domain
+            );
+        }
+    }
 }
 
 #[test]

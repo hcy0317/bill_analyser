@@ -23,7 +23,7 @@ pub async fn ocr_config_get_runtime_handler(
         Err(response) => return route_response(response),
     };
     match load_postgres_ocr_config_setting(runtime.pool(), user_id_value).await {
-        Ok(config) => ai_route_response(build_ocr_config_success_response(&config)),
+        Ok(config) => route_response(build_ocr_config_success_response(&config)),
         Err(error) => route_response(db_error_response(error)),
     }
 }
@@ -50,11 +50,11 @@ pub async fn ocr_config_put_runtime_handler(
         Err(response) => return route_response(response),
     };
     match store_postgres_ocr_config_setting(runtime.pool(), user_id_value, Some(&payload)).await {
-        Ok(config) => ai_route_response(build_ocr_config_success_response(&config)),
+        Ok(config) => route_response(build_ocr_config_success_response(&config)),
         Err(bill_analyser_db::DbError::InvalidOperation(message))
             if message == "unknown OCR provider" =>
         {
-            ai_route_response(build_unknown_ocr_provider_response())
+            route_response(build_unknown_ocr_provider_response())
         }
         Err(error) => route_response(db_error_response(error)),
     }
@@ -95,19 +95,19 @@ pub async fn ocr_recognition_runtime_handler(
         Err(response) => return route_response(response),
     };
     if input.cancelled {
-        return ai_route_response(build_ocr_error_response(
+        return route_response(build_ocr_error_response(
             "cancelled",
             Some("request cancelled by client"),
         ));
     }
     if config.provider == OCR_DISABLED_PROVIDER_NAME {
-        return ai_route_response(build_ocr_error_response(
+        return route_response(build_ocr_error_response(
             "provider_unconfigured",
             Some("ocr provider not configured"),
         ));
     }
     if !ocr_rate_limit_try_acquire(user_id_value) {
-        return ai_route_response(build_ocr_error_response(
+        return route_response(build_ocr_error_response(
             "rate_limited",
             Some("ocr per-user rate limit exceeded"),
         ));
@@ -116,7 +116,7 @@ pub async fn ocr_recognition_runtime_handler(
         && provider_auth_is_expired(&config.credential_config, Utc::now())
     {
         if validate_llm_vision_base_url(&config.base_url).is_err() {
-            return ai_route_response(build_ocr_error_response(
+            return route_response(build_ocr_error_response(
                 "provider_unconfigured",
                 Some("OCR provider base URL is not allowed"),
             ));
@@ -128,7 +128,7 @@ pub async fn ocr_recognition_runtime_handler(
         {
             Ok(client) => client,
             Err(_) => {
-                return ai_route_response(build_ocr_error_response(
+                return route_response(build_ocr_error_response(
                     "provider_unconfigured",
                     Some("OCR provider unavailable"),
                 ))
@@ -140,7 +140,7 @@ pub async fn ocr_recognition_runtime_handler(
             {
                 Ok(refreshed) => refreshed,
                 Err(_) => {
-                    return ai_route_response(build_ocr_error_response(
+                    return route_response(build_ocr_error_response(
                         "provider_relogin_required",
                         Some(
                             "OCR provider authorization expired; sign in again or refresh credentials",
@@ -174,13 +174,13 @@ pub async fn ocr_recognition_runtime_handler(
     let provider_result =
         match run_ocr_provider(&config, input.image_bytes, input.mime.clone()).await {
             Ok(result) => result,
-            Err(failure) => return ai_route_response(ocr_provider_failure_response(failure)),
+            Err(failure) => return route_response(ocr_provider_failure_response(failure)),
         };
     let draft_context = match load_receipt_draft_context(runtime.connection(), user_id_value).await {
         Ok(context) => context,
         Err(response) => return route_response(response),
     };
-    ai_route_response(build_ocr_recognition_success_response_with_context(
+    route_response(build_ocr_recognition_success_response_with_context(
         &config.provider,
         &provider_result,
         &request_id,

@@ -84,7 +84,7 @@ pub async fn llm_analyze_transactions_runtime_handler(
             if rows.is_empty() {
                 return route_response(ImportV2RouteResponse {
                     status_code: 200,
-                    body: bill_analyser_core::build_llm_analysis_response(
+                    body: build_llm_analysis_response(
                         Vec::new(),
                         &json!({"session_id": session_id}),
                     ),
@@ -278,7 +278,7 @@ pub async fn llm_analyze_transactions_runtime_handler(
             }
             route_response(ImportV2RouteResponse {
                 status_code: 200,
-                body: bill_analyser_core::build_llm_analysis_response(
+                body: build_llm_analysis_response(
                     candidates,
                     &json!({"session_id": session_id}),
                 ),
@@ -293,7 +293,7 @@ pub async fn llm_analyze_transactions_runtime_handler(
             if transactions.is_empty() {
                 return route_response(ImportV2RouteResponse {
                     status_code: 200,
-                    body: bill_analyser_core::build_llm_analysis_response(
+                    body: build_llm_analysis_response(
                         Vec::new(),
                         &json!({"bill_ids": bill_ids}),
                     ),
@@ -371,7 +371,7 @@ pub async fn llm_analyze_transactions_runtime_handler(
             }
             route_response(ImportV2RouteResponse {
                 status_code: 200,
-                body: bill_analyser_core::build_llm_analysis_response(
+                body: build_llm_analysis_response(
                     candidates,
                     &json!({"bill_ids": bill_ids}),
                 ),
