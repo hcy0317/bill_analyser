@@ -400,8 +400,60 @@ jobs:
         with:
           node-version: '22'
 
+      - name: Restore E2E Rust toolchain cache
+        id: e2e-rust-toolchain-cache
+        uses: https://github.com/actions/cache/restore@v4
+        with:
+          path: |
+            ~/.rustup/toolchains
+            ~/.rustup/update-hashes
+            ~/.rustup/settings.toml
+            ~/.cargo/bin/rustup
+            ~/.cargo/bin/cargo
+            ~/.cargo/bin/cargo-clippy
+            ~/.cargo/bin/cargo-fmt
+            ~/.cargo/bin/clippy-driver
+            ~/.cargo/bin/rustc
+            ~/.cargo/bin/rustdoc
+            ~/.cargo/bin/rustfmt
+          key: ${{ runner.os }}-rust-toolchain-slim-v2-bootstrap
+          restore-keys: |
+            ${{ runner.os }}-rust-toolchain-slim-v2-
+
+      - name: Activate cached E2E Rust tools
+        run: |
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.cargo/bin:$PATH"
+          if command -v rustup >/dev/null 2>&1; then
+            rustup --version
+          fi
+          if command -v cargo >/dev/null 2>&1; then
+            cargo --version
+          fi
+
       - name: Setup E2E Rust stable
         uses: https://github.com/dtolnay/rust-toolchain@stable
+
+      - name: Restore E2E Cargo cache
+        id: e2e-cargo-cache
+        uses: https://github.com/actions/cache/restore@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+          key: ${{ runner.os }}-cargo-slim-v1-stable-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-slim-v1-stable-
+
+      - name: Restore E2E npm cache
+        id: e2e-npm-cache
+        uses: https://github.com/actions/cache/restore@v4
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-npm-slim-v1-${{ hashFiles('src/web/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-npm-slim-v1-
 
       - name: Install locked E2E dependencies
         run: npm ci --prefix src/web

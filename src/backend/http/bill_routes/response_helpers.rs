@@ -35,12 +35,6 @@ fn user_id_from_headers(headers: &HeaderMap, config: &HttpShellConfig) -> RouteR
     })
 }
 
-fn route_contract_response(response: RouteResponseContract) -> Response {
-    let status =
-        StatusCode::from_u16(response.status_code).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
-    json_response(status, response.body)
-}
-
 fn response_error_text(response: Response) -> Option<String> {
     let status = response.status();
     if status == StatusCode::BAD_REQUEST {
@@ -56,6 +50,17 @@ fn json_response(status: StatusCode, body: Value) -> Response {
 
 fn success_result(status: StatusCode, result: Value) -> Response {
     json_response(status, json!({ "success": true, "result": result }))
+}
+
+fn error_result(status: StatusCode, message: impl ToString, result: Value) -> Response {
+    json_response(
+        status,
+        json!({
+            "success": false,
+            "error": message.to_string(),
+            "result": result,
+        }),
+    )
 }
 
 fn bad_request(message: impl ToString) -> Response {
@@ -127,5 +132,21 @@ mod response_helper_tests {
         let (status, error) = response_value(error_response(StatusCode::CONFLICT, "duplicate")).await;
         assert_eq!(status, StatusCode::CONFLICT);
         assert_eq!(error, json!({"success": false, "error": "duplicate"}));
+
+        let (status, error_with_result) = response_value(error_result(
+            StatusCode::BAD_REQUEST,
+            "invalid item",
+            json!({"failedIndex": 2}),
+        ))
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(
+            error_with_result,
+            json!({
+                "success": false,
+                "error": "invalid item",
+                "result": {"failedIndex": 2}
+            })
+        );
     }
 }

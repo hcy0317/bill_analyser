@@ -92,20 +92,6 @@ pub fn batch_create_success_response(items: Vec<Value>, ids: Vec<String>) -> Bat
     }
 }
 
-/// 将批量创建成功 payload 包装成路由响应合同。
-pub fn batch_create_success_route_response(
-    items: Vec<Value>,
-    ids: Vec<String>,
-) -> RouteResponseContract {
-    RouteResponseContract {
-        status_code: 201,
-        body: success_result_body(
-            serde_json::to_value(batch_create_success_response(items, ids))
-                .expect("batch create result should serialize"),
-        ),
-    }
-}
-
 /// 生成批量创建部分失败的业务响应，保留成功项和逐条错误明细。
 pub fn batch_create_failure_response(
     failed_index: usize,
@@ -118,63 +104,6 @@ pub fn batch_create_failure_response(
         items: created_items,
         ids: created_ids,
     }
-}
-
-/// 生成批量创建在 payload 预处理阶段失败时的路由响应。
-pub fn batch_create_prepare_error_route_response(
-    error: impl Into<String>,
-    failed_index: usize,
-) -> RouteResponseContract {
-    RouteResponseContract {
-        status_code: 400,
-        body: error_result_body(error, batch_create_prepare_error_result(failed_index)),
-    }
-}
-
-/// 生成批量创建在持久化阶段失败时的路由响应。
-pub fn batch_create_persist_error_route_response(
-    error: impl Into<String>,
-    failed_index: usize,
-    created_items: Vec<Value>,
-    created_ids: Vec<String>,
-) -> RouteResponseContract {
-    RouteResponseContract {
-        status_code: 500,
-        body: error_result_body(
-            error,
-            serde_json::to_value(batch_create_failure_response(
-                failed_index,
-                created_items,
-                created_ids,
-            ))
-            .expect("batch create failure result should serialize"),
-        ),
-    }
-}
-
-/// 生成删除单笔正式账单后的兼容 payload。
-pub fn delete_bill_success_payload() -> Value {
-    let mut payload = Map::new();
-    payload.insert("success".to_string(), Value::Bool(true));
-    payload.insert("result".to_string(), Value::Bool(true));
-    payload.insert(
-        "message".to_string(),
-        Value::String("Bill deleted successfully".to_string()),
-    );
-    Value::Object(payload)
-}
-
-/// 生成批量删除后的删除数量 payload。
-pub fn batch_delete_success_payload(deleted_count: usize) -> Value {
-    let mut result = Map::new();
-    result.insert(
-        "deleted_count".to_string(),
-        Value::Number(Number::from(deleted_count)),
-    );
-    let mut payload = Map::new();
-    payload.insert("success".to_string(), Value::Bool(true));
-    payload.insert("result".to_string(), Value::Object(result));
-    Value::Object(payload)
 }
 
 /// 汇总批量更新前后受影响账户，供余额重算去重使用。

@@ -199,7 +199,7 @@ async fn delete_bill_path_handler(
 ) -> Response {
     #[cfg(not(coverage))]
     tracing::info!(domain = "bills", operation = "delete_bill_path_handler", "business operation entered");
-    delete_bill_response(state, headers, bill_id, delete_bill_success_payload()).await
+    delete_bill_response(state, headers, bill_id).await
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -207,7 +207,6 @@ async fn delete_bill_response(
     state: HttpAppState,
     headers: HeaderMap,
     bill_id: i64,
-    success_body: Value,
 ) -> Response {
     let user_id = match user_id_from_headers(&headers, &state.config) {
         Ok(value) => value,
@@ -219,10 +218,21 @@ async fn delete_bill_response(
             Err(response) => return *response,
         };
         return match delete_postgres_bill(runtime.pool(), user_id.get() as i64, bill_id).await {
-            Ok(true) => json_response(StatusCode::OK, success_body),
+            Ok(true) => delete_bill_success_response(),
             Ok(false) => not_found("Bill not found"),
             Err(_) => db_error_response(),
         };
+}
+
+fn delete_bill_success_response() -> Response {
+    json_response(
+        StatusCode::OK,
+        json!({
+            "success": true,
+            "result": true,
+            "message": "Bill deleted successfully",
+        }),
+    )
 }
 
 #[cfg(test)]
@@ -287,5 +297,23 @@ mod crud_handler_tests {
         }
         assert!(!include_str!("query.rs").contains("fn postgres_filters_from_query"));
         assert!(!include_str!("record_presenters.rs").contains("fn page_to_frontend_postgres"));
+    }
+
+    #[tokio::test]
+    async fn delete_success_response_preserves_legacy_result_and_message() {
+        let response = delete_bill_success_response();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("delete response bytes");
+        let body: Value = serde_json::from_slice(&body).expect("delete response JSON");
+        assert_eq!(
+            body,
+            json!({
+                "success": true,
+                "result": true,
+                "message": "Bill deleted successfully"
+            })
+        );
     }
 }

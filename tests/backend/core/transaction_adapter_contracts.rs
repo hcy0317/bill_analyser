@@ -1,31 +1,22 @@
 use bill_analyser_core::adapters::transaction::{
     apply_create_category_contract, apply_manual_create_defaults, batch_create_failure_response,
-    batch_create_persist_error_route_response, batch_create_prepare_error_route_response,
-    batch_create_success_response, batch_create_success_route_response,
-    batch_create_transaction_items, batch_delete_success_payload,
+    batch_create_success_response, batch_create_transaction_items,
     batch_update_balance_sync_account_ids, batch_update_response, build_reconciliation_filters,
     build_reconciliation_transactions, calculate_account_balance_from_bills,
-    calculate_reconciliation_summary, delete_bill_success_payload,
-    frontend_transaction_from_backend, frontend_transaction_mutation_to_backend,
-    invalid_reconciliation_account_id_response, invalid_transaction_picture_file_response,
-    is_allowed_transaction_picture_filename, is_formula_like_export_cell,
-    missing_reconciliation_parameters_response, missing_transaction_picture_file_response,
-    missing_unused_transaction_picture_id_response, month_date_range, parse_reconciliation_query,
-    reconciliation_account_not_found_response, reconciliation_category_filters,
-    reconciliation_internal_error_response, reconciliation_opening_balance,
-    reconciliation_result_payload, reconciliation_success_response, reconciliation_type_filter,
-    remove_unused_transaction_picture_success_payload,
-    remove_unused_transaction_picture_success_response, secure_picture_file_name,
-    serialize_export_cell, serialize_optional_export_cell, sync_account_ids_for_batch_delete,
-    sync_account_ids_for_bill, sync_account_ids_for_update, transaction_list_type_filter,
+    calculate_reconciliation_summary, frontend_transaction_from_backend,
+    frontend_transaction_mutation_to_backend, is_allowed_transaction_picture_filename,
+    is_formula_like_export_cell, month_date_range, parse_reconciliation_query,
+    reconciliation_category_filters, reconciliation_opening_balance, reconciliation_result_payload,
+    reconciliation_type_filter, secure_picture_file_name, serialize_export_cell,
+    serialize_optional_export_cell, sync_account_ids_for_batch_delete, sync_account_ids_for_bill,
+    sync_account_ids_for_update, transaction_list_type_filter,
     transaction_picture_data_url_from_base64, transaction_picture_delete_path,
-    transaction_picture_extension, transaction_picture_internal_error_response,
-    transaction_picture_mime_type, transaction_picture_upload_id,
-    transaction_picture_upload_success_payload, transaction_picture_upload_success_response,
-    unsupported_transaction_picture_type_message, unsupported_transaction_picture_type_response,
-    validate_batch_route_update_fields, validate_bill_create_fields, validate_bill_update_fields,
-    AccountBalanceBill, BackendTransactionView, BillAccountSyncSnapshot, FrontendTransactionTag,
-    ReconciliationBill, ReconciliationCategoryRecord, ReconciliationOpeningBalanceSnapshot,
+    transaction_picture_extension, transaction_picture_mime_type, transaction_picture_upload_id,
+    unsupported_transaction_picture_type_message, validate_batch_route_update_fields,
+    validate_bill_create_fields, validate_bill_update_fields, AccountBalanceBill,
+    BackendTransactionView, BillAccountSyncSnapshot, FrontendTransactionTag, ReconciliationBill,
+    ReconciliationCategoryRecord, ReconciliationOpeningBalanceSnapshot,
+    TransactionPictureUploadResult,
 };
 use bill_analyser_core::primitives::{Money, TransactionType, UtcOffsetMinutes};
 use bill_analyser_core::ErrorCode;
@@ -458,15 +449,6 @@ fn batch_create_items_and_update_field_guards_match_route_and_db_contracts() {
     assert_eq!(success["ids"], json!(["1", "2"]));
     assert!(success.get("failedIndex").is_none());
 
-    let success_route = batch_create_success_route_response(
-        vec![json!({"id": "1"}), json!({"id": "2"})],
-        vec!["1".to_string(), "2".to_string()],
-    );
-    assert_eq!(success_route.status_code, 201);
-    assert_eq!(success_route.body["success"], true);
-    assert_eq!(success_route.body["result"]["createdCount"], 2);
-    assert_eq!(success_route.body["result"]["ids"], json!(["1", "2"]));
-
     let failure = serde_json::to_value(batch_create_failure_response(
         3,
         vec![json!({"id": "1"})],
@@ -478,43 +460,6 @@ fn batch_create_items_and_update_field_guards_match_route_and_db_contracts() {
     assert_eq!(failure["items"], json!([{"id": "1"}]));
     assert_eq!(failure["ids"], json!(["1"]));
 
-    let prepare_error = batch_create_prepare_error_route_response("bad input", 3);
-    assert_eq!(prepare_error.status_code, 400);
-    assert_eq!(prepare_error.body["success"], false);
-    assert_eq!(prepare_error.body["error"], "bad input");
-    assert_eq!(prepare_error.body["result"]["failedIndex"], 3);
-    assert_eq!(prepare_error.body["result"]["createdCount"], 0);
-    assert_eq!(prepare_error.body["result"]["items"], json!([]));
-    assert!(prepare_error.body["result"].get("ids").is_none());
-
-    let persist_error = batch_create_persist_error_route_response(
-        "db failed",
-        2,
-        vec![json!({"id": "1"})],
-        vec!["1".to_string()],
-    );
-    assert_eq!(persist_error.status_code, 500);
-    assert_eq!(persist_error.body["success"], false);
-    assert_eq!(persist_error.body["error"], "db failed");
-    assert_eq!(persist_error.body["result"]["failedIndex"], 2);
-    assert_eq!(persist_error.body["result"]["createdCount"], 1);
-    assert_eq!(persist_error.body["result"]["ids"], json!(["1"]));
-
-    let first_persist_error =
-        batch_create_persist_error_route_response("db failed", 0, Vec::new(), Vec::new());
-    assert_eq!(first_persist_error.status_code, 500);
-    assert_eq!(first_persist_error.body["result"]["createdCount"], 0);
-    assert_eq!(first_persist_error.body["result"]["items"], json!([]));
-    assert_eq!(first_persist_error.body["result"]["ids"], json!([]));
-
-    assert_eq!(
-        delete_bill_success_payload(),
-        json!({"success": true, "result": true, "message": "Bill deleted successfully"})
-    );
-    assert_eq!(
-        batch_delete_success_payload(2),
-        json!({"success": true, "result": {"deleted_count": 2}})
-    );
     assert_eq!(
         batch_update_balance_sync_account_ids(["amount_cents", "source_account_id"]),
         Vec::<i64>::new()
@@ -645,52 +590,25 @@ fn account_sync_ids_and_balance_formula_cover_crud_update_delete_paths() {
 }
 
 #[test]
-fn reconciliation_query_filters_and_error_envelopes_match_bills_route_contract() {
+fn reconciliation_query_filters_and_errors_are_transport_neutral() {
     let missing = parse_reconciliation_query(None, Some(0), Some(0), None, None, None)
-        .expect_err("missing account_id should produce route error");
-    assert_eq!(missing.status_code, 400);
+        .expect_err("missing account_id should produce a typed error");
+    assert_eq!(missing.code, ErrorCode::InvalidInput);
     assert_eq!(
-        missing.body,
-        json!({"success": false, "error": "Missing required parameters: account_id, start_time, end_time"})
+        missing.message,
+        "Missing required parameters: account_id, start_time, end_time"
     );
-    assert_eq!(missing, missing_reconciliation_parameters_response());
 
     let invalid = parse_reconciliation_query(Some("abc"), Some(0), Some(0), None, None, None)
-        .expect_err("non-integer account_id should produce route error");
-    assert_eq!(invalid.status_code, 400);
-    assert_eq!(
-        invalid.body,
-        json!({"success": false, "error": "Invalid account_id: abc"})
-    );
-    assert_eq!(invalid, invalid_reconciliation_account_id_response("abc"));
+        .expect_err("non-integer account_id should produce a typed error");
+    assert_eq!(invalid.code, ErrorCode::InvalidInput);
+    assert_eq!(invalid.message, "Invalid account_id: abc");
 
     let timestamp_error =
         parse_reconciliation_query(Some("abc"), Some(i64::MAX), Some(0), None, None, None)
             .expect_err("date conversion should run before account_id parsing");
-    assert_eq!(timestamp_error.status_code, 500);
-    assert_eq!(
-        timestamp_error.body,
-        json!({
-            "success": false,
-            "error": "invalid reconciliation start_time",
-            "message": "Failed to retrieve reconciliation statements"
-        })
-    );
-
-    assert_eq!(
-        reconciliation_account_not_found_response().body,
-        json!({"success": false, "error": "Account not found"})
-    );
-    let internal = reconciliation_internal_error_response("reconciliation boom");
-    assert_eq!(internal.status_code, 500);
-    assert_eq!(
-        internal.body,
-        json!({
-            "success": false,
-            "error": "reconciliation boom",
-            "message": "Failed to retrieve reconciliation statements"
-        })
-    );
+    assert_eq!(timestamp_error.code, ErrorCode::InternalError);
+    assert_eq!(timestamp_error.message, "invalid reconciliation start_time");
 
     let params = parse_reconciliation_query(
         Some("1"),
@@ -965,11 +883,7 @@ fn reconciliation_summary_transactions_and_payload_pin_current_balance_trace() {
     assert_eq!(payload["itemCount"], 3);
     assert_eq!(payload["transactions"][0]["id"], "expense");
 
-    let response =
-        reconciliation_success_response(&params, "现金账户", &summary, transactions).unwrap();
-    assert_eq!(response.status_code, 200);
-    assert_eq!(response.body["success"], true);
-    assert_eq!(response.body["result"], payload);
+    assert_eq!(transactions.len(), 3);
 }
 
 #[test]
@@ -1037,45 +951,14 @@ fn transaction_picture_upload_contract_matches_rest_route_envelope_and_validatio
         "data:image/png;base64,YWJj"
     );
 
-    let success = transaction_picture_upload_success_response(
-        "pic.png",
-        transaction_picture_data_url_from_base64("pic.png", "YWJj"),
-    );
-    assert_eq!(success.status_code, 200);
+    let result = serde_json::to_value(TransactionPictureUploadResult {
+        picture_id: "pic.png".to_string(),
+        original_url: transaction_picture_data_url_from_base64("pic.png", "YWJj"),
+    })
+    .unwrap();
     assert_eq!(
-        success.body,
-        json!({"success": true, "result": {"pictureId": "pic.png", "originalUrl": "data:image/png;base64,YWJj"}})
-    );
-    assert_eq!(
-        transaction_picture_upload_success_payload("pic.webp", "data:image/webp;base64,abc"),
-        json!({"success": true, "result": {"pictureId": "pic.webp", "originalUrl": "data:image/webp;base64,abc"}})
-    );
-
-    let missing = missing_transaction_picture_file_response();
-    assert_eq!(missing.status_code, 400);
-    assert_eq!(
-        missing.body,
-        json!({"success": false, "error": "Missing picture file"})
-    );
-    assert_eq!(
-        invalid_transaction_picture_file_response().body,
-        json!({"success": false, "error": "Invalid picture file"})
-    );
-    assert_eq!(
-        unsupported_transaction_picture_type_response().status_code,
-        400
-    );
-    assert_eq!(
-        unsupported_transaction_picture_type_response().body,
-        json!({"success": false, "error": message})
-    );
-    assert_eq!(
-        transaction_picture_internal_error_response("picture boom").body,
-        json!({"success": false, "error": "picture boom"})
-    );
-    assert_eq!(
-        transaction_picture_internal_error_response("picture boom").status_code,
-        500
+        result,
+        json!({"pictureId": "pic.png", "originalUrl": "data:image/png;base64,YWJj"})
     );
 }
 
@@ -1093,20 +976,5 @@ fn unused_transaction_picture_delete_contract_is_best_effort_and_filename_saniti
     assert_eq!(
         transaction_picture_delete_path(upload_root, "LPT1.webp"),
         upload_root.join("_LPT1.webp")
-    );
-
-    let missing = missing_unused_transaction_picture_id_response();
-    assert_eq!(missing.status_code, 400);
-    assert_eq!(
-        missing.body,
-        json!({"success": false, "error": "Missing picture id"})
-    );
-
-    let success = remove_unused_transaction_picture_success_response();
-    assert_eq!(success.status_code, 200);
-    assert_eq!(success.body, json!({"success": true, "result": true}));
-    assert_eq!(
-        remove_unused_transaction_picture_success_payload(),
-        json!({"success": true, "result": true})
     );
 }

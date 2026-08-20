@@ -14,32 +14,26 @@ use axum::{
 };
 use base64::{engine::general_purpose, Engine as _};
 use bill_analyser_core::adapters::transaction::{
-    apply_create_category_contract, apply_manual_create_defaults,
-    batch_create_persist_error_route_response, batch_create_prepare_error_route_response,
-    batch_create_success_route_response, batch_create_transaction_items,
-    batch_delete_success_payload, batch_update_response, build_reconciliation_transactions,
-    calculate_reconciliation_summary, delete_bill_success_payload,
+    apply_create_category_contract, apply_manual_create_defaults, batch_create_failure_response,
+    batch_create_success_response, batch_create_transaction_items, batch_update_response,
+    build_reconciliation_transactions, calculate_reconciliation_summary,
     frontend_transaction_from_backend, frontend_transaction_mutation_to_backend,
-    frontend_transaction_type_from_backend, invalid_transaction_picture_file_response,
-    is_allowed_transaction_picture_filename, missing_transaction_picture_file_response,
-    missing_unused_transaction_picture_id_response, parse_reconciliation_query,
-    reconciliation_account_not_found_response, reconciliation_category_filters,
-    reconciliation_internal_error_response, reconciliation_opening_balance,
-    reconciliation_result_payload, reconciliation_type_filter,
-    remove_unused_transaction_picture_success_response, serialize_optional_export_cell,
+    frontend_transaction_type_from_backend, is_allowed_transaction_picture_filename,
+    parse_reconciliation_query, reconciliation_category_filters, reconciliation_opening_balance,
+    reconciliation_result_payload, reconciliation_type_filter, serialize_optional_export_cell,
     transaction_list_type_filter, transaction_picture_data_url_from_base64,
-    transaction_picture_delete_path, transaction_picture_internal_error_response,
-    transaction_picture_upload_id, transaction_picture_upload_success_response,
-    unsupported_transaction_picture_type_response, BackendTransactionView, FrontendTransactionTag,
-    ReconciliationOpeningBalanceSnapshot, ReconciliationQueryParams, RouteResponseContract,
-    EXPORT_COLUMNS,
+    transaction_picture_delete_path, transaction_picture_upload_id,
+    unsupported_transaction_picture_type_message, BackendTransactionView, FrontendTransactionTag,
+    ReconciliationOpeningBalanceSnapshot, ReconciliationQueryParams,
+    TransactionPictureUploadResult, EXPORT_COLUMNS,
 };
 use bill_analyser_core::category_rules::{
     escape_rule_expression_term, select_category_rule_candidate, CategoryRuleCandidate,
     CategoryRuleCandidateDraft,
 };
 use bill_analyser_core::{
-    LedgerEntry, LedgerEntryPage, LedgerListQuery, Money, RuntimeError, UserId, UtcOffsetMinutes,
+    ErrorCode, LedgerEntry, LedgerEntryPage, LedgerListQuery, Money, RuntimeError, UserId,
+    UtcOffsetMinutes,
 };
 use bill_analyser_db::{
     batch_create_postgres_bills, batch_delete_postgres_bills, batch_update_postgres_bills,

@@ -23,23 +23,38 @@ async fn reconciliation_statements_handler(
         query.keyword.as_deref(),
     ) {
         Ok(value) => value,
-        Err(response) => return route_contract_response(response),
+        Err(error) => return reconciliation_query_error_response(error),
     };
 
+    let runtime = match open_postgres_runtime(&state, "bills") {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    match reconciliation_statement_payload_postgres(runtime.pool(), user_id, &params).await {
+        Ok(Some(result)) => success_result(StatusCode::OK, result),
+        Ok(None) => not_found("Account not found"),
+        Err(error) => reconciliation_internal_error_response(error.to_string()),
+    }
+}
 
-        let runtime = match open_postgres_runtime(&state, "bills") {
-            Ok(value) => value,
-            Err(response) => return *response,
-        };
-        return match reconciliation_statement_payload_postgres(runtime.pool(), user_id, &params)
-            .await
-        {
-            Ok(Some(result)) => success_result(StatusCode::OK, result),
-            Ok(None) => route_contract_response(reconciliation_account_not_found_response()),
-            Err(error) => route_contract_response(reconciliation_internal_error_response(
-                error.to_string(),
-            )),
-        };
+fn reconciliation_query_error_response(error: RuntimeError) -> Response {
+    match error.code {
+        ErrorCode::InvalidInput => bad_request(error.message),
+        ErrorCode::SerializationError | ErrorCode::InternalError => {
+            reconciliation_internal_error_response(error.message)
+        }
+    }
+}
+
+fn reconciliation_internal_error_response(error: impl ToString) -> Response {
+    json_response(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        json!({
+            "success": false,
+            "error": error.to_string(),
+            "message": "Failed to retrieve reconciliation statements",
+        }),
+    )
 }
 
 const RECONCILIATION_QUERY_LIMIT: usize = 10_000;
@@ -182,4 +197,82 @@ async fn load_postgres_reconciliation_opening_snapshots(
     Ok(vec![ReconciliationOpeningBalanceSnapshot {
         account_balance: summary.closing_balance,
     }])
+}
+
+#[cfg(test)]
+mod reconciliation_response_tests {
+    use super::*;
+    use axum::body::to_bytes;
+
+    async fn response_value(response: Response) -> (StatusCode, Value) {
+        let status = response.status();
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("reconciliation response bytes");
+        (
+            status,
+            serde_json::from_slice(&body).expect("reconciliation response JSON"),
+        )
+    }
+
+    #[tokio::test]
+    async fn reconciliation_query_errors_preserve_public_status_and_envelope() {
+        let missing = parse_reconciliation_query(None, Some(0), Some(0), None, None, None)
+            .expect_err("missing account id");
+        let (status, body) = response_value(reconciliation_query_error_response(missing)).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(
+            body,
+            json!({
+                "success": false,
+                "error": "Missing required parameters: account_id, start_time, end_time"
+            })
+        );
+
+        let invalid = parse_reconciliation_query(
+            Some("abc"),
+            Some(i64::MAX),
+            Some(0),
+            None,
+            None,
+            None,
+        )
+        .expect_err("timestamp validation must precede account id parsing");
+        let (status, body) = response_value(reconciliation_query_error_response(invalid)).await;
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(
+            body,
+            json!({
+                "success": false,
+                "error": "invalid reconciliation start_time",
+                "message": "Failed to retrieve reconciliation statements"
+            })
+        );
+
+        let invalid_account =
+            parse_reconciliation_query(Some("abc"), Some(0), Some(0), None, None, None)
+                .expect_err("invalid account id");
+        let (status, body) =
+            response_value(reconciliation_query_error_response(invalid_account)).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(
+            body,
+            json!({"success": false, "error": "Invalid account_id: abc"})
+        );
+    }
+
+    #[tokio::test]
+    async fn reconciliation_internal_error_preserves_compatibility_message() {
+        let (status, body) =
+            response_value(reconciliation_internal_error_response("reconciliation boom")).await;
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(
+            body,
+            json!({
+                "success": false,
+                "error": "reconciliation boom",
+                "message": "Failed to retrieve reconciliation statements"
+            })
+        );
+    }
 }

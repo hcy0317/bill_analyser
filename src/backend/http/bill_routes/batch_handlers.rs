@@ -25,10 +25,7 @@ async fn batch_create_bills_handler(
         let item_objects = match batch_create_transaction_items(&payload) {
             Ok(value) => value,
             Err(error) => {
-                return route_contract_response(batch_create_prepare_error_route_response(
-                    error.to_string(),
-                    0,
-                ))
+                return batch_create_prepare_error_response(error.to_string(), 0)
             }
         };
         let mut drafts = Vec::with_capacity(item_objects.len());
@@ -39,9 +36,7 @@ async fn batch_create_bills_handler(
                 Err(response) => {
                     let error = response_error_text(*response)
                         .unwrap_or_else(|| "Invalid bill payload".to_string());
-                    return route_contract_response(batch_create_prepare_error_route_response(
-                        error, index,
-                    ));
+                    return batch_create_prepare_error_response(error, index);
                 }
             }
         }
@@ -49,12 +44,12 @@ async fn batch_create_bills_handler(
             match batch_create_postgres_bills(runtime.pool(), user_id.get() as i64, &drafts).await {
                 Ok(value) => value,
                 Err(error) => {
-                    return route_contract_response(batch_create_persist_error_route_response(
+                    return batch_create_persist_error_response(
                         error.to_string(),
                         0,
                         Vec::new(),
                         Vec::new(),
-                    ))
+                    )
                 }
             };
         let mut items = Vec::with_capacity(bill_ids.len());
@@ -68,7 +63,43 @@ async fn batch_create_bills_handler(
                 Ok(None) | Err(_) => return db_error_response(),
             }
         }
-        return route_contract_response(batch_create_success_route_response(items, ids));
+        return batch_create_success_response_projection(items, ids);
+}
+
+fn batch_create_success_response_projection(items: Vec<Value>, ids: Vec<String>) -> Response {
+    let result = serde_json::to_value(batch_create_success_response(items, ids))
+        .expect("batch create result should serialize");
+    success_result(StatusCode::CREATED, result)
+}
+
+fn batch_create_prepare_error_response(
+    error: impl ToString,
+    failed_index: usize,
+) -> Response {
+    error_result(
+        StatusCode::BAD_REQUEST,
+        error,
+        json!({
+            "failedIndex": failed_index,
+            "createdCount": 0,
+            "items": [],
+        }),
+    )
+}
+
+fn batch_create_persist_error_response(
+    error: impl ToString,
+    failed_index: usize,
+    created_items: Vec<Value>,
+    created_ids: Vec<String>,
+) -> Response {
+    let result = serde_json::to_value(batch_create_failure_response(
+        failed_index,
+        created_items,
+        created_ids,
+    ))
+    .expect("batch create failure result should serialize");
+    error_result(StatusCode::INTERNAL_SERVER_ERROR, error, result)
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -157,8 +188,62 @@ async fn batch_delete_bills_handler(
         .await
         {
             Ok(deleted_count) => {
-                json_response(StatusCode::OK, batch_delete_success_payload(deleted_count))
+                success_result(StatusCode::OK, json!({"deleted_count": deleted_count}))
             }
             Err(_) => db_error_response(),
         };
+}
+
+#[cfg(test)]
+mod batch_response_tests {
+    use super::*;
+    use axum::body::to_bytes;
+
+    async fn response_value(response: Response) -> (StatusCode, Value) {
+        let status = response.status();
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("batch response bytes");
+        (
+            status,
+            serde_json::from_slice(&body).expect("batch response JSON"),
+        )
+    }
+
+    #[tokio::test]
+    async fn batch_create_response_projection_preserves_status_and_compatibility_fields() {
+        let (status, success) = response_value(batch_create_success_response_projection(
+            vec![json!({"id": "1"}), json!({"id": "2"})],
+            vec!["1".to_string(), "2".to_string()],
+        ))
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+        assert_eq!(success["success"], true);
+        assert_eq!(success["result"]["createdCount"], 2);
+        assert_eq!(success["result"]["ids"], json!(["1", "2"]));
+
+        let (status, prepare_error) =
+            response_value(batch_create_prepare_error_response("bad input", 3)).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(prepare_error["success"], false);
+        assert_eq!(prepare_error["error"], "bad input");
+        assert_eq!(prepare_error["result"]["failedIndex"], 3);
+        assert_eq!(prepare_error["result"]["createdCount"], 0);
+        assert_eq!(prepare_error["result"]["items"], json!([]));
+        assert!(prepare_error["result"].get("ids").is_none());
+
+        let (status, persist_error) = response_value(batch_create_persist_error_response(
+            "db failed",
+            2,
+            vec![json!({"id": "1"})],
+            vec!["1".to_string()],
+        ))
+        .await;
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(persist_error["success"], false);
+        assert_eq!(persist_error["error"], "db failed");
+        assert_eq!(persist_error["result"]["failedIndex"], 2);
+        assert_eq!(persist_error["result"]["createdCount"], 1);
+        assert_eq!(persist_error["result"]["ids"], json!(["1"]));
+    }
 }

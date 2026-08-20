@@ -1,0 +1,104 @@
+{
+  "schema_version": "cyanflow-slice-evidence.v1",
+  "slice": "C7p",
+  "work_id": "bill-analyser-cyanflow-c7p-bill-response-ownership-20260820",
+  "base_commit": "72c2f427e62aceb2d5628f72795c4d051fa3951f",
+  "branch": "codex/c7p-bill-response-ownership",
+  "objective": "Make HTTP the only owner of Bill REST status and envelopes while preserving the live batch, delete, picture, and reconciliation contracts.",
+  "architecture": {
+    "owner": "crate-private src/backend/http/bill_routes response projection using existing HTTP helpers",
+    "retained_core_capabilities": [
+      "typed batch create, picture upload, and reconciliation results",
+      "bill input validation and frontend/backend value projection",
+      "picture filename, MIME, path, and data URL safety",
+      "reconciliation query parsing, ledger calculation, and typed RuntimeError"
+    ],
+    "deleted_boundaries": [
+      "core RouteResponseContract status plus JSON carrier",
+      "core batch, delete, picture, and reconciliation REST envelope builders",
+      "HTTP route_contract_response mechanical carrier adapter"
+    ],
+    "unchanged_boundaries": [
+      "REST paths, status codes, envelope fields, compatibility messages, and parsing order",
+      "database schema, user scope, queries, transactions, and writers",
+      "frontend contracts and integer-cent amount semantics"
+    ],
+    "rejected_expansion": [
+      "a new Bill outcome enum or second HTTP response carrier",
+      "a dedicated reconciliation query error used by only one adapter",
+      "a response service, trait, port, UnitOfWork, cache, or new crate"
+    ]
+  },
+  "tdd": {
+    "red": {
+      "command": "cargo test -p bill-analyser-http --test bill_route_input_contract bill_route_transport_response_owner_is_http_private -- --exact --nocapture",
+      "executed": 1,
+      "result": "failed because core still owned RouteResponseContract"
+    },
+    "green": [
+      {
+        "command": "cargo test -p bill-analyser-http --test bill_route_input_contract bill_route_transport_response_owner_is_http_private -- --exact --nocapture",
+        "executed": 1,
+        "failed": 0,
+        "ignored": 0
+      },
+      {
+        "command": "cargo test -p bill-analyser-core --test transaction_adapter_contracts",
+        "executed": 16,
+        "failed": 0,
+        "ignored": 0
+      },
+      {
+        "command": "cargo test -p bill-analyser-http --lib bill_routes -- --nocapture",
+        "executed": 18,
+        "failed": 0,
+        "ignored": 0
+      }
+    ]
+  },
+  "verification": {
+    "cargo_check_http_tests": "passed",
+    "cargo_fmt_check": "passed",
+    "cargo_clippy_workspace_all_targets_deny_warnings": "passed",
+    "cargo_test_workspace": "passed against a fresh isolated PostgreSQL database with zero failed or ignored test cases",
+    "git_diff_check": "passed",
+    "non_http_bill_rest_builder_hits": 0,
+    "legacy_route_response_carrier_hits": 0,
+    "cargo_llvm_cov_workspace": {
+      "command": "cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 35 -- --test-threads=1",
+      "result": "passed with CARGO_BUILD_JOBS=2 against a separate fresh isolated PostgreSQL database with zero failed or ignored test cases",
+      "executable_lines": 80921,
+      "covered_lines": 56190,
+      "line_coverage_percent": 69.44
+    },
+    "changed_line_coverage": {
+      "command": "node scripts/governance-normalizers.mjs changed-coverage --lcov workspace.lcov --diff .git/ai/c7p-rust-changed.diff --threshold 90 --require-matched-files --require-executable-lines --allow-no-business-files",
+      "business_files": 11,
+      "matched_files": 6,
+      "missing_lcov_files": 0,
+      "executable_changed_lines": 235,
+      "covered_changed_lines": 231,
+      "coverage_percent": 98.3,
+      "status": "passed"
+    },
+    "review": {
+      "base_ref": "72c2f427e62aceb2d5628f72795c4d051fa3951f",
+      "head_ref": "working tree on codex/c7p-bill-response-ownership",
+      "standards_axis": "APPROVE with P0=0, P1=0, and one inherited non-blocking P2",
+      "spec_axis": "APPROVE with P0=0, P1=0, and the only P2 comment mismatch fixed before delivery",
+      "verdict": "APPROVE"
+    },
+    "money_review": "No amount field, conversion, storage, or API contract changed; existing integer-cent semantics remain untouched.",
+    "delivery_evidence": "Gitea PR, exact-head Actions, squash merge, and branch-deletion evidence are added after delivery."
+  },
+  "residual_risks": [
+    "Bill response projections remain distributed by feature handler inside one HTTP module; this is intentional locality, not a new shared abstraction.",
+    "Picture and reconciliation compatibility responses still expose underlying error Display text exactly as the base implementation did; replacing it with stable public errors requires a separately characterized security slice.",
+    "This ownership cutover does not change or complete reconciliation reads, Bill business rules, import performance, or signal lifecycle work."
+  ],
+  "environment_hygiene": {
+    "test_database_strategy": "workspace and coverage gates use a dedicated C7p PostgreSQL database rather than the user business database",
+    "provider_strategy": "no OCR, LLM, payment, or other paid external call is part of this slice",
+    "secrets": "database credentials remain process-local and are absent from committed evidence"
+  }
+}

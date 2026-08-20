@@ -106,12 +106,6 @@ pub struct BatchCreateResult {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct RouteResponseContract {
-    pub status_code: u16,
-    pub body: Value,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TransactionPictureUploadResult {
     pub picture_id: String,

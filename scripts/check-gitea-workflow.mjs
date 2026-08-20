@@ -51,10 +51,42 @@ const RUST_WORKSPACE_COVERAGE_COMMAND = 'cargo llvm-cov --workspace --lcov --out
 const RUST_ONLY_COMMAND = 'node scripts/check-rust-only-source-tree.mjs';
 const FRONTEND_COVERAGE_SCRIPT = 'cross-env CI=1 COVERAGE_GATE=1 TS_NODE_PROJECT="./tsconfig.jest.json" jest --maxWorkers=50% --coverage';
 const E2E_SUPERVISOR_COMMAND = 'npm --prefix src/web run e2e:ci:smoke';
+const E2E_RUST_TOOLCHAIN_CACHE_PATHS = [
+    '~/.rustup/toolchains',
+    '~/.rustup/update-hashes',
+    '~/.rustup/settings.toml',
+    '~/.cargo/bin/rustup',
+    '~/.cargo/bin/cargo',
+    '~/.cargo/bin/cargo-clippy',
+    '~/.cargo/bin/cargo-fmt',
+    '~/.cargo/bin/clippy-driver',
+    '~/.cargo/bin/rustc',
+    '~/.cargo/bin/rustdoc',
+    '~/.cargo/bin/rustfmt',
+].join('\n');
+const E2E_CARGO_CACHE_PATHS = [
+    '~/.cargo/registry/index',
+    '~/.cargo/registry/cache',
+    '~/.cargo/git/db',
+].join('\n');
+const E2E_ACTIVATE_RUST_TOOLS = [
+    'echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"',
+    'export PATH="$HOME/.cargo/bin:$PATH"',
+    'if command -v rustup >/dev/null 2>&1; then',
+    'rustup --version',
+    'fi',
+    'if command -v cargo >/dev/null 2>&1; then',
+    'cargo --version',
+    'fi',
+].join('\n');
 const E2E_SETUP_STEPS = [
     'Checkout E2E source',
     'Setup E2E Node.js 22',
+    'Restore E2E Rust toolchain cache',
+    'Activate cached E2E Rust tools',
     'Setup E2E Rust stable',
+    'Restore E2E Cargo cache',
+    'Restore E2E npm cache',
     'Install locked E2E dependencies',
     'Install Playwright Chromium',
 ];
@@ -284,6 +316,32 @@ function validateCleanupOrder(job, jobId, gateName, cleanupName) {
     }
 }
 
+function validateRestoreCacheStep(step, jobId, {
+    id,
+    paths,
+    key,
+    restoreKeys,
+}) {
+    if (step.uses !== 'https://github.com/actions/cache/restore@v4') {
+        throw new Error(`${jobId}/${step.name} must use actions/cache/restore@v4`);
+    }
+    if (step.id !== id) {
+        throw new Error(`${jobId}/${step.name} id drift`);
+    }
+    if (normalizeCommand(step.with?.path) !== normalizeCommand(paths)) {
+        throw new Error(`${jobId}/${step.name} cache path drift`);
+    }
+    if (String(step.with?.key ?? '') !== key) {
+        throw new Error(`${jobId}/${step.name} cache key drift`);
+    }
+    if (normalizeCommand(step.with?.['restore-keys']) !== normalizeCommand(restoreKeys)) {
+        throw new Error(`${jobId}/${step.name} restore key drift`);
+    }
+    if (/(?:^|\n)(?:target|node_modules|dist|coverage|workspace\.lcov)(?:\n|$)/.test(normalizeCommand(step.with?.path))) {
+        throw new Error(`${jobId}/${step.name} must not cache generated outputs`);
+    }
+}
+
 function validateRequiredE2e(workflow) {
     const job = requiredJob(workflow, 'e2e-ci');
     if (job['runs-on'] !== 'ubuntu-latest') {
@@ -353,6 +411,25 @@ function validateRequiredE2e(workflow) {
     if (setupRust.uses !== 'https://github.com/dtolnay/rust-toolchain@stable') {
         throw new Error('e2e-ci Rust setup drift');
     }
+    validateRestoreCacheStep(requiredStep(job, 'e2e-ci', 'Restore E2E Rust toolchain cache'), 'e2e-ci', {
+        id: 'e2e-rust-toolchain-cache',
+        paths: E2E_RUST_TOOLCHAIN_CACHE_PATHS,
+        key: '${{ runner.os }}-rust-toolchain-slim-v2-bootstrap',
+        restoreKeys: '${{ runner.os }}-rust-toolchain-slim-v2-',
+    });
+    requiredStep(job, 'e2e-ci', 'Activate cached E2E Rust tools', E2E_ACTIVATE_RUST_TOOLS);
+    validateRestoreCacheStep(requiredStep(job, 'e2e-ci', 'Restore E2E Cargo cache'), 'e2e-ci', {
+        id: 'e2e-cargo-cache',
+        paths: E2E_CARGO_CACHE_PATHS,
+        key: "${{ runner.os }}-cargo-slim-v1-stable-${{ hashFiles('Cargo.lock') }}",
+        restoreKeys: '${{ runner.os }}-cargo-slim-v1-stable-',
+    });
+    validateRestoreCacheStep(requiredStep(job, 'e2e-ci', 'Restore E2E npm cache'), 'e2e-ci', {
+        id: 'e2e-npm-cache',
+        paths: '~/.npm',
+        key: "${{ runner.os }}-npm-slim-v1-${{ hashFiles('src/web/package-lock.json') }}",
+        restoreKeys: '${{ runner.os }}-npm-slim-v1-',
+    });
     requiredStep(job, 'e2e-ci', 'Install locked E2E dependencies', 'npm ci --prefix src/web');
     requiredStep(job, 'e2e-ci', 'Install Playwright Chromium', 'npm --prefix src/web run e2e:install -- --with-deps');
     requiredStep(job, 'e2e-ci', 'Run deterministic E2E supervisor', E2E_SUPERVISOR_COMMAND);
@@ -573,7 +650,38 @@ function workflowFixture() {
                 steps: [
                     { ...checkout(), name: 'Checkout E2E source' },
                     { name: 'Setup E2E Node.js 22', uses: 'https://github.com/actions/setup-node@v4', with: { 'node-version': '22' } },
+                    {
+                        name: 'Restore E2E Rust toolchain cache',
+                        id: 'e2e-rust-toolchain-cache',
+                        uses: 'https://github.com/actions/cache/restore@v4',
+                        with: {
+                            path: E2E_RUST_TOOLCHAIN_CACHE_PATHS,
+                            key: '${{ runner.os }}-rust-toolchain-slim-v2-bootstrap',
+                            'restore-keys': '${{ runner.os }}-rust-toolchain-slim-v2-',
+                        },
+                    },
+                    { name: 'Activate cached E2E Rust tools', run: E2E_ACTIVATE_RUST_TOOLS },
                     { name: 'Setup E2E Rust stable', uses: 'https://github.com/dtolnay/rust-toolchain@stable' },
+                    {
+                        name: 'Restore E2E Cargo cache',
+                        id: 'e2e-cargo-cache',
+                        uses: 'https://github.com/actions/cache/restore@v4',
+                        with: {
+                            path: E2E_CARGO_CACHE_PATHS,
+                            key: "${{ runner.os }}-cargo-slim-v1-stable-${{ hashFiles('Cargo.lock') }}",
+                            'restore-keys': '${{ runner.os }}-cargo-slim-v1-stable-',
+                        },
+                    },
+                    {
+                        name: 'Restore E2E npm cache',
+                        id: 'e2e-npm-cache',
+                        uses: 'https://github.com/actions/cache/restore@v4',
+                        with: {
+                            path: '~/.npm',
+                            key: "${{ runner.os }}-npm-slim-v1-${{ hashFiles('src/web/package-lock.json') }}",
+                            'restore-keys': '${{ runner.os }}-npm-slim-v1-',
+                        },
+                    },
                     { name: 'Install locked E2E dependencies', run: 'npm ci --prefix src/web' },
                     { name: 'Install Playwright Chromium', run: 'npm --prefix src/web run e2e:install -- --with-deps' },
                     { name: 'Run deterministic E2E supervisor', run: E2E_SUPERVISOR_COMMAND },
@@ -739,6 +847,15 @@ function selfTest(parser) {
     expectWorkflowFailure(fixture, value => {
         value.jobs['e2e-ci'].services.postgres.env.POSTGRES_PASSWORD = 'wrong';
     }, /test credentials/);
+    expectWorkflowFailure(fixture, value => {
+        value.jobs['e2e-ci'].steps.find(step => step.name === 'Restore E2E Cargo cache').with.path += '\ntarget';
+    }, /cache path drift|generated outputs/);
+    expectWorkflowFailure(fixture, value => {
+        value.jobs['e2e-ci'].steps.find(step => step.name === 'Restore E2E npm cache').with.key = '${{ runner.os }}-npm-floating';
+    }, /cache key drift/);
+    expectWorkflowFailure(fixture, value => {
+        value.jobs['e2e-ci'].steps = value.jobs['e2e-ci'].steps.filter(step => step.name !== 'Restore E2E Rust toolchain cache');
+    }, /setup step inventory drift|Rust toolchain cache/);
 
     const activeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'bill-active-config-'));
     try {

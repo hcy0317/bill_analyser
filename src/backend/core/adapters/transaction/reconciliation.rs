@@ -60,7 +60,7 @@ pub fn calculate_account_balance_from_bills(
     money_from_i128_cents(balance)
 }
 
-/// 解析对账单查询参数，并把缺失或非法输入映射成稳定路由响应。
+/// 解析对账单查询参数，并把缺失或非法输入映射成稳定 typed error。
 pub fn parse_reconciliation_query(
     account_id: Option<&str>,
     start_time: Option<i64>,
@@ -68,20 +68,29 @@ pub fn parse_reconciliation_query(
     category_ids: Option<&str>,
     transaction_type_code: Option<i64>,
     keyword: Option<&str>,
-) -> Result<ReconciliationQueryParams, RouteResponseContract> {
+) -> Result<ReconciliationQueryParams, RuntimeError> {
     let (Some(account_id), Some(start_time), Some(end_time)) = (account_id, start_time, end_time)
     else {
-        return Err(missing_reconciliation_parameters_response());
+        return Err(RuntimeError::new(
+            ErrorCode::InvalidInput,
+            "Missing required parameters: account_id, start_time, end_time",
+        ));
     };
 
     let (start_date, end_date) = if start_time == 0 && end_time == 0 {
         (None, None)
     } else {
         let start_date = reconciliation_date_from_timestamp(start_time).ok_or_else(|| {
-            reconciliation_internal_error_response("invalid reconciliation start_time")
+            RuntimeError::new(
+                ErrorCode::InternalError,
+                "invalid reconciliation start_time",
+            )
         })?;
         let end_date = reconciliation_date_from_timestamp(end_time).ok_or_else(|| {
-            reconciliation_internal_error_response("invalid reconciliation end_time")
+            RuntimeError::new(
+                ErrorCode::InternalError,
+                "invalid reconciliation end_time",
+            )
         })?;
         (Some(start_date), Some(end_date))
     };
@@ -89,7 +98,12 @@ pub fn parse_reconciliation_query(
     let account_id_int = account_id
         .trim()
         .parse::<i64>()
-        .map_err(|_| invalid_reconciliation_account_id_response(account_id))?;
+        .map_err(|_| {
+            RuntimeError::new(
+                ErrorCode::InvalidInput,
+                format!("Invalid account_id: {account_id}"),
+            )
+        })?;
 
     Ok(ReconciliationQueryParams {
         account_id: account_id.to_string(),
@@ -315,60 +329,4 @@ pub fn reconciliation_result_payload(
             format!("failed to serialize reconciliation result: {error}"),
         )
     })
-}
-
-/// 生成对账接口成功响应。
-pub fn reconciliation_success_response(
-    params: &ReconciliationQueryParams,
-    account_name: impl Into<String>,
-    summary: &ReconciliationSummary,
-    transactions: Vec<Value>,
-) -> Result<RouteResponseContract, RuntimeError> {
-    Ok(RouteResponseContract {
-        status_code: 200,
-        body: success_result_body(reconciliation_result_payload(
-            params,
-            account_name,
-            summary,
-            transactions,
-        )?),
-    })
-}
-
-/// 生成对账接口缺少必填参数时的错误响应。
-pub fn missing_reconciliation_parameters_response() -> RouteResponseContract {
-    simple_route_error_response(
-        400,
-        "Missing required parameters: account_id, start_time, end_time",
-    )
-}
-
-/// 生成对账接口账户 id 非法时的错误响应。
-pub fn invalid_reconciliation_account_id_response(
-    account_id: impl ToString,
-) -> RouteResponseContract {
-    simple_route_error_response(
-        400,
-        format!("Invalid account_id: {}", account_id.to_string()),
-    )
-}
-
-/// 生成对账账户不存在时的错误响应。
-pub fn reconciliation_account_not_found_response() -> RouteResponseContract {
-    simple_route_error_response(404, "Account not found")
-}
-
-/// 生成对账内部错误响应，并保留前端依赖的 message 文案。
-pub fn reconciliation_internal_error_response(error: impl Into<String>) -> RouteResponseContract {
-    let mut body = Map::new();
-    body.insert("success".to_string(), Value::Bool(false));
-    body.insert("error".to_string(), Value::String(error.into()));
-    body.insert(
-        "message".to_string(),
-        Value::String("Failed to retrieve reconciliation statements".to_string()),
-    );
-    RouteResponseContract {
-        status_code: 500,
-        body: Value::Object(body),
-    }
 }

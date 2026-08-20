@@ -18,13 +18,11 @@ async fn upload_transaction_picture_handler(
         let next_field = match multipart.next_field().await {
             Ok(value) => value,
             Err(error) => {
-                return route_contract_response(transaction_picture_internal_error_response(
-                    error.to_string(),
-                ));
+                return picture_internal_error_response(error.to_string());
             }
         };
         let Some(field) = next_field else {
-            return route_contract_response(missing_transaction_picture_file_response());
+            return bad_request("Missing picture file");
         };
         if field.name() != Some("picture") {
             continue;
@@ -36,18 +34,16 @@ async fn upload_transaction_picture_handler(
             .filter(|value| !value.is_empty())
             .map(ToOwned::to_owned)
         else {
-            return route_contract_response(invalid_transaction_picture_file_response());
+            return bad_request("Invalid picture file");
         };
         if !is_allowed_transaction_picture_filename(&filename) {
-            return route_contract_response(unsupported_transaction_picture_type_response());
+            return bad_request(unsupported_transaction_picture_type_message());
         }
 
         let picture_bytes = match field.bytes().await {
             Ok(value) => value,
             Err(error) => {
-                return route_contract_response(transaction_picture_internal_error_response(
-                    error.to_string(),
-                ));
+                return picture_internal_error_response(error.to_string());
             }
         };
         let picture_uuid = match random_picture_uuid_hex() {
@@ -60,23 +56,16 @@ async fn upload_transaction_picture_handler(
         };
         let upload_root = FsPath::new(&state.config.uploads_dir);
         if let Err(error) = fs::create_dir_all(upload_root) {
-            return route_contract_response(transaction_picture_internal_error_response(
-                error.to_string(),
-            ));
+            return picture_internal_error_response(error.to_string());
         }
         let file_path = upload_root.join(&picture_id);
         if let Err(error) = fs::write(&file_path, picture_bytes.as_ref()) {
-            return route_contract_response(transaction_picture_internal_error_response(
-                error.to_string(),
-            ));
+            return picture_internal_error_response(error.to_string());
         }
 
         let encoded = general_purpose::STANDARD.encode(picture_bytes.as_ref());
         let original_url = transaction_picture_data_url_from_base64(&picture_id, encoded);
-        return route_contract_response(transaction_picture_upload_success_response(
-            picture_id,
-            original_url,
-        ));
+        return picture_upload_success_response(picture_id, original_url);
     }
 }
 
@@ -98,20 +87,34 @@ async fn remove_unused_transaction_picture_handler(
         serde_json::from_slice(&body).unwrap_or_else(|_| Value::Object(Map::new()))
     };
     let Some(picture_id) = picture_id_from_payload(&payload) else {
-        return route_contract_response(missing_unused_transaction_picture_id_response());
+        return bad_request("Missing picture id");
     };
 
     let file_path =
         transaction_picture_delete_path(FsPath::new(&state.config.uploads_dir), &picture_id);
     if file_path.is_file() {
         if let Err(error) = fs::remove_file(&file_path) {
-            return route_contract_response(transaction_picture_internal_error_response(
-                error.to_string(),
-            ));
+            return picture_internal_error_response(error.to_string());
         }
     }
 
-    route_contract_response(remove_unused_transaction_picture_success_response())
+    success_result(StatusCode::OK, Value::Bool(true))
+}
+
+fn picture_upload_success_response(
+    picture_id: impl Into<String>,
+    original_url: impl Into<String>,
+) -> Response {
+    let result = serde_json::to_value(TransactionPictureUploadResult {
+        picture_id: picture_id.into(),
+        original_url: original_url.into(),
+    })
+    .expect("transaction picture upload result should serialize");
+    success_result(StatusCode::OK, result)
+}
+
+fn picture_internal_error_response(error: impl ToString) -> Response {
+    error_response(StatusCode::INTERNAL_SERVER_ERROR, error)
 }
 
 fn random_picture_uuid_hex() -> RouteResult<String> {
@@ -146,6 +149,7 @@ fn picture_id_from_payload(payload: &Value) -> Option<String> {
 #[cfg(test)]
 mod picture_helper_tests {
     use super::*;
+    use axum::body::to_bytes;
 
     #[test]
     fn picture_helpers_cover_payload_and_uuid_edges() {
@@ -164,5 +168,43 @@ mod picture_helper_tests {
         assert_eq!(picture_id_from_payload(&json!({"id": {}})), None);
         assert_eq!(picture_id_from_payload(&json!({})), None);
         assert_eq!(picture_id_from_payload(&Value::Null), None);
+    }
+
+    #[tokio::test]
+    async fn picture_response_projection_preserves_compatibility_envelopes() {
+        let response = picture_upload_success_response(
+            "pic.png",
+            "data:image/png;base64,YWJj",
+        );
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: Value = serde_json::from_slice(
+            &to_bytes(response.into_body(), usize::MAX)
+                .await
+                .expect("picture response bytes"),
+        )
+        .expect("picture response JSON");
+        assert_eq!(
+            body,
+            json!({
+                "success": true,
+                "result": {
+                    "pictureId": "pic.png",
+                    "originalUrl": "data:image/png;base64,YWJj"
+                }
+            })
+        );
+
+        let response = picture_internal_error_response("picture boom");
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let body: Value = serde_json::from_slice(
+            &to_bytes(response.into_body(), usize::MAX)
+                .await
+                .expect("picture error bytes"),
+        )
+        .expect("picture error JSON");
+        assert_eq!(
+            body,
+            json!({"success": false, "error": "picture boom"})
+        );
     }
 }

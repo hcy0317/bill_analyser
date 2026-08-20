@@ -206,48 +206,9 @@ fn collect_account_ids(snapshots: impl IntoIterator<Item = BillAccountSyncSnapsh
     ids.into_iter().collect()
 }
 
-fn success_result_body(result: Value) -> Value {
-    let mut body = Map::new();
-    body.insert("success".to_string(), Value::Bool(true));
-    body.insert("result".to_string(), result);
-    Value::Object(body)
-}
-
-fn error_result_body(error: impl Into<String>, result: Value) -> Value {
-    let mut body = Map::new();
-    body.insert("success".to_string(), Value::Bool(false));
-    body.insert("error".to_string(), Value::String(error.into()));
-    body.insert("result".to_string(), result);
-    Value::Object(body)
-}
-
-fn simple_route_error_response(
-    status_code: u16,
-    error: impl Into<String>,
-) -> RouteResponseContract {
-    let mut body = Map::new();
-    body.insert("success".to_string(), Value::Bool(false));
-    body.insert("error".to_string(), Value::String(error.into()));
-    RouteResponseContract {
-        status_code,
-        body: Value::Object(body),
-    }
-}
-
 fn windows_device_file_name(filename: &str) -> bool {
     let stem = filename.split('.').next().unwrap_or_default();
     WINDOWS_DEVICE_FILES.contains(&stem.to_ascii_uppercase().as_str())
-}
-
-fn batch_create_prepare_error_result(failed_index: usize) -> Value {
-    let mut result = Map::new();
-    result.insert(
-        "failedIndex".to_string(),
-        Value::Number(Number::from(failed_index)),
-    );
-    result.insert("createdCount".to_string(), Value::Number(Number::from(0)));
-    result.insert("items".to_string(), Value::Array(Vec::new()));
-    Value::Object(result)
 }
 
 fn path_suffix_lower(filename: &str) -> Option<String> {
