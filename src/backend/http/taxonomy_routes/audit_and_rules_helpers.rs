@@ -3,46 +3,16 @@
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
 #[tracing::instrument(level = "debug", skip_all)]
-/// 校验敏感账户操作密码，按用户密码、环境变量、旧 settings 密码的顺序兼容历史配置。
+/// 为账户敏感操作加载当前用户，并委托给共享密码策略。
 async fn verify_sensitive_account_operation_password_postgres(
     pool: &PostgresPool,
     user_id: UserId,
     password: &str,
 ) -> bill_analyser_db::DbResult<bool> {
-    if password.is_empty() {
+    let Some(user) = get_postgres_login_user_by_id(pool, user_id).await? else {
         return Ok(false);
-    }
-
-    let current_password_matches = get_postgres_login_user_by_id(pool, user_id)
-        .await?
-        .is_some_and(|user| {
-            !user.password_hash.is_empty()
-                && bcrypt::verify(password, &user.password_hash).unwrap_or(false)
-        });
-    if current_password_matches
-    {
-        return Ok(true);
-    }
-
-    if let Some(env_password) = std::env::var("BILL_ANALYSER_OPERATION_PASSWORD")
-        .ok()
-        .filter(|value| !value.is_empty())
-    {
-        return Ok(password == env_password);
-    }
-
-    let stored_password = get_postgres_operation_password(pool, user_id).await?;
-    Ok(stored_account_operation_password_matches(
-        password,
-        stored_password.as_deref(),
-    ))
-}
-
-fn stored_account_operation_password_matches(password: &str, stored: Option<&str>) -> bool {
-    stored
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .is_some_and(|value| password == value)
+    };
+    verify_sensitive_operation_password(pool, &user, password).await
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -95,27 +65,6 @@ fn optional_json_body(body: Bytes) -> Option<Value> {
 
 fn value_as_i64_or(value: Option<&Value>, default: i64) -> i64 {
     value.and_then(value_as_i64).unwrap_or(default)
-}
-
-#[cfg(test)]
-mod sensitive_account_operation_password_tests {
-    use super::stored_account_operation_password_matches;
-
-    #[test]
-    fn missing_or_blank_operation_password_fails_closed() {
-        assert!(!stored_account_operation_password_matches(
-            "wrong-current-password",
-            None
-        ));
-        assert!(!stored_account_operation_password_matches(
-            "wrong-current-password",
-            Some("  ")
-        ));
-        assert!(stored_account_operation_password_matches(
-            "legacy-secret",
-            Some("legacy-secret")
-        ));
-    }
 }
 
 /// 解析分类规则列表查询的 enabled_only 默认值，默认只返回启用规则。

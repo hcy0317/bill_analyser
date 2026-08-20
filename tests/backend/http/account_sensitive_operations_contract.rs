@@ -5,7 +5,7 @@ use axum::{
     http::{Method, Request, StatusCode},
 };
 use bill_analyser_db::PostgresPool;
-use bill_analyser_http::{taxonomy_runtime_router, HttpAppState, HttpShellConfig};
+use bill_analyser_http::{build_router, taxonomy_runtime_router, HttpAppState, HttpShellConfig};
 use serde_json::{json, Value};
 use sqlx::Row;
 use tower::ServiceExt;
@@ -15,6 +15,7 @@ mod postgres_test_support;
 
 const TRUST_SECRET: &str = "account-sensitive-operation-contract-secret";
 const OPERATION_PASSWORD_ENV: &str = "BILL_ANALYSER_OPERATION_PASSWORD";
+const OPERATION_PASSWORD_CHILD_MARKER: &str = "BILL_ANALYSER_OPERATION_PASSWORD_CONTRACT_CHILD";
 
 #[tokio::test]
 async fn wrong_current_password_without_operation_password_fails_closed(
@@ -34,7 +35,19 @@ async fn wrong_current_password_without_operation_password_fails_closed(
     let source_account_id = insert_account(&test_db.pool, user_id, "来源账户").await?;
     let target_account_id = insert_account(&test_db.pool, user_id, "目标账户").await?;
     let bill_id = insert_bill(&test_db.pool, user_id, source_account_id).await?;
-    let app = taxonomy_runtime_router().with_state(state_for_database(&test_db.db_name)?);
+    let state = state_for_database(&test_db.db_name)?;
+    let app = taxonomy_runtime_router().with_state(state.clone());
+    let auth_app = build_router(state);
+
+    let (step_up_status, step_up_body) = request_json(
+        auth_app,
+        "/api/security/step-up/verify".to_string(),
+        user_id,
+        json!({"password": "wrong-current-password"}),
+    )
+    .await?;
+    assert_eq!(step_up_status, StatusCode::UNAUTHORIZED);
+    assert_eq!(step_up_body["message"], "Current password is incorrect");
 
     let (clear_status, clear_body) = request_json(
         app.clone(),
@@ -108,7 +121,9 @@ async fn legacy_object_operation_password_still_authorizes_the_account_operation
         .bind(json!({"value": "legacy-operation-password"}))
         .execute(&test_db.pool)
         .await?;
-    let app = taxonomy_runtime_router().with_state(state_for_database(&test_db.db_name)?);
+    let state = state_for_database(&test_db.db_name)?;
+    let app = taxonomy_runtime_router().with_state(state.clone());
+    let auth_app = build_router(state);
 
     let (status, body) = request_json(
         app,
@@ -120,6 +135,20 @@ async fn legacy_object_operation_password_still_authorizes_the_account_operation
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["success"], true);
     assert_eq!(body["result"], true);
+
+    let (step_up_status, step_up_body) = request_json(
+        auth_app,
+        "/api/security/step-up/verify".to_string(),
+        user_id,
+        json!({"password": "legacy-operation-password"}),
+    )
+    .await?;
+    assert_eq!(step_up_status, StatusCode::OK);
+    assert_eq!(step_up_body["success"], true);
+    assert_eq!(step_up_body["result"]["verifiedVia"], "password");
+    assert!(step_up_body["result"]["stepUpToken"]
+        .as_str()
+        .is_some_and(|value| !value.is_empty()));
 
     let successful_audit: i64 = sqlx::query_scalar(
         r#"
@@ -135,6 +164,67 @@ async fn legacy_object_operation_password_still_authorizes_the_account_operation
     .fetch_one(&test_db.pool)
     .await?;
     assert_eq!(successful_audit, 1);
+
+    test_db.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn configured_environment_password_is_authoritative_after_current_password(
+) -> Result<(), Box<dyn Error>> {
+    if rerun_with_operation_password_env(
+        "configured_environment_password_is_authoritative_after_current_password",
+        "environment-operation-password",
+    )? {
+        return Ok(());
+    }
+
+    let test_db = required_isolated_postgres("account_sensitive_environment_password").await?;
+    let user_id = insert_user_with_password(
+        &test_db.pool,
+        "account-sensitive-environment-password",
+        "correct-current-password",
+    )
+    .await?;
+    let account_id = insert_account(&test_db.pool, user_id, "环境操作密码账户").await?;
+    sqlx::query("INSERT INTO settings (user_id, key, value) VALUES ($1, $2, $3)")
+        .bind(user_id)
+        .bind("operation_password")
+        .bind(json!("stored-operation-password"))
+        .execute(&test_db.pool)
+        .await?;
+    let state = state_for_database(&test_db.db_name)?;
+    let account_app = taxonomy_runtime_router().with_state(state.clone());
+    let auth_app = build_router(state);
+
+    let (stored_status, _) = request_json(
+        account_app.clone(),
+        format!("/api/accounts/{account_id}/transactions/clear"),
+        user_id,
+        json!({"password": "stored-operation-password"}),
+    )
+    .await?;
+    assert_eq!(stored_status, StatusCode::UNAUTHORIZED);
+
+    let (environment_status, environment_body) = request_json(
+        account_app,
+        format!("/api/accounts/{account_id}/transactions/clear"),
+        user_id,
+        json!({"password": "environment-operation-password"}),
+    )
+    .await?;
+    assert_eq!(environment_status, StatusCode::OK);
+    assert_eq!(environment_body["success"], true);
+
+    let (current_status, current_body) = request_json(
+        auth_app,
+        "/api/security/step-up/verify".to_string(),
+        user_id,
+        json!({"password": "correct-current-password"}),
+    )
+    .await?;
+    assert_eq!(current_status, StatusCode::OK);
+    assert_eq!(current_body["result"]["verifiedVia"], "password");
 
     test_db.cleanup().await?;
     Ok(())
@@ -196,12 +286,37 @@ fn rerun_without_operation_password_env_if_configured(
     Ok(true)
 }
 
+fn rerun_with_operation_password_env(
+    test_name: &str,
+    operation_password: &str,
+) -> Result<bool, Box<dyn Error>> {
+    if std::env::var(OPERATION_PASSWORD_CHILD_MARKER).as_deref() == Ok("1") {
+        return Ok(false);
+    }
+
+    let status = Command::new(std::env::current_exe()?)
+        .arg("--exact")
+        .arg(test_name)
+        .arg("--nocapture")
+        .env(OPERATION_PASSWORD_ENV, operation_password)
+        .env(OPERATION_PASSWORD_CHILD_MARKER, "1")
+        .status()?;
+    if !status.success() {
+        return Err(format!(
+            "account operation contract child process failed for {test_name}: {status}"
+        )
+        .into());
+    }
+    Ok(true)
+}
+
 fn state_for_database(database: &str) -> Result<HttpAppState, Box<dyn Error>> {
     let base_url = std::env::var("BILL_ANALYSER_TEST_POSTGRES_URL")?;
     let mut url = url::Url::parse(&base_url)?;
     url.set_path(&format!("/{database}"));
     let config = HttpShellConfig::new("", Duration::from_secs(2), 1024 * 1024)?
         .with_postgres_url(url.to_string())?
+        .with_auth_jwt_secret("account-sensitive-operation-contract-jwt-secret")
         .with_trusted_user_header_secret(TRUST_SECRET);
     Ok(HttpAppState::new(config)?)
 }

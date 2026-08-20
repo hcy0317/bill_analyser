@@ -169,14 +169,7 @@ async fn verify_postgres_security_step_up_response(
     }
 
     let verified_via = if !password.is_empty() {
-        match verify_postgres_sensitive_operation_password_with_policy(
-            runtime.pool(),
-            &user,
-            password,
-            OperationPasswordPolicy::RequireConfigured,
-        )
-        .await
-        {
+        match verify_sensitive_operation_password(runtime.pool(), &user, password).await {
             Ok(true) => {}
             Ok(false) => {
                 if let Err(response) = record_postgres_sensitive_auth_failure(

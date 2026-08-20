@@ -17,8 +17,8 @@ use axum::{
 };
 use bill_analyser_core::{category_rules::match_rule_expression, UserId};
 use bill_analyser_db::{
-    get_postgres_login_user_by_id, get_postgres_operation_password, list_postgres_llm_configs,
-    load_postgres_ocr_config_setting, sync_all_postgres_account_balances,
+    get_postgres_login_user_by_id, list_postgres_llm_configs, load_postgres_ocr_config_setting,
+    sync_all_postgres_account_balances,
     taxonomy::{
         account_rules::AccountRuleRecord,
         accounts::{AccountDisplayOrder, AccountRecord},
@@ -59,7 +59,7 @@ use serde_json::{json, Map, Number, Value};
 use crate::{
     auth::resolve_user_id_from_headers,
     bill_routes::recategorize_bills_with_category_rules_postgres, config::HttpShellConfig,
-    state::HttpAppState,
+    sensitive_operation_password::verify_sensitive_operation_password, state::HttpAppState,
 };
 
 const TRUSTED_USER_SECRET_HEADER: &str = "x-bill-analyser-trusted-user-secret";

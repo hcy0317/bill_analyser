@@ -25,6 +25,7 @@ pub mod matching_routes;
 pub mod route_ownership;
 pub mod router;
 pub mod runtime;
+mod sensitive_operation_password;
 pub mod server;
 pub mod state;
 pub mod statistics_routes;

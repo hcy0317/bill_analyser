@@ -147,6 +147,69 @@ fn account_transaction_mutations_keep_sql_and_transactions_out_of_http_handlers(
 }
 
 #[test]
+fn sensitive_operation_password_policy_has_one_http_owner() {
+    let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+    let shared_policy =
+        fs::read_to_string(repo_root.join("src/backend/http/sensitive_operation_password.rs"))
+            .expect("shared sensitive operation password policy is readable");
+    for required in [
+        "pub(crate) async fn verify_sensitive_operation_password",
+        "bcrypt::verify",
+        "BILL_ANALYSER_OPERATION_PASSWORD",
+        "get_postgres_operation_password",
+    ] {
+        assert!(
+            shared_policy.contains(required),
+            "the shared password policy must own the complete precedence contract: {required}"
+        );
+    }
+
+    let taxonomy_adapter = fs::read_to_string(
+        repo_root.join("src/backend/http/taxonomy_routes/audit_and_rules_helpers.rs"),
+    )
+    .expect("taxonomy sensitive-operation adapter is readable");
+    for forbidden in [
+        "BILL_ANALYSER_OPERATION_PASSWORD",
+        "get_postgres_operation_password",
+        "stored_account_operation_password_matches",
+        "bcrypt::verify",
+    ] {
+        assert!(
+            !taxonomy_adapter.contains(forbidden),
+            "taxonomy must delegate password precedence to the shared policy: {forbidden}"
+        );
+    }
+
+    let auth_adapter = fs::read_to_string(
+        repo_root.join("src/backend/http/auth_routes/jwt_totp_helpers/sensitive_auth.rs"),
+    )
+    .expect("auth sensitive-operation adapter is readable");
+    for forbidden in [
+        "OperationPasswordPolicy",
+        "verify_postgres_sensitive_operation_password_with_policy",
+        "verify_postgres_operation_password",
+        "stored_operation_password_matches",
+        "BILL_ANALYSER_OPERATION_PASSWORD",
+        "get_postgres_operation_password",
+    ] {
+        assert!(
+            !auth_adapter.contains(forbidden),
+            "auth routes must delegate password precedence to the shared policy: {forbidden}"
+        );
+    }
+
+    let settings_export = fs::read_to_string(
+        repo_root.join("src/backend/http/taxonomy_routes/settings_bundle_handlers.rs"),
+    )
+    .expect("settings bundle handlers are readable");
+    assert!(settings_export.contains("bcrypt::verify"));
+    assert!(
+        !settings_export.contains("verify_sensitive_operation_password"),
+        "settings export must remain current-password-only"
+    );
+}
+
+#[test]
 fn governance_tests_verified_paths_exist() {
     let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
 
