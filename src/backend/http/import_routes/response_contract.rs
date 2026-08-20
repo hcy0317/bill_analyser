@@ -1,12 +1,12 @@
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ImportV2RouteResponse {
-    pub status_code: u16,
-    pub body: Value,
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+struct ImportV2RouteResponse {
+    status_code: u16,
+    body: Value,
 }
 
 /// 中文说明：生成导入 v2 标准错误响应，统一 success=false 与 error 字段形态。
 #[tracing::instrument(level = "debug", skip_all)]
-pub fn import_v2_error_response(status_code: u16, error: &str) -> ImportV2RouteResponse {
+fn import_v2_error_response(status_code: u16, error: &str) -> ImportV2RouteResponse {
     ImportV2RouteResponse {
         status_code,
         body: json!({"success": false, "error": error}),
@@ -15,7 +15,7 @@ pub fn import_v2_error_response(status_code: u16, error: &str) -> ImportV2RouteR
 
 /// 中文说明：生成导入 v2 消息响应，供取消会话等无需 data payload 的路由复用。
 #[tracing::instrument(level = "debug", skip_all)]
-pub fn import_v2_message_response(
+fn import_v2_message_response(
     status_code: u16,
     success: bool,
     message: &str,
@@ -28,9 +28,9 @@ pub fn import_v2_message_response(
 
 /// 中文说明：生成导入 v2 成功 data 响应，统一后端导入链路的 REST envelope。
 #[tracing::instrument(level = "debug", skip_all)]
-pub fn import_v2_data_response<T>(data: T) -> ImportV2RouteResponse
+fn import_v2_data_response<T>(data: T) -> ImportV2RouteResponse
 where
-    T: Serialize,
+    T: serde::Serialize,
 {
     ImportV2RouteResponse {
         status_code: 200,
@@ -40,7 +40,7 @@ where
 
 /// 中文说明：包装 parse stage 成功响应，保持导入阶段响应结构与前端服务适配器一致。
 #[tracing::instrument(level = "debug", skip_all)]
-pub fn import_stage_parse_success(data: ImportStageParseData) -> ImportV2RouteResponse {
+fn import_stage_parse_success(data: ImportStageParseData) -> ImportV2RouteResponse {
     #[cfg(not(coverage))]
     tracing::debug!(
         domain = "import_parser",
@@ -52,7 +52,7 @@ pub fn import_stage_parse_success(data: ImportStageParseData) -> ImportV2RouteRe
 
 /// 中文说明：包装 dedup stage 成功响应，保留去重候选、转账和重复组数据的标准 envelope。
 #[tracing::instrument(level = "debug", skip_all)]
-pub fn import_stage_dedup_success(data: ImportStageDedupData) -> ImportV2RouteResponse {
+fn import_stage_dedup_success(data: ImportStageDedupData) -> ImportV2RouteResponse {
     #[cfg(not(coverage))]
     tracing::debug!(
         domain = "import_parser",
@@ -64,7 +64,7 @@ pub fn import_stage_dedup_success(data: ImportStageDedupData) -> ImportV2RouteRe
 
 /// 中文说明：包装 confirm stage 成功响应，统一确认导入后的数量和结果 payload。
 #[tracing::instrument(level = "debug", skip_all)]
-pub fn import_stage_confirm_success(data: ImportStageConfirmData) -> ImportV2RouteResponse {
+fn import_stage_confirm_success(data: ImportStageConfirmData) -> ImportV2RouteResponse {
     #[cfg(not(coverage))]
     tracing::debug!(
         domain = "import_parser",
@@ -76,7 +76,7 @@ pub fn import_stage_confirm_success(data: ImportStageConfirmData) -> ImportV2Rou
 
 /// 中文说明：包装分页预览响应，供前端预览表格读取 page/item/filter metadata。
 #[tracing::instrument(level = "debug", skip_all)]
-pub fn import_preview_page_success(data: ImportPreviewPageData) -> ImportV2RouteResponse {
+fn import_preview_page_success(data: ImportPreviewPageData) -> ImportV2RouteResponse {
     #[cfg(not(coverage))]
     tracing::debug!(
         domain = "import_parser",
@@ -88,7 +88,7 @@ pub fn import_preview_page_success(data: ImportPreviewPageData) -> ImportV2Route
 
 /// 中文说明：包装预览索引响应，供前端跨页筛选和选择目标使用。
 #[tracing::instrument(level = "debug", skip_all)]
-pub fn import_preview_index_success(data: ImportPreviewIndexData) -> ImportV2RouteResponse {
+fn import_preview_index_success(data: ImportPreviewIndexData) -> ImportV2RouteResponse {
     #[cfg(not(coverage))]
     tracing::debug!(
         domain = "import_parser",
@@ -100,7 +100,7 @@ pub fn import_preview_index_success(data: ImportPreviewIndexData) -> ImportV2Rou
 
 /// 中文说明：包装导入会话摘要响应，保留 session 状态、阶段和用户归属边界。
 #[tracing::instrument(level = "debug", skip_all)]
-pub fn import_session_success(session: ImportSessionSummary) -> ImportV2RouteResponse {
+fn import_session_success(session: ImportSessionSummary) -> ImportV2RouteResponse {
     #[cfg(not(coverage))]
     tracing::debug!(
         domain = "import_parser",
@@ -112,42 +112,24 @@ pub fn import_session_success(session: ImportSessionSummary) -> ImportV2RouteRes
 
 /// 中文说明：生成导入会话不存在响应，统一过期或无权访问 session 的客户端错误。
 #[tracing::instrument(level = "debug", skip_all)]
-pub fn import_session_not_found_response() -> ImportV2RouteResponse {
+fn import_session_not_found_response() -> ImportV2RouteResponse {
     import_v2_error_response(404, "Session not found or expired")
 }
 
 /// 中文说明：生成取消导入时 session 缺失响应，保持旧客户端可接受的 success=false 消息语义。
 #[tracing::instrument(level = "debug", skip_all)]
-pub fn import_session_cancel_missing_response() -> ImportV2RouteResponse {
+fn import_session_cancel_missing_response() -> ImportV2RouteResponse {
     import_v2_message_response(200, false, "Session not found")
 }
 
 /// 中文说明：生成取消导入成功响应，统一会话清理完成的消息 envelope。
 #[tracing::instrument(level = "debug", skip_all)]
-pub fn import_session_cancel_success_response() -> ImportV2RouteResponse {
+fn import_session_cancel_success_response() -> ImportV2RouteResponse {
     import_v2_message_response(200, true, "Session cleared")
-}
-
-/// 中文说明：生成缺少 session_id 的导入 v2 请求错误，避免路由层重复硬编码文案。
-#[tracing::instrument(level = "debug", skip_all)]
-pub fn import_v2_missing_session_id_response() -> ImportV2RouteResponse {
-    import_v2_error_response(400, "Missing session_id")
-}
-
-/// 中文说明：生成导入 v2 非法请求错误，作为解析失败前的通用兜底响应。
-#[tracing::instrument(level = "debug", skip_all)]
-pub fn import_v2_invalid_request_response() -> ImportV2RouteResponse {
-    import_v2_error_response(400, "Invalid request")
-}
-
-/// 中文说明：校验 confirm/update 期望预览状态 payload 是否为对象，防止字符串等旧值绕过冲突检测。
-#[tracing::instrument(level = "debug", skip_all)]
-pub fn expected_preview_state_is_valid(value: Option<&Value>) -> bool {
-    matches!(value, Some(Value::Object(_)))
 }
 
 /// 中文说明：生成预览状态冲突响应，提示前端刷新后再确认导入。
 #[tracing::instrument(level = "debug", skip_all)]
-pub fn preview_state_conflict_response() -> ImportV2RouteResponse {
+fn preview_state_conflict_response() -> ImportV2RouteResponse {
     import_v2_error_response(409, "Preview state changed, please refresh")
 }

@@ -68,6 +68,62 @@ fn position(haystack: &str, needle: &str) -> usize {
         .unwrap_or_else(|| panic!("missing marker {needle}"))
 }
 
+fn rust_source_tree(path: &str) -> String {
+    fn collect_rust_files(path: &Path, files: &mut Vec<PathBuf>) {
+        for entry in fs::read_dir(path)
+            .unwrap_or_else(|err| panic!("read source directory {}: {err}", path.display()))
+        {
+            let entry = entry.expect("source directory entry");
+            let entry_path = entry.path();
+            if entry_path.is_dir() {
+                collect_rust_files(&entry_path, files);
+            } else if entry_path.extension().and_then(|value| value.to_str()) == Some("rs") {
+                files.push(entry_path);
+            }
+        }
+    }
+
+    let root = repo_root().join(path);
+    let mut files = Vec::new();
+    collect_rust_files(&root, &mut files);
+    files.sort();
+    files
+        .into_iter()
+        .map(|file| {
+            fs::read_to_string(&file)
+                .unwrap_or_else(|err| panic!("read source file {}: {err}", file.display()))
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+#[test]
+fn import_transport_response_owner_is_http_private() {
+    let non_http_sources = format!(
+        "{}\n{}",
+        rust_source_tree("src/backend/core"),
+        rust_source_tree("src/backend/db")
+    );
+    let http_contract = source("src/backend/http/import_routes/response_contract.rs");
+
+    for transport_symbol in [
+        "ImportV2RouteResponse",
+        "import_v2_error_response",
+        "import_v2_data_response",
+        "import_stage_parse_success",
+        "preview_state_conflict_response",
+    ] {
+        assert!(
+            !non_http_sources.contains(transport_symbol),
+            "core and DB must not own HTTP transport symbol {transport_symbol}"
+        );
+        assert!(
+            http_contract.contains(transport_symbol),
+            "HTTP response contract must own transport symbol {transport_symbol}"
+        );
+    }
+}
+
 #[test]
 fn import_mutations_expose_structured_version_contract_telemetry() {
     let telemetry = source("src/backend/http/import_contract_telemetry.rs");

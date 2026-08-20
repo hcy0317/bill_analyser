@@ -5,6 +5,128 @@ mod response_payload_tests {
     use zip::{write::SimpleFileOptions, ZipWriter};
 
     #[test]
+    fn import_response_contract_keeps_error_message_and_status_envelopes() {
+        let missing_session_id = import_v2_error_response(400, "Missing session_id");
+        assert_eq!(missing_session_id.status_code, 400);
+        assert_eq!(
+            missing_session_id.body,
+            json!({"success": false, "error": "Missing session_id"})
+        );
+        assert_eq!(
+            import_v2_error_response(400, "Invalid request").body,
+            json!({"success": false, "error": "Invalid request"})
+        );
+        assert_eq!(
+            preview_state_conflict_response().body,
+            json!({"success": false, "error": "Preview state changed, please refresh"})
+        );
+        assert_eq!(preview_state_conflict_response().status_code, 409);
+        assert_eq!(import_session_not_found_response().status_code, 404);
+        assert_eq!(
+            import_session_cancel_missing_response().body,
+            json!({"success": false, "message": "Session not found"})
+        );
+        assert_eq!(
+            import_session_cancel_success_response().body,
+            json!({"success": true, "message": "Session cleared"})
+        );
+
+        let invalid_status = route_response(import_v2_error_response(99, "invalid status"));
+        assert_eq!(invalid_status.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[test]
+    fn import_stage_response_contract_keeps_typed_data_envelopes() {
+        let parse = import_stage_parse_success(ImportStageParseData {
+            session_id: "sess-parse".to_string(),
+            parsed_count: 2,
+            files: vec![json!({"file": "a.csv", "success": true})],
+            unmatched_files: vec![json!({"file": "unknown.csv"})],
+            errors: vec![],
+        });
+        assert_eq!(parse.body["data"]["parsed_count"], 2);
+        assert_eq!(
+            parse.body["data"]["unmatched_files"][0]["file"],
+            "unknown.csv"
+        );
+
+        let dedup = import_stage_dedup_success(ImportStageDedupData {
+            session_id: "sess-preview".to_string(),
+            preview: vec![json!({"id": 1})],
+            preview_included: true,
+            total: 2,
+            after_dedup: 1,
+            dedup_stats: json!({"removed": 1}),
+            match_stats: json!({"transfer": 0}),
+        });
+        assert_eq!(dedup.body["data"]["preview_included"], true);
+        assert_eq!(dedup.body["data"]["dedup_stats"]["removed"], 1);
+
+        let confirm = import_stage_confirm_success(ImportStageConfirmData {
+            imported_count: 1,
+            skipped_count: 1,
+            errors: vec!["duplicate".to_string()],
+        });
+        assert_eq!(confirm.body["data"]["imported_count"], 1);
+        assert_eq!(confirm.body["data"]["errors"][0], "duplicate");
+    }
+
+    #[test]
+    fn import_success_response_contract_keeps_session_and_preview_keys() {
+        let session = ImportSessionSummary {
+            session_id: "sess-1".to_string(),
+            session_version: 7,
+            status: "previewing".to_string(),
+            created_at: "2026-05-01 08:00:00".to_string(),
+            parsed_count: 3,
+            preview_count: 2,
+            file_paths: json!("a.csv"),
+        };
+        let response = import_session_success(session);
+        assert_eq!(response.status_code, 200);
+        assert_eq!(response.body["data"]["session_id"], "sess-1");
+        assert_eq!(response.body["data"]["session_version"], 7);
+        assert_eq!(response.body["data"]["preview_count"], 2);
+        assert_eq!(response.body["data"]["file_paths"], "a.csv");
+
+        let page = import_preview_page_success(ImportPreviewPageData {
+            preview: vec![json!({"id": 1})],
+            total: 1,
+            page: 1,
+            page_size: 50,
+            query: Some(json!({"page": 1, "page_size": 50})),
+            metadata: Some(json!({"counts": {"total": 1}})),
+        });
+        assert_eq!(
+            page.body,
+            json!({
+                "success": true,
+                "data": {
+                    "preview": [{"id": 1}],
+                    "total": 1,
+                    "page": 1,
+                    "page_size": 50,
+                    "query": {"page": 1, "page_size": 50},
+                    "metadata": {"counts": {"total": 1}}
+                }
+            })
+        );
+
+        let preview_value = json!({"id": 1, "preview_type": "expense"});
+        let index_item = build_import_preview_filter_index_item(
+            preview_value.as_object().expect("preview object"),
+            &BTreeMap::<i64, CategoryLookup>::new(),
+            &BTreeMap::<i64, AccountLookup>::new(),
+        );
+        let index = import_preview_index_success(ImportPreviewIndexData {
+            items: vec![index_item],
+            total: 1,
+        });
+        assert_eq!(index.body["data"]["items"][0]["id"], 1);
+        assert_eq!(index.body["data"]["total"], 1);
+    }
+
+    #[test]
     fn request_budget_rejects_aggregate_materialized_bill_output() {
         let bill = StandardBill {
             date: "2026-07-18 00:00:00".to_string(),

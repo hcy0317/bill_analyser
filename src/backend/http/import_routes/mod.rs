@@ -40,20 +40,15 @@ use bill_analyser_core::{
         select_category_rule_candidate, CategoryRuleCandidate, CategoryRuleCandidateDraft,
     },
     coerce_preview_selected_value, composite_hash_from_features, copy_runtime_llm_config,
-    find_import_reconciliation_candidates, import_preview_index_success,
-    import_preview_page_success, import_session_cancel_missing_response,
-    import_session_cancel_success_response, import_session_not_found_response,
-    import_session_success, import_stage_confirm_success, import_stage_dedup_success,
-    import_stage_parse_success, import_v2_data_response, import_v2_error_response,
-    normalize_history_operation, normalize_import_preview_page_query,
-    normalize_provider_auth_config, normalize_weaviate_transaction_type_scope,
-    parse_llm_json_array_response, preview_state_conflict_response, provider_auth_access_token,
-    provider_auth_has_refresh_credential, provider_auth_is_expired, provider_auth_refresh_token,
-    render_llm_prompt_template, safe_llm_config_payload, score_learning_rule_similarity,
-    validate_llm_vision_base_url, AccountLookup, AiRouteResponse, CategoryLookup, DedupBill,
-    DuplicateGroup, ImportLearningRecommendationKeyInput, ImportPreviewIndexData,
-    ImportPreviewPageData, ImportSessionSummary, ImportStageConfirmData, ImportStageDedupData,
-    ImportStageParseData, ImportV2RouteResponse, LlmProviderConfigContract, OcrConfigContract,
+    find_import_reconciliation_candidates, normalize_history_operation,
+    normalize_import_preview_page_query, normalize_provider_auth_config,
+    normalize_weaviate_transaction_type_scope, parse_llm_json_array_response,
+    provider_auth_access_token, provider_auth_has_refresh_credential, provider_auth_is_expired,
+    provider_auth_refresh_token, render_llm_prompt_template, safe_llm_config_payload,
+    score_learning_rule_similarity, validate_llm_vision_base_url, AccountLookup, AiRouteResponse,
+    CategoryLookup, DedupBill, DuplicateGroup, ImportLearningRecommendationKeyInput,
+    ImportPreviewIndexData, ImportPreviewPageData, ImportSessionSummary, ImportStageConfirmData,
+    ImportStageDedupData, ImportStageParseData, LlmProviderConfigContract, OcrConfigContract,
     OcrProviderTextLine, OcrProviderTextResult, ReceiptDraftAccount, ReceiptDraftCategory,
     ReceiptDraftCategoryRule, ReceiptDraftContext, ReceiptDraftTag, ReconciliationCandidateType,
     SmartDeduplicationEngine, TransferPair, UserId, IMPORT_PREVIEW_SORT_KEYS, LLM_SYSTEM_PROMPT,
@@ -411,6 +406,7 @@ pub fn import_runtime_router() -> Router<HttpAppState> {
 
 mod ocr_security;
 
+include!("response_contract.rs");
 include!("stage_vector_recall.rs");
 include!("stage_json_helpers.rs");
 include!("stage_handlers.rs");

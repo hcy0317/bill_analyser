@@ -1,0 +1,120 @@
+{
+  "schema_version": "cyanflow-slice-evidence.v1",
+  "slice": "C7l",
+  "work_id": "bill-analyser-cyanflow-c7l-import-response-ownership-20260820",
+  "base_commit": "307a0439f714ca91b0705c03d52a261ccd089abb",
+  "branch": "codex/c7l-import-response-ownership",
+  "objective": "Move the import REST status and envelope owner from core to the private HTTP import adapter without changing public response, database, session, receipt, or writer behavior.",
+  "architecture": {
+    "old_owner": "src/backend/core/import_pipeline/responses.rs plus the bill_analyser_core facade re-export",
+    "new_owner": "src/backend/http/import_routes/response_contract.rs",
+    "production_surface": [
+      "parse and dedup stage responses",
+      "preview page and index responses",
+      "session load and cancel responses",
+      "confirm responses and shared import errors"
+    ],
+    "deleted_boundaries": [
+      "core ImportV2RouteResponse definition and import_pipeline include",
+      "core facade exports for import REST response builders",
+      "dead fixed Missing session_id and Invalid request wrappers",
+      "dead expected_preview_state_is_valid public helper"
+    ],
+    "unchanged_boundaries": [
+      "REST paths, status codes, success/data, success/error, and success/message envelopes",
+      "typed stage, preview, and session data DTOs remain in core",
+      "PostgreSQL schema, transactions, writers, user scope, session CAS, row CAS, and confirm receipt behavior",
+      "durable receipt compatibility encoding and integer-cent money contracts"
+    ],
+    "rejected_expansion": [
+      "new service, trait, port, crate, cache, transaction, compatibility re-export, or second writer",
+      "AiRouteResponse, LearningRouteResponse, OCR provider failure, budget writer, or database CHECK changes",
+      "performance or missing-category behavior changes"
+    ]
+  },
+  "tdd": {
+    "red": {
+      "command": "cargo test -p bill-analyser-http --test import_runtime_contract import_transport_response_owner_is_http_private -- --exact --nocapture",
+      "result": "failed because the HTTP-private response_contract.rs owner did not exist"
+    },
+    "green": [
+      {
+        "command": "cargo test -p bill-analyser-http --test import_runtime_contract import_transport_response_owner_is_http_private -- --exact --nocapture",
+        "discovered": 1,
+        "executed": 1,
+        "failed": 0,
+        "skipped": 0
+      },
+      {
+        "command": "cargo test -p bill-analyser-http --lib response_contract_keeps -- --nocapture",
+        "discovered": 3,
+        "executed": 3,
+        "failed": 0,
+        "skipped": 0
+      },
+      {
+        "command": "cargo test -p bill-analyser-core --test import_pipeline_contracts -- --nocapture",
+        "discovered": 28,
+        "executed": 28,
+        "failed": 0,
+        "skipped": 0
+      },
+      {
+        "command": "cargo test -p bill-analyser-http --lib response_payload_tests -- --nocapture",
+        "discovered": 9,
+        "executed": 9,
+        "failed": 0,
+        "skipped": 0,
+        "database": "fresh isolated PostgreSQL database"
+      }
+    ]
+  },
+  "verification": {
+    "cargo_fmt_check": "passed",
+    "cargo_clippy_workspace_all_targets_deny_warnings": "passed",
+    "git_diff_check": "passed",
+    "core_and_db_transport_symbol_hits": 0,
+    "cargo_test_workspace": {
+      "command": "cargo test --workspace -j 2 -- --test-threads=1",
+      "result": "passed against a fresh isolated PostgreSQL database",
+      "discovered": 857,
+      "failed": 0,
+      "skipped": 0
+    },
+    "cargo_llvm_cov_workspace": {
+      "command": "cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 35 -- --test-threads=1",
+      "result": "passed with CARGO_BUILD_JOBS=2 against a separate fresh isolated PostgreSQL database",
+      "executable_lines": 80918,
+      "covered_lines": 54943,
+      "line_coverage_percent": 67.90
+    },
+    "changed_line_coverage": {
+      "command": "node scripts/governance-normalizers.mjs changed-coverage --lcov workspace.lcov --diff .git/ai/c7l-rust-changed.diff --threshold 90 --require-matched-files --require-executable-lines --allow-no-business-files",
+      "business_files": 4,
+      "coverage_eligible_files": 1,
+      "executable_changed_lines": 14,
+      "covered_changed_lines": 14,
+      "coverage_percent": 100,
+      "strict_threshold_percent": 90,
+      "status": "passed"
+    },
+    "review": {
+      "base_ref": "307a0439f714ca91b0705c03d52a261ccd089abb",
+      "head_ref": "working tree on codex/c7l-import-response-ownership",
+      "changed_files": 10,
+      "standards_axis": "passed after the ownership ratchet was widened from two files to the complete core and DB Rust source trees",
+      "spec_axis": "passed after the 400 response status assertion was added; 200, 400, 404, 409, invalid-status fallback, typed stage data, session, page, and index envelopes are pinned",
+      "findings": 0,
+      "residual_risk": "This slice removes one transport ownership inversion but does not complete all Import transport exits or improve import latency by itself."
+    },
+    "money_review": "No amount field or conversion changed; integer-cent contracts are unchanged.",
+    "delivery_evidence": "The Gitea PR and exact-head Actions run remain the authoritative external delivery evidence and are added after this commit is pushed."
+  },
+  "environment_hygiene": {
+    "long_lived_database": "A focused attempt against the existing development database failed closed with migration VersionMismatch(25); the database was not modified for verification.",
+    "test_database_strategy": "Focused, workspace, and coverage gates used explicit isolated PostgreSQL databases; all are removed after evidence capture.",
+    "workspace_lcov_removed_after_measurement": true,
+    "temporary_database_residue": "none after cleanup",
+    "secrets": "The existing local PostgreSQL test credential was held only in process-local environment variables and was not added to source or evidence."
+  }
+}
