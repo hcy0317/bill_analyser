@@ -40,41 +40,26 @@ async fn bills_by_month_handler(
         Ok(value) => value,
         Err(response) => return *response,
     };
-        let runtime = match open_postgres_runtime(&state, "bills") {
-            Ok(value) => value,
-            Err(response) => return *response,
-        };
-        let (start_date, end_date) = match bill_analyser_core::adapters::transaction::month_date_range(
-            query.year,
-            query.month,
-        ) {
+    let (start_date, end_date) =
+        match bill_analyser_core::adapters::transaction::month_date_range(query.year, query.month) {
             Ok(value) => value,
             Err(error) => return bad_request(error.to_string()),
         };
-        let mut filters = match postgres_filters_from_query(runtime.pool(), user_id, &query.common).await
-        {
-            Ok(value) => value,
-            Err(response) => return *response,
-        };
-        filters.date_from = Some(start_date);
-        filters.date_to = Some(end_date);
-        let bill_page = match query_postgres_bills(
-            runtime.pool(),
-            user_id.get() as i64,
-            1,
-            100_000,
-            &filters,
-        )
-            .await
-        {
-            Ok(value) => value,
-            Err(_) => return db_error_response(),
-        };
-        return match page_to_frontend_postgres(runtime.pool(), user_id, 1, 100_000, bill_page).await
-        {
-            Ok(value) => json_response(StatusCode::OK, value),
-            Err(_) => db_error_response(),
-        };
+    let mut ledger_query = query.common.into_ledger_list_query();
+    ledger_query.date_from = Some(start_date);
+    ledger_query.date_to = Some(end_date);
+    let queries = match open_ledger_queries(&state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let page = match queries.list_month(user_id, ledger_query).await {
+        Ok(value) => value,
+        Err(_) => return db_error_response(),
+    };
+    match ledger_page_to_frontend(page) {
+        Ok(value) => json_response(StatusCode::OK, value),
+        Err(_) => db_error_response(),
+    }
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -262,20 +247,28 @@ mod crud_handler_tests {
     }
 
     #[test]
-    fn list_handler_depends_on_ledger_boundary_instead_of_postgres_rows() {
+    fn list_handlers_depend_on_ledger_boundary_instead_of_postgres_rows() {
         let source = include_str!("crud_handlers.rs");
-        let start = source
+        let list_start = source
             .find("async fn list_bills_handler")
             .expect("list handler source");
-        let end = source[start..]
+        let month_start = source[list_start..]
             .find("async fn bills_by_month_handler")
-            .map(|offset| start + offset)
+            .map(|offset| list_start + offset)
             .expect("next handler source");
-        let handler = &source[start..end];
+        let month_end = source[month_start..]
+            .find("async fn create_bill_handler")
+            .map(|offset| month_start + offset)
+            .expect("handler after month source");
+        let list_handler = &source[list_start..month_start];
+        let month_handler = &source[month_start..month_end];
 
-        assert!(handler.contains("open_ledger_queries"));
-        assert!(handler.contains(".list(user_id, query.into_ledger_list_query())"));
-        assert!(handler.contains("ledger_page_to_frontend"));
+        assert!(list_handler.contains("open_ledger_queries"));
+        assert!(list_handler.contains(".list(user_id, query.into_ledger_list_query())"));
+        assert!(list_handler.contains("ledger_page_to_frontend"));
+        assert!(month_handler.contains("open_ledger_queries"));
+        assert!(month_handler.contains(".list_month(user_id, ledger_query)"));
+        assert!(month_handler.contains("ledger_page_to_frontend"));
         for forbidden in [
             "open_postgres_runtime",
             ".pool()",
@@ -284,9 +277,15 @@ mod crud_handler_tests {
             "page_to_frontend_postgres",
         ] {
             assert!(
-                !handler.contains(forbidden),
+                !list_handler.contains(forbidden),
                 "list handler leaked forbidden dependency: {forbidden}"
             );
+            assert!(
+                !month_handler.contains(forbidden),
+                "month handler leaked forbidden dependency: {forbidden}"
+            );
         }
+        assert!(!include_str!("query.rs").contains("fn postgres_filters_from_query"));
+        assert!(!include_str!("record_presenters.rs").contains("fn page_to_frontend_postgres"));
     }
 }

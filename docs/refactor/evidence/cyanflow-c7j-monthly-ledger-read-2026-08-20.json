@@ -1,0 +1,116 @@
+{
+  "schema_version": "cyanflow-slice-evidence.v1",
+  "slice": "C7j",
+  "work_id": "bill-analyser-cyanflow-c7j-monthly-ledger-read-20260820",
+  "base_commit": "288d5be0fdd17dd0bcb4c83306d7c7088a059ece",
+  "branch": "codex/c7j-monthly-ledger-read",
+  "objective": "Move the complete bounded monthly bill read into the existing typed PostgreSQL Ledger boundary, eliminating the silent 500-row clamp and per-row tag N+1 without changing the public REST contract.",
+  "architecture": {
+    "owner": "src/backend/db/bills/postgres_reads/ledger_query.rs",
+    "production_adapter": "src/backend/http/bill_routes/crud_handlers.rs::bills_by_month_handler",
+    "read_contract": [
+      "normal Ledger list remains paginated and capped at 500 rows",
+      "monthly Ledger list requires both date bounds and returns one complete page up to 100000 rows",
+      "a monthly result above 100000 rows fails closed instead of returning a partial collection",
+      "category filters, typed row mapping, and tags share the existing Ledger repository path",
+      "tags are loaded once for the result bill ids rather than once per row"
+    ],
+    "unchanged_boundaries": [
+      "GET /api/bills/by-month route, query aliases, sorting, and success/result envelope",
+      "user-scoped PostgreSQL filters and category-id resolution",
+      "integer cents and frontend transaction-type projection",
+      "bill writers, transactions, schema, configuration, and frontend code"
+    ],
+    "deleted_compatibility_paths": [
+      "HTTP postgres_filters_from_query",
+      "HTTP page_to_frontend_postgres per-row tag presenter",
+      "monthly handler direct pool, BillRecord, and raw PostgreSQL query dependency"
+    ],
+    "rejected_expansion": [
+      "new service or repository trait",
+      "UnitOfWork, cache, streaming protocol, new transaction, or second writer",
+      "unbounded monthly response or unrelated bill-detail migration"
+    ]
+  },
+  "tdd": {
+    "red": {
+      "command": "cargo test -p bill-analyser-http --test ledger_list_contract get_bills_by_month_returns_the_complete_bounded_month_with_tags_and_user_scope -- --exact --nocapture",
+      "result": "failed before implementation because the public monthly endpoint returned 500 rows instead of the 501-row bounded month"
+    },
+    "green": [
+      {
+        "command": "cargo test -p bill-analyser-http --test ledger_list_contract -- --nocapture",
+        "discovered": 2,
+        "executed": 2,
+        "failed": 0,
+        "skipped": 0,
+        "database": "fresh isolated PostgreSQL databases"
+      },
+      {
+        "command": "cargo test -p bill-analyser-http list_handlers_depend_on_ledger_boundary_instead_of_postgres_rows --lib -- --nocapture",
+        "discovered": 1,
+        "executed": 1,
+        "failed": 0,
+        "skipped": 0
+      },
+      {
+        "command": "cargo test -p bill-analyser-db --test bills_postgres ledger_queries_list_returns_typed_page_with_cents_tags_and_user_scope -- --exact --nocapture",
+        "discovered": 1,
+        "executed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "database": "fresh isolated PostgreSQL database"
+      }
+    ]
+  },
+  "verification": {
+    "cargo_fmt_check": "passed",
+    "cargo_clippy_workspace_all_targets_deny_warnings": "passed",
+    "git_diff_check": "passed",
+    "cargo_test_workspace": {
+      "command": "cargo test --workspace -j 2 -- --test-threads=1",
+      "result": "passed against a fresh temporary PostgreSQL gate database",
+      "discovered": 849,
+      "failed": 0,
+      "skipped": 0
+    },
+    "cargo_llvm_cov_workspace": {
+      "command": "cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 35 -- --test-threads=1",
+      "result": "passed with CARGO_BUILD_JOBS=2 against a fresh temporary PostgreSQL gate database",
+      "executable_lines": 80916,
+      "covered_lines": 54751,
+      "line_coverage_percent": 67.66
+    },
+    "changed_line_coverage": {
+      "command": "node scripts/governance-normalizers.mjs changed-coverage --lcov workspace.lcov --diff .git/ai/c7j-rust-changed.diff --threshold 90 --require-matched-files --require-executable-lines --allow-no-business-files",
+      "business_files": 6,
+      "matched_coverage_files": 3,
+      "executable_changed_lines": 80,
+      "covered_changed_lines": 75,
+      "coverage_percent": 93.75,
+      "strict_threshold_percent": 90,
+      "status": "passed"
+    },
+    "review": {
+      "base_ref": "288d5be0fdd17dd0bcb4c83306d7c7088a059ece",
+      "head_ref": "working tree on codex/c7j-monthly-ledger-read",
+      "changed_files": 11,
+      "standards_axis": "passed with no findings: SQL, row mapping, category resolution, and batch tags remain in DB; handlers only orchestrate; no trait, service, UnitOfWork, transaction owner, cache, or writer was added",
+      "spec_axis": "passed with no findings: the 501-row filtered month, tags, user scope, ordering, legacy envelope, normal 500-row pagination limit, and integer-cents projection are preserved",
+      "test_gap": "The exact above-100000 failure branch is not materialized with a 100001-row integration fixture because that would make every workspace and coverage run allocate the maximum response; the bounded check is explicit and the residual is retained rather than hidden.",
+      "residual_risk": "A valid month approaching 100000 rows remains an intentionally large in-memory response; pagination or streaming beyond that product boundary is a separate slice."
+    },
+    "money_review": "No conversion was added or moved: database, typed Ledger, HTTP DTO, and tests remain integer cents.",
+    "delivery_evidence": "The Gitea PR and exact-head Actions record remain the authoritative external delivery evidence, so their immutable run identifiers are not written into the head they verify."
+  },
+  "environment_diagnostics": [
+    "An exploratory full HTTP lib run against the long-lived development database failed during test setup with sqlx VersionMismatch(25); C7j focused contracts had already passed and no monthly code path failed.",
+    "The unchanged HTTP lib suite passed 246 of 246 when run serially against a fresh temporary PostgreSQL database, proving the earlier result was stale migration state rather than a source regression.",
+    "Full workspace tests and coverage used their own fresh temporary databases and serial test threads; no source, test, or threshold was relaxed."
+  ],
+  "environment_hygiene": {
+    "long_lived_development_database": "not migrated, cleared, or used by passing full gates",
+    "test_database_strategy": "required PostgreSQL contracts create, migrate, and remove isolated databases; the full test and coverage commands each used and removed a dedicated temporary base database",
+    "secrets": "the test database URL is passed only through process environment and is not persisted in this artifact"
+  }
+}

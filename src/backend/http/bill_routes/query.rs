@@ -137,43 +137,6 @@ struct RecurringCandidatesQuery {
     #[serde(rename = "toleranceDays")]
     tolerance_days: Option<i64>,
 }
-async fn postgres_filters_from_query(
-    pool: &PostgresPool,
-    user_id: UserId,
-    query: &BillsListQuery,
-) -> RouteResult<BillFilters> {
-    let category_ids = query.category_ids();
-    let categories = if category_ids.is_empty() {
-        Vec::new()
-    } else {
-        postgres_category_filters_for_ids(pool, user_id.get() as i64, &category_ids)
-            .await
-            .map_err(|_| Box::new(db_error_response()))?
-    };
-    Ok(BillFilters {
-        date_from: query
-            .start_date
-            .clone()
-            .or_else(|| query.min_time.and_then(date_from_timestamp)),
-        date_to: query
-            .end_date
-            .clone()
-            .or_else(|| query.max_time.and_then(date_from_timestamp)),
-        transaction_type: transaction_list_type_filter(query.transaction_type.as_deref()),
-        main_category: non_empty_string(query.main_category.as_ref()),
-        sub_category: non_empty_string(query.sub_category.as_ref()),
-        batch_id: non_empty_string(query.batch_id.as_ref()),
-        counterparty: non_empty_string(query.counterparty.as_ref()),
-        description: non_empty_string(query.description.as_ref()),
-        keyword: non_empty_string(query.keyword.as_ref()),
-        account_ids: query.account_ids(),
-        categories,
-        tag_ids: query.tag_ids(),
-        amount_filter_cents: query.amount_filter_cents(),
-        ..BillFilters::default()
-    })
-}
-
 #[cfg(test)]
 mod bill_query_tests {
     use super::*;

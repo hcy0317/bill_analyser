@@ -3,6 +3,9 @@ pub struct PostgresLedgerQueries {
     pool: PostgresPool,
 }
 
+const LEDGER_PAGE_SIZE_LIMIT: usize = 500;
+const MONTH_LEDGER_SIZE_LIMIT: usize = 100_000;
+
 impl PostgresLedgerQueries {
     pub fn new(pool: &PostgresPool) -> Self {
         Self { pool: pool.clone() }
@@ -13,6 +16,41 @@ impl PostgresLedgerQueries {
         &self,
         principal: UserId,
         query: LedgerListQuery,
+    ) -> DbResult<LedgerEntryPage> {
+        self.list_with_page_size_limit(principal, query, LEDGER_PAGE_SIZE_LIMIT)
+            .await
+    }
+
+    /// 查询一个有明确日期边界的完整月份，并拒绝静默返回超过有界上限的部分集合。
+    pub async fn list_month(
+        &self,
+        principal: UserId,
+        mut query: LedgerListQuery,
+    ) -> DbResult<LedgerEntryPage> {
+        if query.date_from.is_none() || query.date_to.is_none() {
+            return Err(DbError::InvalidOperation(
+                "monthly ledger query requires a bounded date range".to_string(),
+            ));
+        }
+        query.page = 1;
+        query.page_size = MONTH_LEDGER_SIZE_LIMIT;
+        let page = self
+            .list_with_page_size_limit(principal, query, MONTH_LEDGER_SIZE_LIMIT)
+            .await?;
+        if page.total > i64::try_from(MONTH_LEDGER_SIZE_LIMIT).unwrap_or(i64::MAX) {
+            return Err(DbError::InvalidOperation(format!(
+                "monthly ledger exceeds bounded read limit: {}",
+                MONTH_LEDGER_SIZE_LIMIT
+            )));
+        }
+        Ok(page)
+    }
+
+    async fn list_with_page_size_limit(
+        &self,
+        principal: UserId,
+        query: LedgerListQuery,
+        max_page_size: usize,
     ) -> DbResult<LedgerEntryPage> {
         let user_id = i64::try_from(principal.get())
             .map_err(|_| DbError::InvalidOperation("user id exceeds PostgreSQL BIGINT".to_string()))?;
@@ -38,11 +76,12 @@ impl PostgresLedgerQueries {
             amount_filter_cents: query.amount_filter_cents,
             ..BillFilters::default()
         };
-        let page = query_postgres_bills(
+        let page = query_postgres_bills_with_page_size_limit(
             &self.pool,
             user_id,
             query.page,
             query.page_size,
+            max_page_size,
             &filters,
         )
         .await?;
@@ -68,7 +107,7 @@ impl PostgresLedgerQueries {
             items,
             total: page.total,
             page: query.page.max(1),
-            page_size: query.page_size.clamp(1, 500),
+            page_size: query.page_size.clamp(1, max_page_size.max(1)),
         })
     }
 }

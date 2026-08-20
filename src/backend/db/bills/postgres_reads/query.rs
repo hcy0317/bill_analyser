@@ -7,7 +7,28 @@ pub async fn query_postgres_bills(
     filters: &BillFilters,
 ) -> DbResult<BillPage> {
     bill_page_from_postgres_rows(
-        query_postgres_bill_rows(pool, user_id, page, page_size, filters).await?,
+        query_postgres_bill_rows(pool, user_id, page, page_size, 500, filters).await?,
+    )
+}
+
+async fn query_postgres_bills_with_page_size_limit(
+    pool: &PostgresPool,
+    user_id: i64,
+    page: usize,
+    page_size: usize,
+    max_page_size: usize,
+    filters: &BillFilters,
+) -> DbResult<BillPage> {
+    bill_page_from_postgres_rows(
+        query_postgres_bill_rows(
+            pool,
+            user_id,
+            page,
+            page_size,
+            max_page_size,
+            filters,
+        )
+        .await?,
     )
 }
 
@@ -20,7 +41,7 @@ pub async fn query_postgres_reconciliation_bills(
     filters: &BillFilters,
 ) -> DbResult<PostgresReconciliationBillPage> {
     reconciliation_bill_page_from_postgres_rows(
-        query_postgres_bill_rows(pool, user_id, page, page_size, filters).await?,
+        query_postgres_bill_rows(pool, user_id, page, page_size, 500, filters).await?,
     )
 }
 
@@ -29,10 +50,11 @@ async fn query_postgres_bill_rows(
     user_id: i64,
     page: usize,
     page_size: usize,
+    max_page_size: usize,
     filters: &BillFilters,
 ) -> DbResult<(Vec<PgRow>, i64)> {
     let page = page.max(1);
-    let page_size = page_size.clamp(1, 500);
+    let page_size = page_size.clamp(1, max_page_size.max(1));
     let offset = (page - 1).saturating_mul(page_size);
 
     let mut count_builder = QueryBuilder::<Postgres>::new(

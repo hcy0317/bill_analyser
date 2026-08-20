@@ -1,35 +1,6 @@
 // 中文导读：HTTP 运行态层，负责 Axum 路由、认证上下文、请求 DTO 解析和前端当前响应投影。
 // 维护重点：handler 只编排请求到 core/db 的调用，复杂 SQL、事务和跨表规则应下沉到 repository 或业务合同层。
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
-async fn page_to_frontend_postgres(
-    pool: &PostgresPool,
-    user_id: UserId,
-    page: usize,
-    page_size: usize,
-    bill_page: bill_analyser_db::BillPage,
-) -> bill_analyser_db::DbResult<Value> {
-    let mut items = Vec::with_capacity(bill_page.bills.len());
-    for bill in bill_page.bills {
-        let bill_id = record_i64(&bill, "id").unwrap_or_default();
-        let tags = get_postgres_bill_tags(pool, user_id.get() as i64, bill_id).await?;
-        let category_id = value_string(bill.get("category_id"));
-        items.push(record_to_frontend_value_with_related(bill, tags, category_id)?);
-    }
-    let total = usize::try_from(bill_page.total.max(0)).unwrap_or(usize::MAX);
-    Ok(json!({
-        "success": true,
-        "result": {
-            "items": items,
-            "totalCount": bill_page.total,
-            "page": page,
-            "pageSize": page_size,
-            "total": bill_page.total,
-            "page_size": page_size,
-            "total_pages": total.div_ceil(page_size),
-        }
-    }))
-}
-
 fn ledger_page_to_frontend(page: LedgerEntryPage) -> bill_analyser_db::DbResult<Value> {
     let page_size = page.page_size.max(1);
     let total_pages = usize::try_from(page.total.max(0))

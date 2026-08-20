@@ -11,7 +11,7 @@ use bill_analyser_db::{
     list_postgres_reconciliation_categories, list_postgres_user_data_categories,
     query_postgres_bills, resolve_postgres_category_by_id, sync_all_postgres_account_balances,
     update_postgres_bill, BillCategoryFilter, BillCreateDraft, BillFilters, BillUpdateDraft,
-    PostgresLedgerQueries, PostgresPool,
+    DbError, PostgresLedgerQueries, PostgresPool,
 };
 use serde_json::{json, Value};
 use sqlx::Row;
@@ -110,6 +110,16 @@ async fn ledger_queries_list_returns_typed_page_with_cents_tags_and_user_scope(
     assert!(empty_page.items.is_empty());
     assert_eq!(empty_page.page, 1);
     assert_eq!(empty_page.page_size, 500);
+
+    let missing_month_range = queries
+        .list_month(principal, LedgerListQuery::default())
+        .await
+        .expect_err("unbounded month query must fail closed");
+    assert!(matches!(
+        missing_month_range,
+        DbError::InvalidOperation(message)
+            if message == "monthly ledger query requires a bounded date range"
+    ));
 
     test_db.cleanup().await?;
     Ok(())
