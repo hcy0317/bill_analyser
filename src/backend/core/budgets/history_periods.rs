@@ -15,7 +15,7 @@ pub fn normalize_budget_query_end_date(end_date: Option<&str>) -> Option<String>
 
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn expand_forecast_history_window(
-    period_type: &str,
+    period_kind: BudgetPeriodKind,
     start_date: &str,
     end_date: &str,
     history_periods: i64,
@@ -29,36 +29,11 @@ pub fn expand_forecast_history_window(
         });
     }
     let periods_to_expand = history_periods - 1;
-    let expanded_start = match period_type {
-        "daily" => start - Duration::days(periods_to_expand),
-        "weekly" => start - Duration::weeks(periods_to_expand),
-        "quarterly" => shift_month_start(start, -3 * periods_to_expand)?,
-        "yearly" => make_date(
-            start.year()
-                - i32::try_from(periods_to_expand)
-                    .map_err(|_| "Invalid history periods".to_string())?,
-            start.month(),
-            start.day(),
-        )?,
-        _ => shift_month_start(start, -periods_to_expand)?,
-    };
+    let expanded_start = period_kind.shift_start(start, -periods_to_expand)?;
     Ok(BudgetPeriodRange {
         start_date: format_date(expanded_start),
         end_date: format_date(end),
     })
-}
-
-#[tracing::instrument(level = "debug", skip_all)]
-pub fn build_forecast_period_key(period_type: &str, date: NaiveDate) -> String {
-    #[cfg(not(coverage))]
-    tracing::info!(domain = "budget", operation = "build_forecast_period_key", "business operation entered");
-    match period_type {
-        "daily" => format_date(date),
-        "weekly" => date.format("%Y-%W").to_string(),
-        "quarterly" => format!("{}-Q{}", date.year(), ((date.month() - 1) / 3) + 1),
-        "yearly" => date.year().to_string(),
-        _ => date.format("%Y-%m").to_string(),
-    }
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -148,7 +123,7 @@ pub fn build_budget_history_filter_summary(input: &BudgetHistoryFilterSummaryInp
 
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn iter_budget_history_period_ranges(
-    period_type: &str,
+    period_kind: BudgetPeriodKind,
     start_date: &str,
     end_date: &str,
 ) -> Result<Vec<BudgetPeriodRange>, String> {
@@ -159,49 +134,12 @@ pub fn iter_budget_history_period_ranges(
     }
 
     let mut ranges = Vec::new();
-    let mut current = match period_type {
-        "weekly" => start - Duration::days(i64::from(start.weekday().num_days_from_monday())),
-        "monthly" => make_date(start.year(), start.month(), 1)?,
-        "quarterly" => make_date(start.year(), (((start.month() - 1) / 3) * 3) + 1, 1)?,
-        "yearly" => make_date(start.year(), 1, 1)?,
-        _ => start,
-    };
+    let containing = period_kind.containing(start)?;
+    let mut current = parse_budget_date_prefix(&containing.start_date)?;
 
     while current <= end {
-        let range = match period_type {
-            "weekly" => BudgetPeriodRange {
-                start_date: format_date(current),
-                end_date: format_date(current + Duration::days(6)),
-            },
-            "monthly" => BudgetPeriodRange {
-                start_date: format_date(current),
-                end_date: format_date(last_day_of_month(current.year(), current.month())?),
-            },
-            "quarterly" => {
-                let end_month = current.month() + 2;
-                BudgetPeriodRange {
-                    start_date: format_date(current),
-                    end_date: format_date(last_day_of_month(current.year(), end_month)?),
-                }
-            }
-            "yearly" => BudgetPeriodRange {
-                start_date: format_date(current),
-                end_date: format_date(make_date(current.year(), 12, 31)?),
-            },
-            _ => BudgetPeriodRange {
-                start_date: format_date(current),
-                end_date: format_date(current),
-            },
-        };
-        ranges.push(range);
-
-        current = match period_type {
-            "weekly" => current + Duration::weeks(1),
-            "monthly" => shift_month_start(current, 1)?,
-            "quarterly" => shift_month_start(current, 3)?,
-            "yearly" => shift_month_start(current, 12)?,
-            _ => current + Duration::days(1),
-        };
+        ranges.push(period_kind.containing(current)?);
+        current = period_kind.shift_start(current, 1)?;
     }
 
     Ok(ranges)

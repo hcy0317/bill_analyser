@@ -2,7 +2,7 @@
 mod tests {
     use super::*;
     use sqlx::postgres::PgPoolOptions;
-    use std::{env, error::Error};
+    use std::{env, error::Error, io};
 
     #[test]
     fn category_names_from_postgres_path_splits_main_and_subcategory() {
@@ -121,6 +121,51 @@ mod tests {
         assert_eq!(history.get("budget_amount_cents"), Some(&json!(12345)));
         assert_eq!(history.get("spent_amount_cents"), Some(&json!(4500)));
         assert_eq!(history.get("remaining_amount_cents"), Some(&json!(7845)));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn postgres_forecast_group_keys_match_the_core_period_contract(
+    ) -> Result<(), Box<dyn Error>> {
+        let postgres_url = env::var("BILL_ANALYSER_TEST_POSTGRES_URL").map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::NotFound,
+                "BILL_ANALYSER_TEST_POSTGRES_URL is required for budget period contracts",
+            )
+        })?;
+        let pool = PgPoolOptions::new()
+            .max_connections(1)
+            .connect(&postgres_url)
+            .await?;
+        let cases = [
+            (BudgetPeriodKind::Daily, "2021-01-01", "2021-01-01"),
+            (BudgetPeriodKind::Weekly, "2021-01-01", "2021-00"),
+            (BudgetPeriodKind::Weekly, "2021-01-10", "2021-01"),
+            (BudgetPeriodKind::Weekly, "2026-05-07", "2026-18"),
+            (BudgetPeriodKind::Monthly, "2021-01-31", "2021-01"),
+            (BudgetPeriodKind::Monthly, "2021-02-01", "2021-02"),
+            (BudgetPeriodKind::Quarterly, "2021-03-31", "2021-Q1"),
+            (BudgetPeriodKind::Quarterly, "2021-04-01", "2021-Q2"),
+            (BudgetPeriodKind::Yearly, "2020-12-31", "2020"),
+            (BudgetPeriodKind::Yearly, "2021-01-01", "2021"),
+        ];
+
+        for (period_kind, day, expected) in cases {
+            let expression = postgres_budget_forecast_group_expr(period_kind);
+            let statement = format!(
+                "SELECT {expression} AS period FROM (SELECT $1::timestamptz AS occurred_at) b"
+            );
+            let actual: String = sqlx::query_scalar(&statement)
+                .bind(format!("{day}T12:00:00Z"))
+                .fetch_one(&pool)
+                .await?;
+            let core_key = period_kind.bucket_key(
+                NaiveDate::parse_from_str(day, "%Y-%m-%d").expect("contract date"),
+            );
+            assert_eq!(actual, expected, "PostgreSQL key for {day}");
+            assert_eq!(actual, core_key, "Rust/PostgreSQL parity for {day}");
+        }
 
         Ok(())
     }

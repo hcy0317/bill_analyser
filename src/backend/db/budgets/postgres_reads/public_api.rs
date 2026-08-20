@@ -275,26 +275,38 @@ pub async fn query_postgres_budget_forecast(
     filters: &BudgetForecastFilters,
 ) -> DbResult<Vec<Value>> {
     let user_id = user_id_i64(user_id)?;
+    let period_kind = BudgetPeriodKind::parse(filters.period_type.trim())
+        .map_err(DbError::InvalidOperation)?;
     let history_window = expand_forecast_history_window(
-        &filters.period_type,
+        period_kind,
         &filters.start_date,
         &filters.end_date,
         filters.history_periods,
     )
     .map_err(DbError::InvalidOperation)?;
     let forecast_rows =
-        query_postgres_budget_forecast_rows(pool, user_id, filters, &history_window).await?;
+        query_postgres_budget_forecast_rows(
+            pool,
+            user_id,
+            filters,
+            period_kind,
+            &history_window,
+        )
+        .await?;
     let (category_totals, period_count) = aggregate_postgres_budget_forecast_rows(forecast_rows);
 
     let categories = load_postgres_category_context_values(pool, user_id).await?;
     let category_context = build_budget_category_context(&categories);
     let budget_map =
-        query_postgres_budget_forecast_budget_map(pool, user_id, filters, &category_context)
-            .await?;
-    let target_period_key = build_forecast_period_key(
-        &filters.period_type,
-        parse_date_prefix(&filters.start_date)?,
-    );
+        query_postgres_budget_forecast_budget_map(
+            pool,
+            user_id,
+            filters,
+            period_kind,
+            &category_context,
+        )
+        .await?;
+    let target_period_key = period_kind.bucket_key(parse_date_prefix(&filters.start_date)?);
 
     let mut results = Vec::new();
     for (category, mut totals) in category_totals {
@@ -363,6 +375,10 @@ pub async fn query_postgres_budget_execution_history(
     user_id: UserId,
     filters: &BudgetExecutionFilters,
 ) -> DbResult<Vec<Value>> {
+    let period_kind = BudgetPeriodKind::parse(
+        filters.period_type.as_deref().unwrap_or("monthly").trim(),
+    )
+    .map_err(DbError::InvalidOperation)?;
     let user_id_value = user_id_i64(user_id)?;
     let categories = load_postgres_category_context_values(pool, user_id_value).await?;
     let category_context = build_budget_category_context(&categories);
@@ -392,8 +408,14 @@ pub async fn query_postgres_budget_execution_history(
     }
 
     let on_demand_items =
-        build_postgres_budget_execution_history_on_demand(pool, user_id, filters, &filter_summary)
-            .await?;
+        build_postgres_budget_execution_history_on_demand(
+            pool,
+            user_id,
+            filters,
+            period_kind,
+            &filter_summary,
+        )
+        .await?;
     if history_items.is_empty() {
         return Ok(on_demand_items);
     }

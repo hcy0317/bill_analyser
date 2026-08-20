@@ -1,12 +1,14 @@
-fn postgres_budget_forecast_group_expr(period_type: &str) -> &'static str {
-    match period_type {
-        "daily" => "to_char(b.occurred_at, 'YYYY-MM-DD')",
-        "weekly" => "to_char(b.occurred_at, 'YYYY-WW')",
-        "quarterly" => {
+fn postgres_budget_forecast_group_expr(period_kind: BudgetPeriodKind) -> &'static str {
+    match period_kind {
+        BudgetPeriodKind::Daily => "to_char(b.occurred_at, 'YYYY-MM-DD')",
+        BudgetPeriodKind::Weekly => {
+            "to_char(b.occurred_at, 'YYYY') || '-' || LPAD(FLOOR((EXTRACT(DOY FROM b.occurred_at) + 7 - EXTRACT(ISODOW FROM b.occurred_at)) / 7)::INT::TEXT, 2, '0')"
+        }
+        BudgetPeriodKind::Quarterly => {
             "to_char(b.occurred_at, 'YYYY') || '-Q' || EXTRACT(QUARTER FROM b.occurred_at)::INT"
         }
-        "monthly" => "to_char(b.occurred_at, 'YYYY-MM')",
-        _ => "to_char(b.occurred_at, 'YYYY')",
+        BudgetPeriodKind::Monthly => "to_char(b.occurred_at, 'YYYY-MM')",
+        BudgetPeriodKind::Yearly => "to_char(b.occurred_at, 'YYYY')",
     }
 }
 

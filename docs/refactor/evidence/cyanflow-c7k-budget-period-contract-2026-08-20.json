@@ -1,0 +1,143 @@
+{
+  "schema_version": "cyanflow-slice-evidence.v1",
+  "slice": "C7k",
+  "work_id": "bill-analyser-cyanflow-c7k-budget-period-contract-execute-20260820",
+  "base_commit": "82cc6bec2e2fd9de5929b1d38917c8fc3a184f53",
+  "branch": "codex/c7k-budget-period-contract",
+  "objective": "Establish one typed budget-period read contract for scope, forecast, history, and PostgreSQL grouping while correcting weekly bucket parity without changing public API, schema, or writers.",
+  "architecture": {
+    "owner": "src/backend/core/budgets/period_kind.rs::BudgetPeriodKind",
+    "production_adapters": [
+      "src/backend/core/budgets/period_validation.rs",
+      "src/backend/core/budgets/history_periods.rs",
+      "src/backend/db/budgets/postgres_reads/public_api.rs",
+      "src/backend/db/budgets/postgres_reads/forecast.rs",
+      "src/backend/db/budgets/postgres_reads/history.rs",
+      "src/backend/db/budgets/postgres_reads/mapping.rs"
+    ],
+    "read_contract": [
+      "daily, weekly, monthly, quarterly, and yearly are parsed strictly once at read boundaries",
+      "containing range, period shifting, and bucket keys share one typed core owner",
+      "weekly uses Monday as the first day and POSIX percent-W week 00 before the first Monday",
+      "PostgreSQL forecast grouping matches Rust bucket keys across day, week, month, quarter, and year boundaries",
+      "explicit unknown forecast and history periods fail before any database query"
+    ],
+    "unchanged_boundaries": [
+      "REST paths, request and response DTOs, default monthly behavior, and frontend code",
+      "PostgreSQL user scope, schema, migrations, and transaction ownership",
+      "budget hierarchy writers and their existing string-based period synchronization",
+      "integer-cent money fields, forecast payload shape, and category filtering"
+    ],
+    "rejected_expansion": [
+      "new service, trait, UnitOfWork, crate, cache, compatibility adapter, or second writer",
+      "database CHECK constraint or writer cutover before a separately approved migration slice",
+      "formal bill draft and export renderer abstractions unrelated to the period identity drift"
+    ]
+  },
+  "database_audit": {
+    "live_period_rows": {
+      "monthly": 24,
+      "quarterly": 3,
+      "yearly": 2,
+      "invalid": 0
+    },
+    "period_type_check_constraint": "absent",
+    "weekly_drift_before_fix": [
+      "2021-01-01: PostgreSQL YYYY-WW produced 2021-01 while Rust percent-W produced 2021-00",
+      "2021-01-10: PostgreSQL YYYY-WW produced 2021-02 while Rust percent-W produced 2021-01",
+      "2026-05-07: PostgreSQL YYYY-WW produced 2026-19 while Rust percent-W produced 2026-18"
+    ]
+  },
+  "tdd": {
+    "red": [
+      {
+        "command": "cargo test -p bill-analyser-db --test budget_period_postgres -- --nocapture",
+        "result": "failed because the public weekly forecast returned current_spent_cents 0 instead of 1200 under PostgreSQL YYYY-WW"
+      },
+      {
+        "command": "cargo test -p bill-analyser-core --test budget_contracts budget_period_kind_strictly_owns_period_identity -- --exact --nocapture",
+        "result": "failed to compile before BudgetPeriodKind existed"
+      },
+      {
+        "command": "cargo test -p bill-analyser-core --test budget_contracts budget_period_kind_owns_containing_ranges_and_bucket_keys -- --exact --nocapture",
+        "result": "failed to compile before the typed range and bucket operations existed"
+      },
+      {
+        "command": "cargo test -p bill-analyser-db --test budget_period_postgres budget_read_models_reject_an_unknown_period_before_querying -- --exact --nocapture",
+        "result": "failed before public forecast and history entrypoints parsed periods strictly"
+      }
+    ],
+    "green": [
+      {
+        "command": "cargo test -p bill-analyser-core --test budget_contracts",
+        "discovered": 13,
+        "executed": 13,
+        "failed": 0,
+        "skipped": 0
+      },
+      {
+        "command": "cargo test -p bill-analyser-db --test budget_period_postgres -- --nocapture",
+        "discovered": 2,
+        "executed": 2,
+        "failed": 0,
+        "skipped": 0,
+        "database": "fresh isolated PostgreSQL database"
+      },
+      {
+        "command": "cargo test -p bill-analyser-db postgres_forecast_group_keys_match_the_core_period_contract --lib -- --nocapture",
+        "discovered": 1,
+        "executed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "database": "real PostgreSQL boundary corpus"
+      }
+    ]
+  },
+  "verification": {
+    "cargo_fmt_check": "passed",
+    "cargo_clippy_workspace_all_targets_deny_warnings": "passed",
+    "git_diff_check": "passed",
+    "cargo_test_workspace": {
+      "command": "cargo test --workspace -j 2 -- --test-threads=1",
+      "result": "passed against a fresh temporary PostgreSQL gate database",
+      "discovered": 854,
+      "failed": 0,
+      "skipped": 0
+    },
+    "cargo_llvm_cov_workspace": {
+      "command": "cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 35 -- --test-threads=1",
+      "result": "passed with CARGO_BUILD_JOBS=2 against a fresh temporary PostgreSQL gate database",
+      "executable_lines": 80935,
+      "covered_lines": 54960,
+      "line_coverage_percent": 67.91
+    },
+    "changed_line_coverage": {
+      "method": "scripts/governance-normalizers.mjs summarizeChangedLineCoverage over the base-to-working-tree Rust diff supplied on stdin",
+      "business_files": 9,
+      "matched_coverage_files": 6,
+      "executable_changed_lines": 123,
+      "covered_changed_lines": 120,
+      "coverage_percent": 97.56,
+      "strict_threshold_percent": 90,
+      "status": "passed"
+    },
+    "review": {
+      "base_ref": "82cc6bec2e2fd9de5929b1d38917c8fc3a184f53",
+      "head_ref": "working tree on codex/c7k-budget-period-contract",
+      "changed_files": 15,
+      "codebase_memory_project": "bill_analyser-d7309f0e9eab-r5b56dca6915d",
+      "standards_axis": "passed with no findings: period behavior is a small concrete core value object; PostgreSQL remains a concrete adapter; no trait, service, transaction owner, schema, cache, or writer was added",
+      "spec_axis": "passed with no findings: scope, forecast, on-demand history, and SQL grouping share typed period semantics; weekly percent-W parity and unknown-period fail-closed behavior are proven on real PostgreSQL",
+      "test_gap": "Three changed executable pass-through lines in the on-demand history adapter were not directly hit; the underlying history range semantics and public unknown-period entrypoint are covered, and aggregate changed-line coverage is 97.56 percent.",
+      "residual_risk": "The hierarchy writer still interprets raw period strings and the database has no period_type CHECK constraint; both are deliberately retained for a separate data-aware writer migration slice."
+    },
+    "money_review": "No money field or conversion changed; budget and forecast values remain integer cents.",
+    "delivery_evidence": "The Gitea PR and exact-head Actions record remain the authoritative external delivery evidence, so their immutable run identifiers are not written into the head they verify."
+  },
+  "environment_hygiene": {
+    "test_database_strategy": "full workspace tests and coverage each used a dedicated temporary PostgreSQL database and removed it with FORCE after completion",
+    "temporary_database_residue": "none",
+    "long_lived_development_database": "audited read-only for period values and constraints; not migrated, cleared, or used as a mutable test fixture",
+    "secrets": "PostgreSQL credentials were read from the existing local container only inside process scope and were not printed or persisted"
+  }
+}

@@ -13,10 +13,10 @@ use crate::TransactionType;
 pub const BUDGET_TYPE_EXPENSE: i32 = 3;
 pub const BUDGET_TYPE_INVESTMENT: i32 = 5;
 pub const CURRENT_EXPENSE_CATEGORY_TYPE: i32 = 1;
-pub const VALID_BUDGET_PERIOD_TYPES: [&str; 5] =
-    ["daily", "weekly", "monthly", "quarterly", "yearly"];
 
 const SYNCHRONIZED_PRIMARY_TOLERANCE_CENTS: i64 = 1;
+
+include!("budgets/period_kind.rs");
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BudgetPeriodRange {

@@ -4,8 +4,8 @@ use bill_analyser_core::budgets::{
     budget_overlaps_period, budget_type_matches_category, build_budget_category_context,
     build_budget_execution_summary, build_budget_export_response, build_budget_forecast_item,
     build_budget_forecast_item_from_input, build_budget_history_filter_summary,
-    build_budget_history_item_from_detail, build_budget_period_scope, build_forecast_period_key,
-    calculate_avg_backtest_mape, calculate_budget_period_progress, calculate_forecast_amount_cents,
+    build_budget_history_item_from_detail, build_budget_period_scope, calculate_avg_backtest_mape,
+    calculate_budget_period_progress, calculate_forecast_amount_cents,
     calculate_forecast_backtest_mape, expand_forecast_history_window, get_budget_type_name,
     iter_budget_history_period_ranges, normalize_budget_category_type,
     normalize_budget_query_end_date, parse_budget_csv_int_list, parse_budget_json_int_list,
@@ -14,7 +14,7 @@ use bill_analyser_core::budgets::{
     resolve_parent_budget_period, rollup_parent_amount_cents, rollup_yearly_child_total_cents,
     select_budget_detail_items, select_budget_summary_items, validate_budget_date_range,
     validate_budget_period_args, validate_import_budget_item, BudgetForecastItemInput,
-    BudgetHistoryFilterSummaryInput, BudgetPeriodScopeInput, BudgetRouteFilters,
+    BudgetHistoryFilterSummaryInput, BudgetPeriodKind, BudgetPeriodScopeInput, BudgetRouteFilters,
     BUDGET_TYPE_EXPENSE, BUDGET_TYPE_INVESTMENT,
 };
 use bill_analyser_core::TransactionType;
@@ -30,6 +30,81 @@ fn ids(items: &[Value]) -> Vec<i64> {
         .iter()
         .map(|item| item["id"].as_i64().expect("id"))
         .collect()
+}
+
+#[test]
+fn budget_period_kind_strictly_owns_period_identity() {
+    for raw in ["daily", "weekly", "monthly", "quarterly", "yearly"] {
+        let period = BudgetPeriodKind::parse(raw).expect("known budget period");
+        assert_eq!(period.as_str(), raw);
+    }
+
+    assert_eq!(
+        BudgetPeriodKind::parse("fortnight"),
+        Err("Invalid period_type: fortnight".to_string())
+    );
+    assert_eq!(
+        BudgetPeriodKind::parse(" monthly "),
+        Err("Invalid period_type:  monthly ".to_string())
+    );
+}
+
+#[test]
+fn budget_period_kind_owns_containing_ranges_and_bucket_keys() {
+    let cases = [
+        (
+            BudgetPeriodKind::Daily,
+            "2026-05-07",
+            "2026-05-07",
+            "2026-05-07",
+        ),
+        (
+            BudgetPeriodKind::Weekly,
+            "2021-01-01",
+            "2020-12-28",
+            "2021-01-03",
+        ),
+        (
+            BudgetPeriodKind::Monthly,
+            "2024-02-15",
+            "2024-02-01",
+            "2024-02-29",
+        ),
+        (
+            BudgetPeriodKind::Quarterly,
+            "2026-05-07",
+            "2026-04-01",
+            "2026-06-30",
+        ),
+        (
+            BudgetPeriodKind::Yearly,
+            "2026-05-07",
+            "2026-01-01",
+            "2026-12-31",
+        ),
+    ];
+    for (period, anchor, expected_start, expected_end) in cases {
+        let range = period.containing(date(anchor)).expect("containing range");
+        assert_eq!(range.start_date, expected_start);
+        assert_eq!(range.end_date, expected_end);
+    }
+
+    let sample_day = date("2026-05-07");
+    assert_eq!(BudgetPeriodKind::Daily.bucket_key(sample_day), "2026-05-07");
+    assert_eq!(
+        BudgetPeriodKind::Weekly.bucket_key(date("2021-01-01")),
+        "2021-00"
+    );
+    assert_eq!(
+        BudgetPeriodKind::Weekly.bucket_key(date("2021-01-10")),
+        "2021-01"
+    );
+    assert_eq!(BudgetPeriodKind::Monthly.bucket_key(sample_day), "2026-05");
+    assert_eq!(
+        BudgetPeriodKind::Quarterly.bucket_key(sample_day),
+        "2026-Q2"
+    );
+    assert_eq!(BudgetPeriodKind::Yearly.bucket_key(sample_day), "2026");
 }
 
 #[test]
@@ -371,8 +446,9 @@ fn date_helpers_pin_query_end_window_history_and_parent_rollup_semantics() {
         Some("2026-05-01 10:30:00".to_string())
     );
 
-    let forecast_window = expand_forecast_history_window("monthly", "2026-05-01", "2026-05-31", 6)
-        .expect("forecast window");
+    let forecast_window =
+        expand_forecast_history_window(BudgetPeriodKind::Monthly, "2026-05-01", "2026-05-31", 6)
+            .expect("forecast window");
     assert_eq!(forecast_window.start_date, "2025-12-01");
     assert_eq!(forecast_window.end_date, "2026-05-31");
 
@@ -415,14 +491,16 @@ fn history_filter_summary_and_on_demand_ranges_are_stable() {
     );
 
     let weekly =
-        iter_budget_history_period_ranges("weekly", "2026-05-07", "2026-05-20").expect("weekly");
+        iter_budget_history_period_ranges(BudgetPeriodKind::Weekly, "2026-05-07", "2026-05-20")
+            .expect("weekly");
     assert_eq!(weekly[0].start_date, "2026-05-04");
     assert_eq!(weekly[0].end_date, "2026-05-10");
     assert_eq!(weekly[2].start_date, "2026-05-18");
     assert_eq!(weekly[2].end_date, "2026-05-24");
 
-    let quarterly = iter_budget_history_period_ranges("quarterly", "2026-05-07", "2026-11-20")
-        .expect("quarterly");
+    let quarterly =
+        iter_budget_history_period_ranges(BudgetPeriodKind::Quarterly, "2026-05-07", "2026-11-20")
+            .expect("quarterly");
     assert_eq!(quarterly[0].start_date, "2026-04-01");
     assert_eq!(quarterly[0].end_date, "2026-06-30");
     assert_eq!(quarterly[2].start_date, "2026-10-01");
@@ -675,37 +753,41 @@ fn category_context_fallback_and_unknown_edges_are_pinned() {
 #[test]
 fn history_and_forecast_edge_branches_are_pinned() {
     assert_eq!(
-        expand_forecast_history_window("monthly", "2026-05-01", "2026-05-31", 1)
+        expand_forecast_history_window(BudgetPeriodKind::Monthly, "2026-05-01", "2026-05-31", 1,)
             .expect("single window")
             .start_date,
         "2026-05-01"
     );
     assert_eq!(
-        expand_forecast_history_window("yearly", "2026-05-01", "2026-05-31", 3)
+        expand_forecast_history_window(BudgetPeriodKind::Yearly, "2026-05-01", "2026-05-31", 3,)
             .expect("yearly window")
             .start_date,
         "2024-05-01"
     );
 
     let sample_day = date("2026-05-07");
-    assert_eq!(build_forecast_period_key("daily", sample_day), "2026-05-07");
-    assert_eq!(build_forecast_period_key("weekly", sample_day), "2026-18");
-    assert_eq!(build_forecast_period_key("yearly", sample_day), "2026");
+    assert_eq!(BudgetPeriodKind::Daily.bucket_key(sample_day), "2026-05-07");
+    assert_eq!(BudgetPeriodKind::Weekly.bucket_key(sample_day), "2026-18");
+    assert_eq!(BudgetPeriodKind::Yearly.bucket_key(sample_day), "2026");
     assert_eq!(
         resolve_parent_budget_period("daily", "2026-05-07", "monthly").expect("parent"),
         None
     );
 
-    assert!(
-        iter_budget_history_period_ranges("monthly", "2026-06-01", "2026-05-01")
-            .expect("empty history")
-            .is_empty()
-    );
-    let daily = iter_budget_history_period_ranges("daily", "2026-05-01", "2026-05-02")
-        .expect("daily history");
+    assert!(iter_budget_history_period_ranges(
+        BudgetPeriodKind::Monthly,
+        "2026-06-01",
+        "2026-05-01",
+    )
+    .expect("empty history")
+    .is_empty());
+    let daily =
+        iter_budget_history_period_ranges(BudgetPeriodKind::Daily, "2026-05-01", "2026-05-02")
+            .expect("daily history");
     assert_eq!(daily.len(), 2);
-    let yearly = iter_budget_history_period_ranges("yearly", "2025-05-01", "2026-05-02")
-        .expect("yearly history");
+    let yearly =
+        iter_budget_history_period_ranges(BudgetPeriodKind::Yearly, "2025-05-01", "2026-05-02")
+            .expect("yearly history");
     assert_eq!(yearly[0].start_date, "2025-01-01");
     assert_eq!(yearly[1].end_date, "2026-12-31");
 

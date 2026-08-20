@@ -2,9 +2,10 @@ async fn query_postgres_budget_forecast_rows(
     pool: &PostgresPool,
     user_id: i64,
     filters: &BudgetForecastFilters,
+    period_kind: BudgetPeriodKind,
     history_window: &bill_analyser_core::budgets::BudgetPeriodRange,
 ) -> DbResult<Vec<BudgetForecastRow>> {
-    let group_by = postgres_budget_forecast_group_expr(&filters.period_type);
+    let group_by = postgres_budget_forecast_group_expr(period_kind);
     let type_name = get_budget_type_name(filters.budget_type);
     let mut builder = QueryBuilder::<Postgres>::new("SELECT ");
     builder.push(group_by);
@@ -87,6 +88,7 @@ async fn query_postgres_budget_forecast_budget_map(
     pool: &PostgresPool,
     user_id: i64,
     filters: &BudgetForecastFilters,
+    period_kind: BudgetPeriodKind,
     category_context: &bill_analyser_core::budgets::BudgetCategoryContext,
 ) -> DbResult<BTreeMap<String, BudgetForecastBudgetAmount>> {
     let mut builder = QueryBuilder::<Postgres>::new(
@@ -98,7 +100,7 @@ async fn query_postgres_budget_forecast_budget_map(
     );
     builder.push_bind(user_id);
     builder.push(" AND period_type = ");
-    builder.push_bind(filters.period_type.clone());
+    builder.push_bind(period_kind.as_str());
     builder.push(" AND enabled = true");
     if let Some(start_date) = text_filter(Some(&filters.start_date)) {
         builder.push(" AND (end_date IS NULL OR end_date >= ");

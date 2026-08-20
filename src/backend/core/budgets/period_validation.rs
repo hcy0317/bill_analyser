@@ -5,7 +5,7 @@
 
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn is_valid_budget_period_type(period_type: &str) -> bool {
-    VALID_BUDGET_PERIOD_TYPES.contains(&period_type)
+    BudgetPeriodKind::parse(period_type).is_ok()
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -13,16 +13,14 @@ pub fn validate_budget_period_args(
     input: &BudgetPeriodScopeInput,
     months_history: Option<i64>,
 ) -> Result<(), String> {
-    let period_type = input
-        .period_type
-        .as_deref()
-        .unwrap_or("monthly")
-        .trim()
-        .to_string();
-    if !is_valid_budget_period_type(&period_type) {
-        return Err(format!("Invalid period_type: {period_type}"));
-    }
+    budget_period_kind(input)?;
+    validate_budget_period_shape(input, months_history)
+}
 
+fn validate_budget_period_shape(
+    input: &BudgetPeriodScopeInput,
+    months_history: Option<i64>,
+) -> Result<(), String> {
     if input.month.is_some_and(|month| !(1..=12).contains(&month)) {
         return Err("month must be between 1 and 12".to_string());
     }
@@ -37,6 +35,10 @@ pub fn validate_budget_period_args(
     }
 
     Ok(())
+}
+
+fn budget_period_kind(input: &BudgetPeriodScopeInput) -> Result<BudgetPeriodKind, String> {
+    BudgetPeriodKind::parse(input.period_type.as_deref().unwrap_or("monthly").trim())
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -64,8 +66,16 @@ pub fn resolve_budget_period_range(
     input: &BudgetPeriodScopeInput,
     today: NaiveDate,
 ) -> Result<BudgetPeriodRange, String> {
-    validate_budget_period_args(input, None)?;
+    let period_kind = budget_period_kind(input)?;
+    validate_budget_period_shape(input, None)?;
+    resolve_budget_period_range_for_kind(input, today, period_kind)
+}
 
+fn resolve_budget_period_range_for_kind(
+    input: &BudgetPeriodScopeInput,
+    today: NaiveDate,
+    period_kind: BudgetPeriodKind,
+) -> Result<BudgetPeriodRange, String> {
     if non_empty_str(input.start_date.as_deref()).is_some()
         && non_empty_str(input.end_date.as_deref()).is_some()
     {
@@ -76,44 +86,23 @@ pub fn resolve_budget_period_range(
         });
     }
 
-    let period_type = input.period_type.as_deref().unwrap_or("monthly").trim();
     let year = input.year.unwrap_or(today.year());
-    match period_type {
-        "daily" => Ok(BudgetPeriodRange {
-            start_date: format_date(today),
-            end_date: format_date(today),
-        }),
-        "weekly" => {
-            let start = today - Duration::days(i64::from(today.weekday().num_days_from_monday()));
-            let end = start + Duration::days(6);
-            Ok(BudgetPeriodRange {
-                start_date: format_date(start),
-                end_date: format_date(end),
-            })
+    let anchor = match period_kind {
+        BudgetPeriodKind::Daily | BudgetPeriodKind::Weekly => today,
+        BudgetPeriodKind::Monthly => {
+            let month = input.month.unwrap_or(today.month());
+            make_date(year, month, 1)?
         }
-        "quarterly" => {
+        BudgetPeriodKind::Quarterly => {
             let quarter = input
                 .quarter
                 .unwrap_or_else(|| ((today.month() - 1) / 3) + 1);
             let start_month = ((quarter - 1) * 3) + 1;
-            let end_month = start_month + 2;
-            Ok(BudgetPeriodRange {
-                start_date: format_date(make_date(year, start_month, 1)?),
-                end_date: format_date(last_day_of_month(year, end_month)?),
-            })
+            make_date(year, start_month, 1)?
         }
-        "yearly" => Ok(BudgetPeriodRange {
-            start_date: format_date(make_date(year, 1, 1)?),
-            end_date: format_date(make_date(year, 12, 31)?),
-        }),
-        _ => {
-            let month = input.month.unwrap_or(today.month());
-            Ok(BudgetPeriodRange {
-                start_date: format_date(make_date(year, month, 1)?),
-                end_date: format_date(last_day_of_month(year, month)?),
-            })
-        }
-    }
+        BudgetPeriodKind::Yearly => make_date(year, 1, 1)?,
+    };
+    period_kind.containing(anchor)
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -123,16 +112,12 @@ pub fn build_budget_period_scope(
 ) -> Result<BudgetPeriodScope, String> {
     #[cfg(not(coverage))]
     tracing::info!(domain = "budget", operation = "build_budget_period_scope", "business operation entered");
-    let period_type = input
-        .period_type
-        .as_deref()
-        .unwrap_or("monthly")
-        .trim()
-        .to_string();
-    let range = resolve_budget_period_range(input, today)?;
+    let period_kind = budget_period_kind(input)?;
+    validate_budget_period_shape(input, None)?;
+    let range = resolve_budget_period_range_for_kind(input, today, period_kind)?;
     Ok(BudgetPeriodScope {
         budget_type: input.budget_type.unwrap_or(BUDGET_TYPE_EXPENSE),
-        period_type,
+        period_type: period_kind.as_str().to_string(),
         start_date: range.start_date,
         end_date: range.end_date,
         year: input.year,

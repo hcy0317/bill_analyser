@@ -60,15 +60,15 @@ async fn build_postgres_budget_execution_history_on_demand(
     pool: &PostgresPool,
     user_id: UserId,
     filters: &BudgetExecutionFilters,
+    period_kind: BudgetPeriodKind,
     filter_summary: &str,
 ) -> DbResult<Vec<Value>> {
-    let period_type = filters.period_type.as_deref().unwrap_or("monthly");
     let (Some(start_date), Some(end_date)) =
         (filters.start_date.as_deref(), filters.end_date.as_deref())
     else {
         return Ok(Vec::new());
     };
-    let period_ranges = iter_budget_history_period_ranges(period_type, start_date, end_date)
+    let period_ranges = iter_budget_history_period_ranges(period_kind, start_date, end_date)
         .map_err(DbError::InvalidOperation)?;
     let mut history_items = Vec::new();
     for period in period_ranges {
@@ -85,7 +85,7 @@ async fn build_postgres_budget_execution_history_on_demand(
                 &detail,
                 &period,
                 filters.budget_type,
-                period_type,
+                period_kind.as_str(),
                 filter_summary,
             ));
         }
