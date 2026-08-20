@@ -1,0 +1,127 @@
+{
+  "schema_version": "cyanflow-slice-evidence.v1",
+  "slice": "C7n",
+  "work_id": "bill-analyser-cyanflow-c7n-ocr-provider-failure-20260820",
+  "base_commit": "a163c9b9b201abdeab19258220b25200295c34df",
+  "branch": "codex/c7n-ocr-provider-failure",
+  "objective": "Make OCR provider execution transport-neutral inside the HTTP crate while preserving every existing REST error code, status, message, provider policy, and success payload.",
+  "architecture": {
+    "owner": "crate-private multipart_and_ocr/provider_runtime with response_payload as the only HTTP failure adapter",
+    "production_surface": [
+      "static provider selection for Tesseract, local JSON OCR, and network LLM vision",
+      "typed unavailable, timeout, invalid-output, and reauthentication failures",
+      "legacy OCR HTTP error projection",
+      "provider-specific process, IO, parsing, auth, and network adapters"
+    ],
+    "deleted_boundaries": [
+      "provider-local AiRouteResponse return types",
+      "provider-local build_ocr_error_response calls",
+      "production wildcard imports from the multipart facade",
+      "local JSON temporary-file errors borrowing the Tesseract message mapper"
+    ],
+    "unchanged_boundaries": [
+      "REST paths, status codes, errorCode values, messages, and success payloads",
+      "cancel, rate-limit, image-size, auth persistence, and receipt-draft ordering",
+      "network URL allowlist, SSRF, redirect, payload-size, token, and response-size policy",
+      "database schema, user scope, configuration shape, and raw provider result shape"
+    ],
+    "rejected_expansion": [
+      "async trait, dynamic registry, service, UnitOfWork, cache, transaction owner, or second writer",
+      "parallel OcrRequest or OcrObservation DTOs beside OcrProviderTextResult",
+      "moving unrelated LLM, learning, or configuration transport contracts",
+      "weakening merge-blocking E2E or CI topology in this slice"
+    ]
+  },
+  "tdd": {
+    "red": [
+      {
+        "command": "cargo test -p bill-analyser-http --test import_runtime_contract ocr_provider_adapters_use_one_typed_failure_boundary -- --exact --nocapture",
+        "result": "failed because provider_runtime.rs did not exist"
+      },
+      {
+        "command": "cargo test -p bill-analyser-http --lib response_payload_tests::ocr_provider_failure_response_keeps_legacy_http_contract -- --exact --nocapture",
+        "result": "failed to compile because OcrProviderFailure and its response mapper did not exist"
+      }
+    ],
+    "green": [
+      {
+        "command": "cargo test -p bill-analyser-http --lib ocr_provider_failure_response_keeps_legacy_http_contract -- --nocapture",
+        "executed": 1,
+        "failed": 0,
+        "skipped": 0
+      },
+      {
+        "command": "cargo test -p bill-analyser-http --test import_runtime_contract",
+        "executed": 15,
+        "failed": 0,
+        "skipped": 0
+      },
+      {
+        "command": "cargo test -p bill-analyser-core --test ai_ocr_llm_contracts",
+        "executed": 10,
+        "failed": 0,
+        "skipped": 0
+      },
+      {
+        "command": "cargo llvm-cov --no-clean -p bill-analyser-http --lib --lcov --output-path workspace.lcov -- --test-threads=1",
+        "executed": 260,
+        "failed": 0,
+        "skipped": 0,
+        "database": "fresh isolated PostgreSQL database"
+      }
+    ]
+  },
+  "verification": {
+    "cargo_fmt_check": "passed",
+    "cargo_clippy_workspace_all_targets_deny_warnings": "passed",
+    "cargo_test_workspace": "passed against a fresh isolated PostgreSQL database with zero failed or ignored test cases",
+    "git_diff_check": "passed",
+    "provider_production_http_type_hits": 0,
+    "provider_production_http_builder_hits": 0,
+    "provider_production_wildcard_import_hits": 0,
+    "live_or_paid_provider_calls": 0,
+    "cargo_llvm_cov_workspace": {
+      "command": "cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 35 -- --test-threads=1",
+      "result": "passed against a fresh isolated PostgreSQL database with zero failed or ignored test cases; the final LCOV also includes the two added deterministic boundary tests",
+      "executable_lines": 81142,
+      "covered_lines": 56247,
+      "line_coverage_percent": 69.32
+    },
+    "changed_line_coverage": {
+      "business_files": 8,
+      "matched_files": 5,
+      "missing_lcov_files": 0,
+      "executable_changed_lines": 330,
+      "covered_changed_lines": 300,
+      "coverage_percent": 90.91,
+      "strict_threshold_percent": 90,
+      "status": "passed"
+    },
+    "review": {
+      "base_ref": "a163c9b9b201abdeab19258220b25200295c34df",
+      "head_ref": "working tree on codex/c7n-ocr-provider-failure",
+      "standards_axis": "approved; URL validation, SSRF, redirect, secret, user-scope, and process isolation boundaries are preserved",
+      "spec_axis": "approved; the accepted private typed boundary is complete without trait, registry, service, or parallel DTO expansion",
+      "initial_findings": 0,
+      "open_findings": 0,
+      "verdict": "APPROVE"
+    },
+    "money_review": "No amount field or yuan/cent conversion changed.",
+    "delivery_evidence": "The Gitea PR and exact-head Actions run remain the authoritative external delivery evidence and are added after this commit is pushed."
+  },
+  "false_starts": [
+    "An initial broad HTTP library run without BILL_ANALYSER_TEST_POSTGRES_URL produced only explicit PostgreSQL environment failures; it was excluded and rerun successfully against a fresh isolated database.",
+    "The first changed-line coverage calculation was 89.74 percent and was rejected; deterministic allowlist-restore and generic Tesseract IO tests raised the measured result to 90.91 percent."
+  ],
+  "residual_risks": [
+    "Real Tesseract and local JSON child-process execution remains environment-dependent; this slice characterizes typed mappers and parsing without invoking installed or paid providers.",
+    "Other AiRouteResponse ownership in LLM, learning, and configuration paths remains outside C7n.",
+    "CI runtime topology is intentionally deferred because skipping the deterministic E2E gate would weaken the accepted merge-blocking contract."
+  ],
+  "environment_hygiene": {
+    "test_database_strategy": "HTTP, workspace, and coverage gates used exact-name isolated PostgreSQL databases that were dropped after each command.",
+    "temporary_database_residue": "none after cleanup",
+    "provider_strategy": "network tests used an in-process loopback TCP fixture; no real or paid OCR/LLM endpoint was called",
+    "secrets": "The existing local PostgreSQL credential was held only in process-local environment variables and was not added to source or evidence."
+  }
+}

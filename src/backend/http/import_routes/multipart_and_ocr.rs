@@ -16,11 +16,11 @@ mod multipart_ocr_local_json;
 mod multipart_ocr_tesseract;
 #[path = "multipart_and_ocr/provider_auth_refresh.rs"]
 mod multipart_provider_auth_refresh;
+#[path = "multipart_and_ocr/provider_runtime.rs"]
+mod multipart_ocr_provider_runtime;
 
 use multipart_form::{decode_import_text, parse_multipart_form_data};
-use multipart_network_llm_ocr::run_network_llm_ocr;
-use multipart_ocr_local_json::run_local_json_ocr;
-use multipart_ocr_tesseract::{ocr_io_error_response, run_tesseract_ocr};
+use multipart_ocr_provider_runtime::{run_ocr_provider, OcrProviderFailure};
 use multipart_provider_auth_refresh::refresh_provider_auth_profile;
 
 #[derive(Debug, Clone)]
@@ -133,28 +133,6 @@ fn ocr_rate_limit_try_acquire(user_id: i64) -> bool {
     }
     bucket.push_back(now);
     true
-}
-
-/// 按 OCR provider 分发到本地 Tesseract、本地 JSON 或网络 LLM vision provider。
-#[tracing::instrument(level = "debug", skip_all)]
-async fn run_ocr_provider(
-    config: &OcrConfigContract,
-    image_bytes: Vec<u8>,
-    mime: String,
-) -> Result<OcrProviderTextResult, AiRouteResponse> {
-    match config.provider.as_str() {
-        "cloud_stub" => Err(build_ocr_error_response(
-            "provider_unconfigured",
-            Some("cloud_ocr_not_configured"),
-        )),
-        "tesseract" => run_tesseract_ocr(config.lang.clone(), image_bytes, mime).await,
-        "local_json_ocr" => run_local_json_ocr(image_bytes, mime).await,
-        NETWORK_OCR_PROVIDER_NAME => run_network_llm_ocr(config, image_bytes, mime).await,
-        _ => Err(build_ocr_error_response(
-            "provider_unconfigured",
-            Some("ocr provider not configured"),
-        )),
-    }
 }
 
 fn first_text_from_object(object: &Map<String, Value>, keys: &[&str]) -> Option<String> {

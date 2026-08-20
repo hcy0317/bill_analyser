@@ -580,6 +580,47 @@ fn ocr_llm_vision_runtime_validates_url_and_caps_payload_before_network_post() {
 }
 
 #[test]
+fn ocr_provider_adapters_use_one_typed_failure_boundary() {
+    let provider_runtime =
+        source("src/backend/http/import_routes/multipart_and_ocr/provider_runtime.rs");
+    assert!(provider_runtime.contains("enum OcrProviderFailure"));
+    assert!(provider_runtime.contains("Result<OcrProviderTextResult, OcrProviderFailure>"));
+    assert!(provider_runtime.contains("run_tesseract_ocr("));
+    assert!(provider_runtime.contains("run_local_json_ocr("));
+    assert!(provider_runtime.contains("run_network_llm_ocr("));
+
+    for provider_path in [
+        "src/backend/http/import_routes/multipart_and_ocr/provider_runtime.rs",
+        "src/backend/http/import_routes/multipart_and_ocr/ocr_tesseract.rs",
+        "src/backend/http/import_routes/multipart_and_ocr/ocr_local_json.rs",
+        "src/backend/http/import_routes/multipart_and_ocr/network_llm_ocr.rs",
+    ] {
+        let provider = source(provider_path);
+        let production = provider
+            .split("#[cfg(test)]")
+            .next()
+            .expect("provider production source");
+        assert!(
+            !production.contains("AiRouteResponse"),
+            "provider implementation must not own HTTP transport responses: {provider_path}"
+        );
+        assert!(
+            !production.contains("build_ocr_error_response("),
+            "provider implementation must not build HTTP error envelopes: {provider_path}"
+        );
+        assert!(
+            !production.contains("use super::*;"),
+            "provider implementation must keep a narrow dependency surface: {provider_path}"
+        );
+    }
+
+    let response_adapter = source("src/backend/http/import_routes/response_payload.rs");
+    assert!(response_adapter.contains("fn ocr_provider_failure_response"));
+    let handler = source("src/backend/http/import_routes/ocr_learning_handlers.rs");
+    assert!(handler.contains("ocr_provider_failure_response(failure)"));
+}
+
+#[test]
 fn preview_row_version_is_mapped_serialized_and_enforced_by_single_update_cas() {
     let migration =
         source("src/backend/db/postgres/migrations/0001_initial_authoritative_schema.sql");

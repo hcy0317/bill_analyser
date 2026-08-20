@@ -1,4 +1,12 @@
-use super::*;
+use super::multipart_ocr_provider_runtime::OcrProviderFailure;
+use bill_analyser_core::OcrProviderTextResult;
+use serde_json::json;
+use std::{
+    env, io,
+    io::Write,
+    process::{Command, Stdio},
+    time::{Duration as StdDuration, Instant},
+};
 
 /// 运行 Tesseract OCR 的异步入口，通过 blocking 线程隔离外部命令执行。
 #[tracing::instrument(level = "debug", skip_all)]
@@ -6,15 +14,14 @@ pub(super) async fn run_tesseract_ocr(
     lang: String,
     image_bytes: Vec<u8>,
     mime: String,
-) -> Result<OcrProviderTextResult, AiRouteResponse> {
+) -> Result<OcrProviderTextResult, OcrProviderFailure> {
     match tokio::task::spawn_blocking(move || run_tesseract_ocr_blocking(lang, image_bytes, mime))
         .await
     {
         Ok(result) => result,
-        Err(error) => Err(build_ocr_error_response(
-            "provider_unconfigured",
-            Some(&format!("tesseract provider unavailable: {error}")),
-        )),
+        Err(error) => Err(OcrProviderFailure::unavailable(format!(
+            "tesseract provider unavailable: {error}"
+        ))),
     }
 }
 
@@ -23,7 +30,7 @@ fn run_tesseract_ocr_blocking(
     lang: String,
     image_bytes: Vec<u8>,
     _mime: String,
-) -> Result<OcrProviderTextResult, AiRouteResponse> {
+) -> Result<OcrProviderTextResult, OcrProviderFailure> {
     let program =
         env::var("BILL_ANALYSER_RUST_OCR_TESSERACT_COMMAND").unwrap_or_else(|_| "tesseract".into());
     let mut args = env::var("BILL_ANALYSER_RUST_OCR_TESSERACT_COMMAND_ARGS")
@@ -56,39 +63,32 @@ fn run_tesseract_ocr_blocking(
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|error| {
-            build_ocr_error_response(
-                "provider_unconfigured",
-                Some(&format!("tesseract provider unavailable: {error}")),
-            )
+            OcrProviderFailure::unavailable(format!("tesseract provider unavailable: {error}"))
         })?;
     if let Some(mut stdin) = child.stdin.take() {
         stdin
             .write_all(&image_bytes)
-            .map_err(ocr_io_error_response)?;
+            .map_err(ocr_io_failure)?;
     }
 
     let started_at = Instant::now();
     loop {
-        match child.try_wait().map_err(ocr_io_error_response)? {
+        match child.try_wait().map_err(ocr_io_failure)? {
             Some(status) => {
-                let output = child.wait_with_output().map_err(ocr_io_error_response)?;
+                let output = child.wait_with_output().map_err(ocr_io_failure)?;
                 if !status.success() {
                     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-                    return Err(build_ocr_error_response(
-                        "provider_unconfigured",
-                        Some(&format!(
+                    return Err(OcrProviderFailure::unavailable(format!(
                             "tesseract provider unavailable{}",
                             if stderr.is_empty() {
                                 String::new()
                             } else {
                                 format!(": {stderr}")
                             }
-                        )),
-                    ));
+                        )));
                 }
-                let text = String::from_utf8(output.stdout).map_err(|error| {
-                    build_ocr_error_response("parse_error", Some(&error.to_string()))
-                })?;
+                let text = String::from_utf8(output.stdout)
+                    .map_err(|error| OcrProviderFailure::invalid_output(error.to_string()))?;
                 return Ok(OcrProviderTextResult {
                     text,
                     confidence: 0.0,
@@ -103,28 +103,19 @@ fn run_tesseract_ocr_blocking(
             None if started_at.elapsed() >= timeout => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return Err(build_ocr_error_response(
-                    "timeout",
-                    Some("ocr provider timeout"),
-                ));
+                return Err(OcrProviderFailure::timed_out("ocr provider timeout"));
             }
             None => std::thread::sleep(StdDuration::from_millis(5)),
         }
     }
 }
 
-/// 将 Tesseract IO 错误归一为 OCR provider 错误，兼容 Windows partial copy 错误。
-pub(super) fn ocr_io_error_response(error: io::Error) -> AiRouteResponse {
+/// 将 Tesseract IO 错误归一为 typed provider failure，兼容 Windows partial copy 错误。
+fn ocr_io_failure(error: io::Error) -> OcrProviderFailure {
     if matches!(error.kind(), io::ErrorKind::BrokenPipe) || error.raw_os_error() == Some(299) {
-        return build_ocr_error_response(
-            "provider_unconfigured",
-            Some("tesseract provider unavailable"),
-        );
+        return OcrProviderFailure::unavailable("tesseract provider unavailable");
     }
-    build_ocr_error_response(
-        "provider_unconfigured",
-        Some(&format!("tesseract provider unavailable: {error}")),
-    )
+    OcrProviderFailure::unavailable(format!("tesseract provider unavailable: {error}"))
 }
 
 #[cfg(test)]
@@ -132,13 +123,24 @@ mod ocr_io_error_tests {
     use super::*;
 
     #[test]
-    fn ocr_io_error_response_normalizes_windows_partial_copy() {
-        let response = ocr_io_error_response(io::Error::from_raw_os_error(299));
-        assert_eq!(response.status_code, 501);
-        assert_eq!(response.body["errorCode"], "provider_unconfigured");
+    fn ocr_io_failure_normalizes_windows_partial_copy() {
+        let failure = ocr_io_failure(io::Error::from_raw_os_error(299));
         assert_eq!(
-            response.body["message"],
-            "tesseract provider unavailable"
+            failure,
+            OcrProviderFailure::Unavailable {
+                message: "tesseract provider unavailable".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn ocr_io_failure_preserves_other_error_context() {
+        let failure = ocr_io_failure(io::Error::other("disk"));
+        assert_eq!(
+            failure,
+            OcrProviderFailure::Unavailable {
+                message: "tesseract provider unavailable: disk".to_string()
+            }
         );
     }
 }

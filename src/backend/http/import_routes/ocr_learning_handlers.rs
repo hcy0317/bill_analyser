@@ -174,7 +174,7 @@ pub async fn ocr_recognition_runtime_handler(
     let provider_result =
         match run_ocr_provider(&config, input.image_bytes, input.mime.clone()).await {
             Ok(result) => result,
-            Err(response) => return ai_route_response(response),
+            Err(failure) => return ai_route_response(ocr_provider_failure_response(failure)),
         };
     let draft_context = match load_receipt_draft_context(runtime.connection(), user_id_value).await {
         Ok(context) => context,

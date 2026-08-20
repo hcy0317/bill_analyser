@@ -1,17 +1,27 @@
-use super::*;
+use super::{
+    first_text_from_object, first_value,
+    multipart_ocr_provider_runtime::OcrProviderFailure,
+};
+use bill_analyser_core::{OcrProviderTextLine, OcrProviderTextResult};
+use serde_json::{json, Value};
+use std::{
+    env, io,
+    io::Write,
+    process::{Command, Stdio},
+    time::{Duration as StdDuration, Instant},
+};
 
 /// 运行本地 JSON OCR provider 的异步入口，通过 blocking 线程隔离外部命令执行。
 pub(super) async fn run_local_json_ocr(
     image_bytes: Vec<u8>,
     mime: String,
-) -> Result<OcrProviderTextResult, AiRouteResponse> {
+) -> Result<OcrProviderTextResult, OcrProviderFailure> {
     match tokio::task::spawn_blocking(move || run_local_json_ocr_blocking(image_bytes, mime)).await
     {
         Ok(result) => result,
-        Err(error) => Err(build_ocr_error_response(
-            "provider_unconfigured",
-            Some(&format!("local JSON OCR provider unavailable: {error}")),
-        )),
+        Err(error) => Err(OcrProviderFailure::unavailable(format!(
+            "local JSON OCR provider unavailable: {error}"
+        ))),
     }
 }
 
@@ -19,13 +29,9 @@ pub(super) async fn run_local_json_ocr(
 fn run_local_json_ocr_blocking(
     image_bytes: Vec<u8>,
     mime: String,
-) -> Result<OcrProviderTextResult, AiRouteResponse> {
-    let program = env::var("BILL_ANALYSER_RUST_OCR_LOCAL_JSON_COMMAND").map_err(|_| {
-        build_ocr_error_response(
-            "provider_unconfigured",
-            Some("local JSON OCR provider unavailable"),
-        )
-    })?;
+) -> Result<OcrProviderTextResult, OcrProviderFailure> {
+    let program = env::var("BILL_ANALYSER_RUST_OCR_LOCAL_JSON_COMMAND")
+        .map_err(|_| OcrProviderFailure::unavailable("local JSON OCR provider unavailable"))?;
     let input_mode = env::var("BILL_ANALYSER_RUST_OCR_LOCAL_JSON_INPUT_MODE")
         .unwrap_or_else(|_| "stdin".to_string())
         .trim()
@@ -43,8 +49,9 @@ fn run_local_json_ocr_blocking(
         .unwrap_or_default();
     let mut temp_file = None;
     if input_mode == "file" {
-        let mut file = tempfile::NamedTempFile::new().map_err(ocr_io_error_response)?;
-        file.write_all(&image_bytes).map_err(ocr_io_error_response)?;
+        let mut file = tempfile::NamedTempFile::new().map_err(ocr_local_json_io_failure)?;
+        file.write_all(&image_bytes)
+            .map_err(ocr_local_json_io_failure)?;
         let path = file.path().to_string_lossy().to_string();
         let mut replaced = false;
         for arg in &mut args {
@@ -81,65 +88,54 @@ fn run_local_json_ocr_blocking(
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|error| {
-            build_ocr_error_response(
-                "provider_unconfigured",
-                Some(&format!("local JSON OCR provider unavailable: {error}")),
-            )
+            OcrProviderFailure::unavailable(format!(
+                "local JSON OCR provider unavailable: {error}"
+            ))
         })?;
     if input_mode != "file" {
         if let Some(mut stdin) = child.stdin.take() {
             stdin
                 .write_all(&image_bytes)
-                .map_err(ocr_local_json_io_error_response)?;
+                .map_err(ocr_local_json_io_failure)?;
         }
     }
 
     let started_at = Instant::now();
     loop {
-        match child.try_wait().map_err(ocr_local_json_io_error_response)? {
+        match child.try_wait().map_err(ocr_local_json_io_failure)? {
             Some(status) => {
                 let output = child
                     .wait_with_output()
-                    .map_err(ocr_local_json_io_error_response)?;
+                    .map_err(ocr_local_json_io_failure)?;
                 drop(temp_file);
                 if !status.success() {
                     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-                    return Err(build_ocr_error_response(
-                        "provider_unconfigured",
-                        Some(&format!(
+                    return Err(OcrProviderFailure::unavailable(format!(
                             "local JSON OCR provider unavailable{}",
                             if stderr.is_empty() {
                                 String::new()
                             } else {
                                 format!(": {stderr}")
                             }
-                        )),
-                    ));
+                        )));
                 }
-                let stdout = String::from_utf8(output.stdout).map_err(|error| {
-                    build_ocr_error_response("parse_error", Some(&error.to_string()))
-                })?;
+                let stdout = String::from_utf8(output.stdout)
+                    .map_err(|error| OcrProviderFailure::invalid_output(error.to_string()))?;
                 return parse_local_json_ocr_output(&stdout, &mime);
             }
             None if started_at.elapsed() >= timeout => {
                 let _ = child.kill();
                 let _ = child.wait();
                 drop(temp_file);
-                return Err(build_ocr_error_response(
-                    "timeout",
-                    Some("ocr provider timeout"),
-                ));
+                return Err(OcrProviderFailure::timed_out("ocr provider timeout"));
             }
             None => std::thread::sleep(StdDuration::from_millis(5)),
         }
     }
 }
 
-fn ocr_local_json_io_error_response(error: io::Error) -> AiRouteResponse {
-    build_ocr_error_response(
-        "provider_unconfigured",
-        Some(&format!("local JSON OCR provider unavailable: {error}")),
-    )
+fn ocr_local_json_io_failure(error: io::Error) -> OcrProviderFailure {
+    OcrProviderFailure::unavailable(format!("local JSON OCR provider unavailable: {error}"))
 }
 
 /// 解析本地 JSON OCR stdout，兼容单个 JSON 值和 JSON Lines 输出。
@@ -147,17 +143,16 @@ fn ocr_local_json_io_error_response(error: io::Error) -> AiRouteResponse {
 fn parse_local_json_ocr_output(
     stdout: &str,
     mime: &str,
-) -> Result<OcrProviderTextResult, AiRouteResponse> {
+) -> Result<OcrProviderTextResult, OcrProviderFailure> {
     let trimmed = stdout.trim();
     if trimmed.is_empty() {
-        return Err(build_ocr_error_response(
-            "parse_error",
-            Some("local JSON OCR provider returned empty output"),
+        return Err(OcrProviderFailure::invalid_output(
+            "local JSON OCR provider returned empty output",
         ));
     }
     let parsed = serde_json::from_str::<Value>(trimmed)
         .or_else(|_| parse_local_json_ocr_json_lines(trimmed))
-        .map_err(|error| build_ocr_error_response("parse_error", Some(&error.to_string())))?;
+        .map_err(|error| OcrProviderFailure::invalid_output(error.to_string()))?;
     local_json_ocr_result_from_value(parsed, mime)
 }
 
@@ -175,7 +170,7 @@ fn parse_local_json_ocr_json_lines(text: &str) -> serde_json::Result<Value> {
 fn local_json_ocr_result_from_value(
     value: Value,
     mime: &str,
-) -> Result<OcrProviderTextResult, AiRouteResponse> {
+) -> Result<OcrProviderTextResult, OcrProviderFailure> {
     let mut model = "local_json_ocr".to_string();
     let mut explicit_text = None;
     let mut explicit_confidence = None;
@@ -220,7 +215,9 @@ fn local_json_ocr_result_from_value(
 }
 
 /// 从字符串、对象或数组 JSON 中提取 OCR 文本行、置信度和 bbox。
-fn local_json_ocr_lines_from_value(value: &Value) -> Result<Vec<OcrProviderTextLine>, AiRouteResponse> {
+fn local_json_ocr_lines_from_value(
+    value: &Value,
+) -> Result<Vec<OcrProviderTextLine>, OcrProviderFailure> {
     let values = match value {
         Value::Array(items) => items.clone(),
         Value::Object(_) | Value::String(_) => vec![value.clone()],
@@ -253,9 +250,8 @@ fn local_json_ocr_lines_from_value(value: &Value) -> Result<Vec<OcrProviderTextL
         });
     }
     if lines.is_empty() {
-        return Err(build_ocr_error_response(
-            "parse_error",
-            Some("local JSON OCR provider returned no text lines"),
+        return Err(OcrProviderFailure::invalid_output(
+            "local JSON OCR provider returned no text lines",
         ));
     }
     Ok(lines)
@@ -268,4 +264,55 @@ fn average_ocr_line_confidence(lines: &[OcrProviderTextLine]) -> Option<f64> {
         .filter_map(|line| line.confidence)
         .collect::<Vec<_>>();
     (!scores.is_empty()).then(|| scores.iter().sum::<f64>() / scores.len() as f64)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parser_accepts_json_and_json_lines_with_typed_observations() {
+        let object = parse_local_json_ocr_output(
+            r#"{"model":"local-test","lines":[{"text":"Coffee","confidence":0.8},{"text":"12.34","confidence":1.0}]}"#,
+            "image/png",
+        )
+        .expect("JSON object output");
+        assert_eq!(object.text, "Coffee\n12.34");
+        assert_eq!(object.model, "local-test");
+        assert!((object.confidence - 0.9).abs() < f64::EPSILON);
+        assert_eq!(object.lines.len(), 2);
+
+        let json_lines = parse_local_json_ocr_output(
+            "{\"text\":\"first\"}\n{\"text\":\"second\",\"score\":0.6}",
+            "image/jpeg",
+        )
+        .expect("JSON Lines output");
+        assert_eq!(json_lines.text, "first\nsecond");
+        assert_eq!(json_lines.lines.len(), 2);
+    }
+
+    #[test]
+    fn parser_returns_typed_invalid_output_failures() {
+        assert_eq!(
+            parse_local_json_ocr_output("  ", "image/png"),
+            Err(OcrProviderFailure::invalid_output(
+                "local JSON OCR provider returned empty output"
+            ))
+        );
+        assert_eq!(
+            parse_local_json_ocr_output("{\"lines\":[{}]}", "image/png"),
+            Err(OcrProviderFailure::invalid_output(
+                "local JSON OCR provider returned no text lines"
+            ))
+        );
+    }
+
+    #[test]
+    fn local_json_io_failure_keeps_provider_specific_message() {
+        let failure = ocr_local_json_io_failure(io::Error::other("disk"));
+        assert_eq!(
+            failure,
+            OcrProviderFailure::unavailable("local JSON OCR provider unavailable: disk")
+        );
+    }
 }

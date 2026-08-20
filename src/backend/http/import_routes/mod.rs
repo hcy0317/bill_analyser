@@ -15,7 +15,6 @@ use axum::{
     routing::{delete, get, post, put},
     Json, Router,
 };
-use base64::{engine::general_purpose, Engine as _};
 use bill_analyser_core::{
     account_rules::{
         compile_account_rule_candidates, match_compiled_account_rules, AccountRuleCandidate,
@@ -49,10 +48,10 @@ use bill_analyser_core::{
     CategoryLookup, DedupBill, DuplicateGroup, ImportLearningRecommendationKeyInput,
     ImportPreviewIndexData, ImportPreviewPageData, ImportSessionSummary, ImportStageConfirmData,
     ImportStageDedupData, ImportStageParseData, LlmProviderConfigContract, OcrConfigContract,
-    OcrProviderTextLine, OcrProviderTextResult, ReceiptDraftAccount, ReceiptDraftCategory,
-    ReceiptDraftCategoryRule, ReceiptDraftContext, ReceiptDraftTag, ReconciliationCandidateType,
-    SmartDeduplicationEngine, TransferPair, UserId, IMPORT_PREVIEW_SORT_KEYS, LLM_SYSTEM_PROMPT,
-    NETWORK_OCR_PROVIDER_NAME, OCR_DISABLED_PROVIDER_NAME, WEAVIATE_RECALL_DEFAULT_LIMIT,
+    OcrProviderTextResult, ReceiptDraftAccount, ReceiptDraftCategory, ReceiptDraftCategoryRule,
+    ReceiptDraftContext, ReceiptDraftTag, ReconciliationCandidateType, SmartDeduplicationEngine,
+    TransferPair, UserId, IMPORT_PREVIEW_SORT_KEYS, LLM_SYSTEM_PROMPT, NETWORK_OCR_PROVIDER_NAME,
+    OCR_DISABLED_PROVIDER_NAME, WEAVIATE_RECALL_DEFAULT_LIMIT,
     WEAVIATE_RULE_STATE_POSTGRES_AUTHORITATIVE,
 };
 use bill_analyser_db::{
@@ -117,10 +116,9 @@ use sha2::{Digest, Sha256};
 use sqlx::{Postgres, QueryBuilder, Row};
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque},
-    env, fs, io,
-    io::{Read, Write},
+    env, fs,
+    io::Read,
     path::{Component, Path as FsPath, PathBuf},
-    process::{Command, Stdio},
     sync::{
         atomic::{AtomicU64, Ordering},
         Mutex, OnceLock,

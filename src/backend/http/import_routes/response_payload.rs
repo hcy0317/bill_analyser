@@ -14,6 +14,19 @@ fn ai_route_response(response: AiRouteResponse) -> Response {
     (status, Json(response.body)).into_response()
 }
 
+/// 将 provider 内部失败一次性投影为既有 OCR HTTP 错误合同。
+fn ocr_provider_failure_response(failure: OcrProviderFailure) -> AiRouteResponse {
+    let (code, message) = match failure {
+        OcrProviderFailure::Unavailable { message } => ("provider_unconfigured", message),
+        OcrProviderFailure::TimedOut { message } => ("timeout", message),
+        OcrProviderFailure::InvalidOutput { message } => ("parse_error", message),
+        OcrProviderFailure::ReauthenticationRequired { message } => {
+            ("provider_relogin_required", message)
+        }
+    };
+    build_ocr_error_response(code, Some(&message))
+}
+
 fn payload_object(payload: &Value) -> Result<&Map<String, Value>, ImportV2RouteResponse> {
     payload
         .as_object()
