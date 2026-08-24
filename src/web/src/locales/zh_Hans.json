@@ -3181,5 +3181,19 @@
     "Loading": "加载中",
     "All categories hidden": "所有分类均已隐藏",
     "Use Mainland China daily defaults": "使用大陆日常账本默认包",
-    "Adds accounts, categories and matching rules for WeChat, Alipay, bank cards and household bills": "添加适配微信、支付宝、银行卡和家庭账单的账户、分类与匹配规则"
+    "Adds accounts, categories and matching rules for WeChat, Alipay, bank cards and household bills": "添加适配微信、支付宝、银行卡和家庭账单的账户、分类与匹配规则",
+    "Action Center": "行动中心",
+    "Pending Actions": "待处理事项",
+    "Analysis Range": "分析范围",
+    "Month count": "{count} 个月",
+    "Recurring Suggestions": "周期账单建议",
+    "No pending actions": "当前没有待处理事项",
+    "No pending recurring suggestions": "当前没有需要审核的周期账单建议",
+    "Review": "查看",
+    "Ignore": "忽略",
+    "Recurring detection result": "检测到 {detected} 条模式，新建 {created} 条，更新 {updated} 条",
+    "Analysis coverage": "已分析 {bills} 笔交易，覆盖 {months} 个月（{start} 至 {end}）",
+    "Failed to load action center": "行动中心加载失败",
+    "Failed to discover recurring patterns": "周期账单模式发现失败",
+    "Failed to update recurring suggestion": "周期账单建议更新失败"
 }

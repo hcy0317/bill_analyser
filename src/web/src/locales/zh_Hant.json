@@ -2893,5 +2893,19 @@
     "Loading": "載入中",
     "All categories hidden": "所有分類均已隱藏",
     "Use Mainland China daily defaults": "使用大陸日常帳本預設包",
-    "Adds accounts, categories and matching rules for WeChat, Alipay, bank cards and household bills": "新增適配微信、支付寶、銀行卡和家庭帳單的帳戶、分類與匹配規則"
+    "Adds accounts, categories and matching rules for WeChat, Alipay, bank cards and household bills": "新增適配微信、支付寶、銀行卡和家庭帳單的帳戶、分類與匹配規則",
+    "Action Center": "行動中心",
+    "Pending Actions": "待處理事項",
+    "Analysis Range": "分析範圍",
+    "Month count": "{count} 個月",
+    "Recurring Suggestions": "週期帳單建議",
+    "No pending actions": "目前沒有待處理事項",
+    "No pending recurring suggestions": "目前沒有需要審核的週期帳單建議",
+    "Review": "查看",
+    "Ignore": "忽略",
+    "Recurring detection result": "偵測到 {detected} 條模式，新增 {created} 條，更新 {updated} 條",
+    "Analysis coverage": "已分析 {bills} 筆交易，涵蓋 {months} 個月（{start} 至 {end}）",
+    "Failed to load action center": "行動中心載入失敗",
+    "Failed to discover recurring patterns": "週期帳單模式探索失敗",
+    "Failed to update recurring suggestion": "週期帳單建議更新失敗"
 }

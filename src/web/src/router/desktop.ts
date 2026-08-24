@@ -203,6 +203,11 @@ const router = createRouter({
                     beforeEnter: checkLogin
                 },
                 {
+                    path: '/action-center',
+                    component: InsightsPage,
+                    beforeEnter: checkLogin
+                },
+                {
                     path: '/insights',
                     component: InsightsPage,
                     beforeEnter: checkLogin

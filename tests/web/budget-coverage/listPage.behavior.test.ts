@@ -193,6 +193,10 @@ import {
 import { AmountFilterType } from '@/core/numeral.ts';
 
 function createBudget(overrides: Partial<Budget> = {}): Budget {
+    const now = new Date();
+    const currentMonthStart = dateOnly(new Date(now.getFullYear(), now.getMonth(), 1));
+    const currentMonthEnd = dateOnly(new Date(now.getFullYear(), now.getMonth() + 1, 0));
+
     return Object.assign(Budget.createNew(BudgetType.Expense), {
         id: 'budget-1',
         name: 'Food Budget',
@@ -203,8 +207,8 @@ function createBudget(overrides: Partial<Budget> = {}): Budget {
         amountCents: 10_000,
         spentAmountCents: 4_000,
         executionRate: 40,
-        startDate: '2026-07-01',
-        endDate: '2026-07-31',
+        startDate: currentMonthStart,
+        endDate: currentMonthEnd,
         categoryIcon: 'budget-icon',
         categoryColor: '112233'
     }, overrides);

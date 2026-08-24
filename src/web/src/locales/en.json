@@ -3180,5 +3180,19 @@
     "Loading": "Loading",
     "All categories hidden": "All categories hidden",
     "Use Mainland China daily defaults": "Use Mainland China daily defaults",
-    "Adds accounts, categories and matching rules for WeChat, Alipay, bank cards and household bills": "Adds accounts, categories and matching rules for WeChat, Alipay, bank cards and household bills"
+    "Adds accounts, categories and matching rules for WeChat, Alipay, bank cards and household bills": "Adds accounts, categories and matching rules for WeChat, Alipay, bank cards and household bills",
+    "Action Center": "Action Center",
+    "Pending Actions": "Pending Actions",
+    "Analysis Range": "Analysis Range",
+    "Month count": "{count} months",
+    "Recurring Suggestions": "Recurring Suggestions",
+    "No pending actions": "You're all caught up",
+    "No pending recurring suggestions": "No recurring suggestions need review",
+    "Review": "Review",
+    "Ignore": "Ignore",
+    "Recurring detection result": "Detected {detected} patterns, created {created}, updated {updated}",
+    "Analysis coverage": "Analyzed {bills} transactions over {months} months ({start} - {end})",
+    "Failed to load action center": "Failed to load action center",
+    "Failed to discover recurring patterns": "Failed to discover recurring patterns",
+    "Failed to update recurring suggestion": "Failed to update recurring suggestion"
 }

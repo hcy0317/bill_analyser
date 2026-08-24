@@ -1,63 +1,155 @@
 <template>
     <v-row class="match-height">
         <v-col cols="12">
-            <v-card>
+            <v-card data-testid="desktop.action-center.page">
                 <v-card-text>
-                    <div class="d-flex align-center mb-4">
-                        <v-icon :icon="mdiLightbulbOn" class="mr-2" />
-                        <span class="text-h6">{{ tt('Anomaly Insights') }}</span>
-                        <v-chip v-if="data.totalCount > 0" class="ml-2" size="small"
-                                variant="tonal" color="warning">
-                            {{ data.totalCount }} {{ tt('anomalies found') }}
-                        </v-chip>
+                    <div class="title-and-toolbar d-flex flex-wrap align-center ga-2 mb-4">
+                        <div class="d-flex align-center">
+                            <v-icon :icon="mdiInboxArrowDownOutline" class="mr-2" />
+                            <span class="text-h6">{{ tt('Action Center') }}</span>
+                            <v-chip v-if="summary.hasWork" class="ml-2" color="warning" size="small" variant="tonal">
+                                {{ summary.total }}
+                            </v-chip>
+                        </div>
                         <v-spacer />
-                        <v-select v-model="months" :items="monthOptions" variant="outlined"
-                                  density="compact" style="max-width: 160px;" class="mr-2"
-                                  hide-details />
-                        <v-btn variant="outlined" :disabled="loading" @click="fetchAnomalies">
+                        <v-select
+                            v-model="months"
+                            :items="monthOptions"
+                            :label="tt('Analysis Range')"
+                            variant="outlined"
+                            density="compact"
+                            hide-details
+                            class="action-center-months"
+                        />
+                        <v-btn variant="tonal" color="primary" :loading="detecting" :disabled="loading" @click="detectRecurring">
+                            <v-icon start :icon="mdiMagnifyScan" />
+                            {{ tt('Discover Patterns') }}
+                        </v-btn>
+                        <v-btn variant="outlined" :loading="loading" :disabled="detecting" @click="load">
                             <v-icon start :icon="mdiRefresh" />
-                            {{ tt('Analyze') }}
+                            {{ tt('Refresh') }}
                         </v-btn>
                     </div>
 
                     <v-progress-linear v-if="loading" indeterminate color="primary" class="mb-4" />
-
                     <v-alert v-if="error" type="error" closable class="mb-4" @click:close="error = null">
-                        {{ error }}
+                        {{ tt(error) }}
+                    </v-alert>
+                    <v-alert v-if="detectResult" type="info" closable class="mb-4" @click:close="detectResult = null">
+                        {{ tt('Recurring detection result', {
+                            detected: detectResult.detected,
+                            created: detectResult.created,
+                            updated: detectResult.updated
+                        }) }}
+                    </v-alert>
+                    <v-alert v-if="!loading && !summary.hasWork" type="success" class="mb-4">
+                        {{ tt('No pending actions') }}
                     </v-alert>
 
-                    <v-alert v-if="!loading && data.anomalies.length === 0" type="success" class="mb-4">
-                        {{ tt('No anomalies detected. Your finances look healthy!') }}
-                    </v-alert>
+                    <section aria-labelledby="anomaly-actions-title">
+                        <div class="d-flex align-center mb-2">
+                            <v-icon :icon="mdiAlertCircleOutline" size="small" class="mr-2" />
+                            <h2 id="anomaly-actions-title" class="text-subtitle-1 font-weight-medium">
+                                {{ tt('Anomaly Insights') }}
+                            </h2>
+                            <v-chip class="ml-2" size="x-small" variant="tonal">
+                                {{ summary.anomalyCount }}
+                            </v-chip>
+                        </div>
+                        <v-list v-if="anomalyData.items.length" lines="two" class="pa-0">
+                            <template v-for="(anomaly, index) in anomalyData.items" :key="anomaly.key">
+                                <v-divider v-if="index > 0" />
+                                <v-list-item class="px-0 py-2">
+                                    <template #prepend>
+                                        <v-avatar :color="severityColor(anomaly.severity)" variant="tonal" size="36">
+                                            <v-icon :icon="anomalyIcon(anomaly.type)" size="20" />
+                                        </v-avatar>
+                                    </template>
+                                    <v-list-item-title class="font-weight-medium">
+                                        {{ tt(anomalyTitle(anomaly.type)) }}
+                                    </v-list-item-title>
+                                    <v-list-item-subtitle class="action-center-subtitle">
+                                        {{ anomalyContext(anomaly) }}
+                                        <span v-if="anomaly.occurredOn"> · {{ anomaly.occurredOn }}</span>
+                                        <span v-if="anomaly.amountCents"> · {{ formatAmount(anomaly.amountCents) }}</span>
+                                    </v-list-item-subtitle>
+                                    <template #append>
+                                        <v-btn variant="text" color="primary" @click="reviewAnomaly(anomaly)">
+                                            <v-icon start :icon="mdiArrowRight" />
+                                            {{ tt('Review') }}
+                                        </v-btn>
+                                    </template>
+                                </v-list-item>
+                            </template>
+                        </v-list>
+                        <p v-else-if="!loading" class="text-body-2 text-medium-emphasis py-3 mb-0">
+                            {{ tt('No anomalies detected. Your finances look healthy!') }}
+                        </p>
+                        <p v-if="anomalyData.analyzedBills > 0" class="text-caption text-medium-emphasis mt-2 mb-0">
+                            {{ tt('Analysis coverage', {
+                                bills: anomalyData.analyzedBills,
+                                months: anomalyData.analyzedMonths,
+                                start: anomalyData.startDate,
+                                end: anomalyData.endDate
+                            }) }}
+                        </p>
+                    </section>
 
-                    <!-- Anomaly Cards -->
-                    <div v-for="(anomaly, i) in data.anomalies" :key="i" class="mb-3">
-                        <v-card variant="outlined" :color="severityColor(anomaly.severity)">
-                            <v-card-text>
-                                <div class="d-flex align-center mb-1">
-                                    <v-icon :icon="anomalyIcon(anomaly.type)" size="small" class="mr-2"
-                                            :color="severityColor(anomaly.severity)" />
-                                    <v-chip :color="severityColor(anomaly.severity)" size="x-small"
-                                            variant="tonal" class="mr-2">
-                                        {{ anomaly.type === 'large_transaction' ? tt('Large Transaction') :
-                                           anomaly.type === 'duplicate_charge' ? tt('Possible Duplicate') :
-                                           tt('Category Spike') }}
-                                    </v-chip>
-                                    <span class="text-caption text-grey">
-                                        {{ anomaly.date || anomaly.month || '' }}
-                                    </span>
-                                </div>
-                                <div class="text-body-2">{{ anomaly.message }}</div>
-                            </v-card-text>
-                        </v-card>
-                    </div>
+                    <v-divider class="my-5" />
 
-                    <!-- Footer summary -->
-                    <div v-if="data.analyzedBills > 0" class="text-caption text-grey mt-4">
-                        {{ tt('Analyzed') }} {{ data.analyzedBills }} {{ tt('transactions over') }}
-                        {{ data.analyzedMonths }} {{ tt('months') }}
-                        ({{ data.startDate }} ~ {{ data.endDate }})
-                    </div>
+                    <section aria-labelledby="recurring-actions-title">
+                        <div class="d-flex align-center mb-2">
+                            <v-icon :icon="mdiCalendarSync" size="small" class="mr-2" />
+                            <h2 id="recurring-actions-title" class="text-subtitle-1 font-weight-medium">
+                                {{ tt('Recurring Suggestions') }}
+                            </h2>
+                            <v-chip class="ml-2" size="x-small" variant="tonal">
+                                {{ summary.recurringCount }}
+                            </v-chip>
+                        </div>
+                        <v-list v-if="recurringSuggestions.length" lines="three" class="pa-0">
+                            <template v-for="(suggestion, index) in recurringSuggestions" :key="suggestion.id">
+                                <v-divider v-if="index > 0" />
+                                <v-list-item class="px-0 py-2">
+                                    <v-list-item-title class="font-weight-medium">
+                                        {{ suggestion.name || suggestion.counterparty }}
+                                    </v-list-item-title>
+                                    <v-list-item-subtitle class="action-center-subtitle">
+                                        {{ suggestion.counterparty || suggestion.description }}
+                                        <span v-if="suggestion.suggestedNextDate"> · {{ tt('Next Date') }}: {{ suggestion.suggestedNextDate }}</span>
+                                    </v-list-item-subtitle>
+                                    <v-list-item-subtitle>
+                                        {{ formatAmount(suggestion.amountCents) }} · {{ tt('Confidence') }} {{ formatPercent(suggestion.confidenceScore) }}
+                                    </v-list-item-subtitle>
+                                    <template #append>
+                                        <div class="d-flex ga-1">
+                                            <v-btn
+                                                variant="tonal"
+                                                color="success"
+                                                :loading="mutatingSuggestionId === suggestion.id"
+                                                :disabled="mutatingSuggestionId !== null"
+                                                @click="acceptRecurring(suggestion.id)"
+                                            >
+                                                <v-icon start :icon="mdiCheck" />
+                                                {{ tt('Accept') }}
+                                            </v-btn>
+                                            <v-btn
+                                                variant="text"
+                                                :disabled="mutatingSuggestionId !== null"
+                                                @click="rejectRecurring(suggestion.id)"
+                                            >
+                                                <v-icon start :icon="mdiClose" />
+                                                {{ tt('Ignore') }}
+                                            </v-btn>
+                                        </div>
+                                    </template>
+                                </v-list-item>
+                            </template>
+                        </v-list>
+                        <p v-else-if="!loading" class="text-body-2 text-medium-emphasis py-3 mb-0">
+                            {{ tt('No pending recurring suggestions') }}
+                        </p>
+                    </section>
                 </v-card-text>
             </v-card>
         </v-col>
@@ -65,68 +157,99 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onMounted } from 'vue';
+import { computed, onMounted, watch } from 'vue';
+import { useRouter } from 'vue-router';
 import {
-    mdiLightbulbOn, mdiRefresh, mdiAlertCircle,
-    mdiContentDuplicate, mdiTrendingUp
+    mdiAlertCircleOutline,
+    mdiArrowRight,
+    mdiCalendarSync,
+    mdiCheck,
+    mdiClose,
+    mdiContentDuplicate,
+    mdiInboxArrowDownOutline,
+    mdiMagnifyScan,
+    mdiRefresh,
+    mdiTrendingUp
 } from '@mdi/js';
-import services from '@/lib/services.ts';
 
-const tt = (key: string) => key;
+import { useI18n } from '@/locales/helpers.ts';
+import {
+    buildAnomalyActionTarget,
+    type ActionCenterAnomaly,
+    type ActionCenterAnomalyType,
+    type ActionCenterSeverity,
+    type DesktopActionTarget
+} from '@/views/base/action-center/actionCenterModel.ts';
+import { useActionCenter } from '@/views/base/action-center/useActionCenter.ts';
 
-const loading = ref(false);
-const error = ref<string | null>(null);
-const months = ref(6);
+const router = useRouter();
+const { tt, formatAmountToLocalizedNumerals } = useI18n();
+const {
+    months,
+    loading,
+    detecting,
+    mutatingSuggestionId,
+    error,
+    detectResult,
+    anomalyData,
+    recurringSuggestions,
+    summary,
+    load,
+    detectRecurring,
+    acceptRecurring,
+    rejectRecurring
+} = useActionCenter();
 
-const monthOptions = [
-    { title: '3 months', value: 3 },
-    { title: '6 months', value: 6 },
-    { title: '12 months', value: 12 },
-];
+const monthOptions = computed(() => [3, 6, 12].map(value => ({
+    title: tt('Month count', { count: value }),
+    value
+})));
 
-interface AnomalyData {
-    anomalies: any[];
-    totalCount: number;
-    analyzedBills: number;
-    analyzedMonths: number;
-    startDate: string;
-    endDate: string;
-}
-
-const data = ref<AnomalyData>({
-    anomalies: [], totalCount: 0,
-    analyzedBills: 0, analyzedMonths: 0,
-    startDate: '', endDate: '',
-});
-
-function severityColor(severity: string) {
-    if (severity === 'error') return 'error';
-    if (severity === 'warning') return 'warning';
+function severityColor(value: ActionCenterSeverity): string {
+    if (value === 'error') return 'error';
+    if (value === 'warning') return 'warning';
     return 'info';
 }
 
-function anomalyIcon(type: string) {
-    if (type === 'large_transaction') return mdiAlertCircle;
+function anomalyIcon(type: ActionCenterAnomalyType): string {
+    if (type === 'large_transaction') return mdiAlertCircleOutline;
     if (type === 'duplicate_charge') return mdiContentDuplicate;
     return mdiTrendingUp;
 }
 
-async function fetchAnomalies() {
-    loading.value = true;
-    error.value = null;
-    try {
-        const resp = await services.getAnomalies({ months: months.value });
-        if (resp.data.success && resp.data.result) {
-            data.value = resp.data.result;
-        }
-    } catch (e: any) {
-        error.value = e.message || 'Failed to analyze';
-    } finally {
-        loading.value = false;
-    }
+function anomalyTitle(type: ActionCenterAnomalyType): string {
+    if (type === 'large_transaction') return 'Large Transaction';
+    if (type === 'duplicate_charge') return 'Possible Duplicate';
+    return 'Category Spike';
 }
 
-watch(months, () => fetchAnomalies());
+function anomalyContext(anomaly: ActionCenterAnomaly): string {
+    return anomaly.counterparty || anomaly.description || anomaly.category || tt('Transaction');
+}
 
-onMounted(() => fetchAnomalies());
+function formatAmount(value: number): string {
+    return formatAmountToLocalizedNumerals(value / 100);
+}
+
+function formatPercent(value: number): string {
+    return `${Math.round(value * 100)}%`;
+}
+
+function reviewAnomaly(anomaly: ActionCenterAnomaly): void {
+    router.push(buildAnomalyActionTarget(anomaly, 'desktop') as DesktopActionTarget);
+}
+
+watch(months, () => load());
+onMounted(() => load());
 </script>
+
+<style scoped>
+.action-center-months {
+    flex: 0 1 170px;
+    min-width: 150px;
+}
+
+.action-center-subtitle {
+    white-space: normal;
+}
+</style>

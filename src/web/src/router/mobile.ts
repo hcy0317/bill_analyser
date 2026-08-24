@@ -49,6 +49,7 @@ import TagListPage from '@/views/mobile/tags/ListPage.vue';
 import TemplateListPage from '@/views/mobile/templates/ListPage.vue';
 
 import BudgetListPage from '@/views/mobile/budgets/ListPage.vue';
+import ActionCenterPage from '@/views/mobile/action-center/ActionCenterPage.vue';
 
 function asyncResolve(component: unknown): (ctx: Router.RouteCallbackCtx) => void {
     return function({ resolve }: { resolve: ({ component }: { component: unknown }) => void }): void {
@@ -350,6 +351,11 @@ const routes: Router.RouteParameters[] = [
     {
         path: '/template/edit',
         async: asyncResolve(TransactionEditPage),
+        beforeEnter: [checkLogin]
+    },
+    {
+        path: '/action-center',
+        async: asyncResolve(ActionCenterPage),
         beforeEnter: [checkLogin]
     },
     {

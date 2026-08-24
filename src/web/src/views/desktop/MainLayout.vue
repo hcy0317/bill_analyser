@@ -45,6 +45,12 @@
                         <span class="nav-item-title">{{ tt('Statistics & Analysis') }}</span>
                     </router-link>
                 </li>
+                <li class="nav-link">
+                    <router-link to="/action-center" data-testid="desktop.nav.action-center">
+                        <v-icon class="nav-item-icon" :icon="mdiInboxArrowDownOutline"/>
+                        <span class="nav-item-title">{{ tt('Action Center') }}</span>
+                    </router-link>
+                </li>
                 <li class="nav-section-title">
                     <div class="title-wrapper">
                         <span class="title-text">{{ tt('Basis Data') }}</span>
@@ -259,7 +265,8 @@ import {
     mdiLockOutline,
     mdiLogout,
     mdiCalculatorVariantOutline,
-    mdiBookCogOutline
+    mdiBookCogOutline,
+    mdiInboxArrowDownOutline
 } from '@mdi/js';
 
 type SnackBarType = InstanceType<typeof SnackBar>;

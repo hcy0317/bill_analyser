@@ -56,6 +56,9 @@ describe('desktop router', () => {
         expect(route('/').children.length).toBeGreaterThan(10);
         expect(route('/template/list').props).toEqual({ initType: 1 });
         expect(route('/schedule/list').props).toEqual({ initType: 2 });
+        expect(route('/action-center').component).toEqual(expect.objectContaining({
+            name: 'Stub:insights/InsightsPage'
+        }));
     });
 
     test('protects signed-in routes for logged-out, locked, and unlocked states', () => {

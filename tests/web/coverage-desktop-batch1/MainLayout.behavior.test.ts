@@ -245,6 +245,7 @@ describe('desktop MainLayout production-loaded behavior', () => {
         const desktop = await renderLayout();
         expect(desktop).toContain('data-testid="desktop.layout.root"');
         expect(desktop).toContain('data-testid="desktop.nav.schedules"');
+        expect(desktop).toContain('data-testid="desktop.nav.action-center"');
         expect(desktop).toContain('tt:Lock Application');
         expect(desktop).toContain('https://example.test/avatar.png');
 

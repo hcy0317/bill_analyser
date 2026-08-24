@@ -15,7 +15,8 @@ const mobileViews = [
     'exchangerates/ListPage', 'exchangerates/UpdatePage', 'AboutPage', 'users/UserProfilePage',
     'users/DataManagementPage', 'users/TwoFactorAuthPage', 'users/SessionListPage',
     'categories/AllPage', 'categories/ListPage', 'categories/EditPage',
-    'categories/PresetPage', 'tags/ListPage', 'templates/ListPage', 'budgets/ListPage'
+    'categories/PresetPage', 'tags/ListPage', 'templates/ListPage', 'budgets/ListPage',
+    'action-center/ActionCenterPage'
 ];
 
 for (const view of mobileViews) {
@@ -59,6 +60,18 @@ describe('mobile router', () => {
             expect(resolve).toHaveBeenCalledWith({ component: expect.any(Object) });
         }
         expect(route('(.*)').redirect).toBe('/');
+    });
+
+    test('exposes the authenticated action center route', () => {
+        const actionCenter = route('/action-center');
+        expect(actionCenter).toBeDefined();
+        expect(actionCenter.beforeEnter).toEqual(expect.any(Array));
+
+        const resolve = jest.fn();
+        actionCenter.async({ resolve });
+        expect(resolve).toHaveBeenCalledWith({
+            component: expect.objectContaining({ name: 'Stub:action-center/ActionCenterPage' })
+        });
     });
 
     test('redirects protected routes to login or unlock before resolving unlocked users', () => {

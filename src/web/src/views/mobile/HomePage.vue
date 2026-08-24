@@ -164,6 +164,11 @@
         </f7-list>
 
         <f7-list strong inset dividers class="margin-top">
+            <f7-list-item link="/action-center" :title="tt('Action Center')" chevron-center data-testid="mobile.home.action-center">
+                <template #media>
+                    <f7-icon f7="tray_full"></f7-icon>
+                </template>
+            </f7-list-item>
             <f7-list-item link="/budgets" :title="tt('Budget Management')" chevron-center>
                 <template #media>
                     <f7-icon f7="chart_bar"></f7-icon>

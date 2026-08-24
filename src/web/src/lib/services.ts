@@ -58,15 +58,6 @@ import type {
     BatchAcceptResponse,
     GenerateSuggestionsResponse
 } from '@/models/learning_center.ts';
-import type {
-    RecurringSuggestionsResponse,
-    RecurringDetectResponse,
-    RecurringAcceptResponse,
-} from '@/models/recurring_suggestion.ts';
-import {
-    normalizeSuggestionsResponse as normalizeRecurringSuggestionsResponse,
-    normalizeDetectResponse,
-} from '@/models/recurring_suggestion.ts';
 import {
     normalizeSuggestionsResponse,
     normalizeRulesResponse,
@@ -99,6 +90,7 @@ import {
     TransactionAmountsRequest
 } from '@/models/transaction.ts';
 import { buildTransactionListQuery } from '@/lib/services/transaction.ts';
+import actionCenterServices from './services/actionCenter.ts';
 import importPreviewServices from './services/importPreview.ts';
 import {
     buildApiResponse,
@@ -108,7 +100,7 @@ import {
 } from './services/http.ts';
 export type { ApiResponsePromise } from './services/http.ts';
 import type {
-    AccountRuleCreateRequest, AnalyzeLLMTransactionsRequest, AnomalyListRequest,
+    AccountRuleCreateRequest, AnalyzeLLMTransactionsRequest,
     BudgetForecastQueryRequest, BudgetHistoryQueryRequest, CalendarEventsRequest,
     CreateLLMConfigRequest, LearningRuleListRequest, LLMAnalyzeTransactionsResponse,
     LLMMemoryEventsResponse, LLMPreviewRecommendAcceptRequest, LLMPreviewRecommendRejectRequest,
@@ -752,6 +744,7 @@ axios.interceptors.response.use((response: any) => {
 });
 
 export default {
+    ...actionCenterServices,
     setLocale: (locale: string) => {
         axios.defaults.headers.common['Accept-Language'] = locale;
     },
@@ -1610,36 +1603,6 @@ export default {
         });
     },
 
-    // ── Recurring Detection (周期自动发现) ──────────
-
-    getRecurringSuggestions: ({ status, limit, offset }: PagedStatusRequest = {}): ApiResponsePromise<RecurringSuggestionsResponse> => {
-        return axios.get<ApiDataResponse<RecurringSuggestionsResponse>>('recurring/suggestions', {
-            params: { status, limit, offset }
-        }).then(response => {
-            const normalized = normalizeRecurringSuggestionsResponse(response.data?.data);
-            return buildApiResponse(response, normalized);
-        });
-    },
-
-    detectRecurringPatterns: (): ApiResponsePromise<RecurringDetectResponse> => {
-        return axios.post<ApiDataResponse<RecurringDetectResponse>>('recurring/suggestions/detect').then(response => {
-            const normalized = normalizeDetectResponse(response.data?.data);
-            return buildApiResponse(response, normalized);
-        });
-    },
-
-    acceptRecurringSuggestion: ({ suggestionId }: { suggestionId: number }): ApiResponsePromise<RecurringAcceptResponse> => {
-        return axios.post<ApiDataResponse<RecurringAcceptResponse>>(`recurring/suggestions/${suggestionId}/accept`).then(response => {
-            return buildApiResponse(response, response.data?.data);
-        });
-    },
-
-    rejectRecurringSuggestion: ({ suggestionId }: { suggestionId: number }): ApiResponsePromise<any> => {
-        return axios.post(`recurring/suggestions/${suggestionId}/reject`).then(response => {
-            return buildApiResponse(response, response.data?.data);
-        });
-    },
-
     // ── Calendar Events (日历/现金流) ──────────
 
     getCalendarEvents: ({ startDate, endDate }: CalendarEventsRequest): ApiResponsePromise<any> => {
@@ -1871,16 +1834,6 @@ export default {
                     : [],
                 total: Number(response.data?.total || 0)
             });
-        });
-    },
-
-    // ── Anomaly Insights (异常洞察) ──────────
-
-    getAnomalies: ({ months }: AnomalyListRequest = {}): ApiResponsePromise<any> => {
-        return axios.get('insights/anomalies', {
-            params: { months }
-        }).then(response => {
-            return buildApiResponse(response, response.data?.data);
         });
     }
 };

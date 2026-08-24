@@ -146,6 +146,8 @@ PostgreSQL `categories.path` 到主/子分类展示名的兼容投影由 DB 私�
 
 预算与统计前端当前以页面/store facade + 功能文件夹组织：桌面预算 `ListPage.vue` 保留页面装配入口，template/style、预算页类型、金额筛选、历史周期 helper 和展示 helper 下沉到 `views/desktop/budgets/list/**`；统计 `stores/statistics.ts` 保留 `useStatisticsStore` facade，筛选类型、页面/交易列表 query 构建，以及分类/趋势/资产趋势请求代次与统一错误映射分别下沉到 `stores/statistics/types.ts`、`pageParams.ts` 与 `loaders.ts`；桌面统计 `TransactionPage.vue` 保留页面装配入口，template/style 和统计/交易跳转链接构建下沉到 `views/desktop/statistics/transaction/**`；`consts/currency.ts` 保留 `ALL_CURRENCIES`、默认货币与父账户占位符 facade，ISO 4217 静态表按代码范围拆到 `consts/currency/**`。该拆分不改变预算筛选、历史图、预测面板、导入导出、统计日期/图表筛选、latest-request-wins、图表 drilldown、导出 dialog、currency code/symbol/fraction 或原 import 路径。
 
+行动中心通过桌面 `/action-center` 与移动 `/action-center` 提供统一的待处理入口，旧桌面 `/insights` 路径继续指向同一页面。共享模型 `views/base/action-center/actionCenterModel.ts` 将 `/api/insights/anomalies` 的大额交易、疑似重复和分类突增结果归一为显式 cents/minor units 字段，并只构造现有交易列表关键字筛选或统计页跳转；共享控制器 `useActionCenter.ts` 同时加载 anomaly 和 pending recurring suggestions。用户可以从行动中心查看异常交易或统计，并直接接受或忽略周期账单建议，也可以触发现有 recurring detect 接口后刷新队列；该前端聚合不新增数据库状态或 REST 路由。
+
 ## 认证与备份
 
 通用业务 Bearer 认证先校验 access JWT 的算法、HMAC 签名、token 类型、过期时间与 `user_id`，再以 token hash、用户、active 状态和过期时间查询 PostgreSQL `token_sessions`；session 不存在或已撤销时拒绝请求，session authority 超时或不可用时返回 503，不回退到 JWT-only。PostgreSQL `token_sessions` 同时承载 refresh token session 查询与原子轮换、logout、session 列表和指定 session 撤销，因此 logout/revoke/refresh 轮换会立即阻止旧 access token 继续访问受保护业务路由。登录、注册、邮箱验证、密码重置、refresh、logout、2FA、profile、cloud settings、external auth、user-data statistics/export/clear 直接读写 PostgreSQL 表。敏感动作通过当前密码、操作密码或签名 step-up token 校验，并写入认证或业务审计。
