@@ -1,0 +1,131 @@
+{
+  "schema_version": 1,
+  "date": "2026-08-24",
+  "cyanflow_slice": "C4 version precondition enforcement",
+  "status": "implementation_exact_head_green_pending_merge",
+  "authorization": {
+    "breaking_contract_approved": true,
+    "autonomous_git_pr_ci_merge_cleanup_approved": true,
+    "legacy_log_files_checked": 40,
+    "legacy_missing_version_hits": 0,
+    "observation_limit": "local logs only; absence is not proof about unknown external clients"
+  },
+  "codebase_memory": {
+    "project": "bill_analyser-d7309f0e9eab-r1452b742b0eb",
+    "tools_used": [
+      "search_graph",
+      "trace_path",
+      "query_graph",
+      "get_graph_schema",
+      "get_code_snippet",
+      "get_architecture",
+      "search_code"
+    ]
+  },
+  "contract": {
+    "missing_row_version": {
+      "http_status": 428,
+      "code": "PREVIEW_ROW_VERSION_REQUIRED",
+      "required_token": "expected_row_version",
+      "writes": 0
+    },
+    "missing_session_version": {
+      "http_status": 428,
+      "code": "IMPORT_SESSION_VERSION_REQUIRED",
+      "required_token": "expected_session_version",
+      "writes": 0
+    },
+    "terminal_receipt_replay_precedes_version_requirement": true,
+    "empty_reclassify_fails_closed": true,
+    "selection_only_uses_selection_hash": true,
+    "non_preview_matching_is_unchanged": true
+  },
+  "architecture": {
+    "schema_change": false,
+    "new_crate": false,
+    "new_trait_or_unit_of_work": false,
+    "second_writer": false,
+    "sidecar": false,
+    "shared_row_version_parser": true,
+    "shared_frontend_models": true
+  },
+  "code_review": {
+    "base_ref": "cee2adbaedcc25e55769a9168daa59e94474c77d",
+    "head_ref": "working_tree",
+    "standards_axis": "pass",
+    "spec_axis": "pass",
+    "findings_resolved": [
+      "aligned the C6 exit wording with the proven typed_v1 target authority while preserving the explicit rollback adapter"
+    ],
+    "remaining_risk": "unknown external legacy clients will receive the approved 428 breaking response"
+  },
+  "focused_verification": {
+    "rust_http_lib": {
+      "passed": 274,
+      "failed": 0
+    },
+    "frontend_lint": {
+      "status": "pass",
+      "errors": 0,
+      "existing_warnings": 128
+    },
+    "frontend_regression_suites": {
+      "status": "pass",
+      "last_focused_suites": 4,
+      "last_focused_tests": 102
+    }
+  },
+  "final_verification": {
+    "status": "local_full_gates_green",
+    "cargo_fmt": "pass",
+    "cargo_clippy": "pass",
+    "workspace_coverage": {
+      "lines_found": 81097,
+      "lines_hit": 56461,
+      "percent": 69.6216,
+      "threshold": 35,
+      "status": "pass"
+    },
+    "rust_changed_line_coverage": {
+      "executable_lines": 104,
+      "covered_lines": 94,
+      "percent": 90.38,
+      "threshold_strictly_greater_than": 90,
+      "status": "pass"
+    },
+    "frontend_coverage": {
+      "suites_passed": 308,
+      "tests_passed": 41500,
+      "lines_found": 39967,
+      "lines_hit": 37666,
+      "percent": 94.2428,
+      "status": "pass"
+    },
+    "frontend_changed_line_coverage": {
+      "executable_lines": 21,
+      "covered_lines": 20,
+      "percent": 95.24,
+      "threshold_strictly_greater_than": 90,
+      "status": "pass"
+    },
+    "frontend_build": "pass",
+    "implementation_exact_head_ci": {
+      "pr": 361,
+      "head_sha": "6c823c81ffe080a2facb8b223e279c18e77a0dbc",
+      "run_id": 16454,
+      "conclusion": "success",
+      "jobs": {
+        "backend-ci": "success",
+        "frontend-ci": "success",
+        "repo-governance": "success_after_tls_checkout_retry",
+        "e2e-ci": "success"
+      }
+    }
+  },
+  "consensus": {
+    "evidence_closed": 28,
+    "total": 28,
+    "open_or_blocked": 0,
+    "c5_c6_reference": "cyanflow-c5-c6-target-rollout-2026-08-24.json"
+  }
+}

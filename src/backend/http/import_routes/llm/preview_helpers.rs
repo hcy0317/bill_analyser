@@ -19,7 +19,7 @@ fn preview_patches_from_payload(
                 preview_id,
                 object,
             )?;
-            Ok(attach_optional_expected_row_version(
+            Ok(attach_expected_row_version(
                 patch,
                 expected_row_version,
             ))

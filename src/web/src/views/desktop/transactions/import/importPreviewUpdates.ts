@@ -20,7 +20,6 @@ export interface BuildImportPreviewUpdateFromTransactionOptions {
     clearLearningDecision?: boolean;
     clearLlmDecision?: boolean;
     includeSuggestionDecisionClears?: boolean;
-    includeExpectedRowVersion?: boolean;
 }
 
 export type ImportPreviewUpdatePayload = ImportPreviewPatchPayload & {
@@ -72,9 +71,12 @@ export function getPreviewIdFromImportTransaction(transaction: ImportTransaction
 
 export function getPreviewRowVersionFromImportTransaction(
     transaction: ImportTransaction
-): number | undefined {
+): number {
     const rowVersion = (transaction as ImportPreviewTransactionDraft)._rowVersion;
-    return Number.isInteger(rowVersion) && Number(rowVersion) > 0 ? rowVersion : undefined;
+    if (Number.isInteger(rowVersion) && Number(rowVersion) > 0) {
+        return Number(rowVersion);
+    }
+    throw new Error('Import preview row version is required.');
 }
 
 export function syncPreviewRowVersionToImportTransaction(
@@ -110,6 +112,11 @@ export function buildImportPreviewUpdateFromTransaction(
     transaction: ImportTransaction,
     options: BuildImportPreviewUpdateFromTransactionOptions
 ): ImportPreviewUpdatePayload {
+    const previewId = getPreviewIdFromImportTransaction(transaction);
+    if (previewId === null) {
+        throw new Error('Import preview row id is required.');
+    }
+    const expectedRowVersion = getPreviewRowVersionFromImportTransaction(transaction);
     const clearTransferDecision = !!options.clearTransferDecision;
     const clearLearningDecision = !!options.clearLearningDecision;
     const clearLlmDecision = !!options.clearLlmDecision;
@@ -120,7 +127,8 @@ export function buildImportPreviewUpdateFromTransaction(
     ].filter(Boolean);
     const categoryPath = options.categoryPath;
     const update: ImportPreviewUpdatePayload = {
-        id: (transaction as ImportPreviewTransactionDraft)._previewId,
+        id: previewId,
+        expected_row_version: expectedRowVersion,
         preview_type: getImportPreviewTransactionTypeLabel(transaction.type),
         preview_amount_cents: requireStrictIntegerCents(transaction.sourceAmountCents, 'sourceAmountCents'),
         preview_destination_amount_cents: requireStrictIntegerCents(
@@ -144,13 +152,6 @@ export function buildImportPreviewUpdateFromTransaction(
     if (transaction.isManuallyAnnotated) {
         update['is_manually_annotated'] = true;
     }
-    if (options.includeExpectedRowVersion) {
-        const rowVersion = getPreviewRowVersionFromImportTransaction(transaction);
-        if (rowVersion !== undefined) {
-            update.expected_row_version = rowVersion;
-        }
-    }
-
     if (options.includeSuggestionDecisionClears) {
         if (clearLearningDecision) {
             update['clear_learning_decision'] = true;

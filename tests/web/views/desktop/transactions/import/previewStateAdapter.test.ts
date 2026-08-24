@@ -153,6 +153,7 @@ describe('typed import preview state adapter', () => {
         const snapshot = snapshotFor(loadFixture()[0]!);
         const record: ImportPreviewRecord = {
             id: 7,
+            row_version: 5,
             preview_state: snapshot,
         };
         const transaction = buildImportTransactionFromPreviewRecord(record, 0, {

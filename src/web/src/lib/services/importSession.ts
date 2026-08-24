@@ -64,7 +64,7 @@ const importSessionServices = {
             `bills/import/v2/session/${encodeURIComponent(sessionId)}`
         ).then(response => buildApiResponse(response, response.data?.data))
     ),
-    // 中文说明：confirm 的 session token 独立于 preview row/selection token；不传 token 时保留旧客户端兼容。
+    // 中文说明：confirm 的 session token 独立于 preview row/selection token，并且当前客户端必须显式携带。
     confirmImportPreview: ({
         sessionId,
         previewUpdates,
@@ -75,11 +75,9 @@ const importSessionServices = {
         const payload: ImportPreviewConfirmPayload = {
             session_id: sessionId,
             preserve_unpatched_selection: !!preserveUnpatchedSelection,
-            preview_updates: previewUpdates || []
+            preview_updates: previewUpdates || [],
+            expected_session_version: expectedSessionVersion
         };
-        if (Number.isSafeInteger(expectedSessionVersion) && Number(expectedSessionVersion) > 0) {
-            payload['expected_session_version'] = expectedSessionVersion;
-        }
         if (historyRewriteAcknowledgement) {
             payload['history_rewrite_acknowledgement'] = historyRewriteAcknowledgement;
         }

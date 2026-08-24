@@ -812,7 +812,7 @@ fn session_version_is_exposed_and_consumed_by_current_confirm_clients() {
     let service = source("src/web/src/lib/services/importSession.ts");
     assert!(service.contains("getImportSession"));
     assert!(service.contains("expectedSessionVersion"));
-    assert!(service.contains("payload['expected_session_version'] = expectedSessionVersion"));
+    assert!(service.contains("expected_session_version: expectedSessionVersion"));
 
     for client in [
         source("src/web/src/views/desktop/transactions/import/ImportDialog.vue"),
@@ -907,7 +907,8 @@ fn weak_import_api_adapters_are_discoverable_and_cannot_grow() {
         "export interface ImportPreviewRecord",
         "export interface ImportPreviewPageData",
     );
-    assert!(preview_record.contains("row_version?: number"));
+    assert!(preview_record.contains("row_version: number"));
+    assert!(!preview_record.contains("row_version?: number"));
 
     let preview_service = source("src/web/src/lib/services/importPreview.ts");
     assert!(preview_service.contains("ApiResponsePromise<ImportPreviewPageData>"));

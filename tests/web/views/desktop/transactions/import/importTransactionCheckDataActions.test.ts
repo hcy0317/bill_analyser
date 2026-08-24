@@ -230,6 +230,7 @@ function createTransaction(id: number, options: Record<string, unknown> = {}): I
         ...options
     } as never, id);
     (transaction as ImportTransaction & { _previewId: number })._previewId = id;
+    (transaction as ImportTransaction & { _rowVersion: number })._rowVersion = 5;
     return transaction;
 }
 

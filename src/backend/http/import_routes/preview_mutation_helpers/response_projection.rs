@@ -1,11 +1,3 @@
-fn response_mode_is_preview_item(object: &Map<String, Value>) -> bool {
-    first_value(object, &["responseMode", "response_mode"]).is_some_and(|value| {
-        value
-            .as_str()
-            .is_some_and(|text| text.eq_ignore_ascii_case("preview-item"))
-    })
-}
-
 fn preview_row_to_value(row: ImportPreviewRow) -> Value {
     let mut value = serde_json::to_value(row).unwrap_or_else(|_| json!({}));
     if let Some(object) = value.as_object_mut() {

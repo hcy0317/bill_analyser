@@ -1,11 +1,8 @@
-fn attach_optional_expected_row_version(
+fn attach_expected_row_version(
     patch: ImportPreviewPatch,
-    expected_row_version: Option<i64>,
+    expected_row_version: i64,
 ) -> ImportPreviewPatch {
-    match expected_row_version {
-        Some(version) => patch.with_expected_row_version(version),
-        None => patch,
-    }
+    patch.with_expected_row_version(expected_row_version)
 }
 
 /// 处理单行 preview 更新，构建 patch、落库身份校验，并按 responseMode 返回单行或汇总。
@@ -50,7 +47,7 @@ pub async fn import_preview_update_runtime_handler(
         "preview_update",
         "row_version",
         1,
-        usize::from(expected_row_version.is_some()),
+        1,
     );
     let preview = match get_preview_bill_by_id(runtime.connection(), preview_id, user_id) {
         Ok(Some(preview)) if preview.session_id == session_id => preview,
@@ -68,7 +65,7 @@ pub async fn import_preview_update_runtime_handler(
         Ok(patch) => patch,
         Err(response) => return route_response(response),
     };
-    let patch = attach_optional_expected_row_version(patch, expected_row_version);
+    let patch = attach_expected_row_version(patch, expected_row_version);
     let updated = match update_preview_bill(runtime.connection(), &session_id, user_id, &patch) {
         Ok(updated) => updated,
         Err(bill_analyser_db::DbError::PreviewVersionConflict {
@@ -91,22 +88,15 @@ pub async fn import_preview_update_runtime_handler(
         }
         Err(error) => return route_response(db_error_response(error)),
     };
-    if expected_row_version.is_some() || response_mode_is_preview_item(object) {
-        let preview_item = match get_preview_bill_by_id(runtime.connection(), preview_id, user_id) {
-            Ok(Some(preview)) if preview.session_id == session_id => preview_row_to_value(preview),
-            Ok(Some(_)) | Ok(None) => Value::Null,
-            Err(error) => return route_response(db_error_response(error)),
-        };
-        route_response(import_v2_data_response(json!({
-            "updated": updated,
-            "previewItem": preview_item,
-        })))
-    } else {
-        route_response(ImportV2RouteResponse {
-            status_code: 200,
-            body: json!({"success": updated}),
-        })
-    }
+    let preview_item = match get_preview_bill_by_id(runtime.connection(), preview_id, user_id) {
+        Ok(Some(preview)) if preview.session_id == session_id => preview_row_to_value(preview),
+        Ok(Some(_)) | Ok(None) => Value::Null,
+        Err(error) => return route_response(db_error_response(error)),
+    };
+    route_response(import_v2_data_response(json!({
+        "updated": updated,
+        "previewItem": preview_item,
+    })))
 }
 
 /// 处理批量 reclassify 请求，复用 preview update patch 链路并刷新分类/账户匹配统计。
@@ -139,6 +129,10 @@ pub async fn import_reclassify_runtime_handler(
         Ok(update_items) => update_items,
         Err(response) => return route_response(response),
     };
+    if update_items.is_empty() {
+        observe_import_version_contract("preview_reclassify", "row_version", 1, 0);
+        return route_response(import_version_required_response("row_version"));
+    }
     let required_row_versions = update_items.len();
     let mut present_row_versions = 0usize;
     let mut patches = Vec::with_capacity(update_items.len());
@@ -152,7 +146,7 @@ pub async fn import_reclassify_runtime_handler(
             Ok(expected_row_version) => expected_row_version,
             Err(response) => return route_response(response),
         };
-        present_row_versions += usize::from(expected_row_version.is_some());
+        present_row_versions += 1;
         match get_preview_bill_by_id(runtime.connection(), preview_id, user_id) {
             Ok(Some(preview)) if preview.session_id == session_id => {}
             Ok(Some(_)) | Ok(None) => {
@@ -169,7 +163,7 @@ pub async fn import_reclassify_runtime_handler(
             Ok(patch) => patch,
             Err(response) => return route_response(response),
         };
-        patches.push(attach_optional_expected_row_version(
+        patches.push(attach_expected_row_version(
             patch,
             expected_row_version,
         ));
@@ -210,11 +204,7 @@ pub async fn import_reclassify_runtime_handler(
         }
         Err(error) => return route_response(db_error_response(error)),
     };
-    let preview = if target_ids.is_empty() {
-        get_preview_by_session(runtime.connection(), &session_id, user_id, false)
-    } else {
-        get_preview_by_ids(runtime.connection(), &session_id, &target_ids, user_id)
-    };
+    let preview = get_preview_by_ids(runtime.connection(), &session_id, &target_ids, user_id);
     let mut preview = match preview {
         Ok(preview) => preview,
         Err(error) => return route_response(db_error_response(error)),
@@ -249,11 +239,7 @@ pub async fn import_reclassify_runtime_handler(
     ) {
         return route_response(db_error_response(error));
     }
-    preview = match if target_ids.is_empty() {
-        get_preview_by_session(runtime.connection(), &session_id, user_id, false)
-    } else {
-        get_preview_by_ids(runtime.connection(), &session_id, &target_ids, user_id)
-    } {
+    preview = match get_preview_by_ids(runtime.connection(), &session_id, &target_ids, user_id) {
         Ok(preview) => preview,
         Err(error) => return route_response(db_error_response(error)),
     };

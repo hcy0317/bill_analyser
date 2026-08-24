@@ -58,7 +58,7 @@ use bill_analyser_db::{
     apply_preview_patches_and_update_selection_by_query,
     apply_preview_patches_preserving_selection, claim_import_group_reclassification,
     clear_import_preview_materialization_state, clear_session_data,
-    confirm_import_command_with_receipt_read_source, count_postgres_llm_candidates,
+    confirm_versioned_import_command_with_receipt_read_source, count_postgres_llm_candidates,
     create_postgres_llm_candidate, create_postgres_llm_config, dedup_bills_from_parser_templates,
     delete_postgres_llm_config, effective_postgres_llm_config_from_saved,
     finish_import_group_reclassification, get_import_decision_groups_by_session,

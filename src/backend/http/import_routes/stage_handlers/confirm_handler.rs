@@ -30,7 +30,7 @@ pub async fn import_confirm_runtime_handler(
         Err(response) => return route_response(response),
     };
 
-    match confirm_import_command_with_receipt_read_source(
+    match confirm_versioned_import_command_with_receipt_read_source(
         runtime.pool(),
         user_id,
         &command,
@@ -221,6 +221,9 @@ fn confirm_invalid_operation_response(message: &str) -> ImportV2RouteResponse {
     }
     if message == "invalid category" {
         return import_v2_error_response(400, "Invalid category");
+    }
+    if message == "expected_session_version is required" {
+        return import_version_required_response("session_version");
     }
     if confirm_invalid_operation_is_conflict(message) {
         return import_v2_error_response(409, message);
@@ -481,7 +484,7 @@ mod confirm_handler_contract_tests {
 
         assert_eq!(
             handler
-                .matches("confirm_import_command_with_receipt_read_source(")
+                .matches("confirm_versioned_import_command_with_receipt_read_source(")
                 .count(),
             1
         );

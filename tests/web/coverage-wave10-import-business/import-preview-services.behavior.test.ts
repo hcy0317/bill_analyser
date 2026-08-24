@@ -118,11 +118,11 @@ describe('import preview upload and learning service behavior', () => {
 
         const scoped = await services.getImportLearningSuggestions({
             sessionId: 'session/2',
-            previewUpdates: [{ id: 8 }],
+            previewUpdates: [{ id: 8, expected_row_version: 4 }],
             actionScope: selectedScope
         });
         expect(axiosPost).toHaveBeenCalledWith('bills/import/v2/learning/session/2/suggestions', {
-            preview_updates: [{ id: 8 }],
+            preview_updates: [{ id: 8, expected_row_version: 4 }],
             action_scope: selectedScope
         });
         expect(scoped.data.result).toEqual({ suggestions: [2] });
@@ -199,7 +199,7 @@ describe('import preview lifecycle service behavior', () => {
         });
         const fallback = await services.updateImportPreviewItem({
             sessionId: 'session/b',
-            payload: { id: 8 }
+            payload: { id: 8, expectedRowVersion: 10 }
         });
 
         expect(axiosPut).toHaveBeenNthCalledWith(1, 'bills/import/v2/preview/session%2Fa/update', {
@@ -208,6 +208,10 @@ describe('import preview lifecycle service behavior', () => {
             expected_row_version: 8
         });
         expect(explicit.data.result).toEqual({ updated: false, previewItem: { id: 7, row_version: 9 } });
+        expect(axiosPut).toHaveBeenNthCalledWith(2, 'bills/import/v2/preview/session%2Fb/update', {
+            id: 8,
+            expected_row_version: 10
+        });
         expect(fallback.data.result).toEqual({ updated: true, previewItem: undefined });
     });
 
@@ -466,11 +470,12 @@ describe('import preview lifecycle service behavior', () => {
         expect(axiosGet).toHaveBeenCalledWith('bills/import/v2/session/s2');
         expect(session.data.result.session_version).toBe(7);
 
-        await services.confirmImportPreview({ sessionId: 's1' });
+        await services.confirmImportPreview({ sessionId: 's1', expectedSessionVersion: 3 });
         expect(axiosPost).toHaveBeenNthCalledWith(1, 'bills/import/v2/confirm', {
             session_id: 's1',
             preserve_unpatched_selection: false,
-            preview_updates: []
+            preview_updates: [],
+            expected_session_version: 3
         }, expect.objectContaining({ timeout: 1_800_000 }));
 
         const acknowledgement: ImportPreviewHistoryRewriteAcknowledgement = {
@@ -492,7 +497,7 @@ describe('import preview lifecycle service behavior', () => {
         };
         await services.confirmImportPreview({
             sessionId: 's2',
-            previewUpdates: [{ id: 4 }],
+            previewUpdates: [{ id: 4, expected_row_version: 6 }],
             preserveUnpatchedSelection: true,
             expectedSessionVersion: 7,
             historyRewriteAcknowledgement: acknowledgement
@@ -500,7 +505,7 @@ describe('import preview lifecycle service behavior', () => {
         expect(axiosPost).toHaveBeenNthCalledWith(2, 'bills/import/v2/confirm', {
             session_id: 's2',
             preserve_unpatched_selection: true,
-            preview_updates: [{ id: 4 }],
+            preview_updates: [{ id: 4, expected_row_version: 6 }],
             expected_session_version: 7,
             history_rewrite_acknowledgement: acknowledgement
         }, expect.objectContaining({ timeout: 1_800_000 }));

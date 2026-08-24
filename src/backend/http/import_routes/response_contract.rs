@@ -13,6 +13,39 @@ fn import_v2_error_response(status_code: u16, error: &str) -> ImportV2RouteRespo
     }
 }
 
+fn import_version_required_response(token_kind: &str) -> ImportV2RouteResponse {
+    tracing::warn!(
+        domain = "import_contract",
+        token_kind,
+        contract = "version_required_rejected",
+        required_tokens = 1,
+        present_tokens = 0,
+        missing_tokens = 1,
+        "import mutation rejected a missing concurrency token"
+    );
+    let (code, error, required_token) = match token_kind {
+        "session_version" => (
+            "IMPORT_SESSION_VERSION_REQUIRED",
+            "Import session version is required",
+            "expected_session_version",
+        ),
+        _ => (
+            "PREVIEW_ROW_VERSION_REQUIRED",
+            "Preview row version is required",
+            "expected_row_version",
+        ),
+    };
+    ImportV2RouteResponse {
+        status_code: 428,
+        body: json!({
+            "success": false,
+            "error": error,
+            "code": code,
+            "data": {"required_token": required_token},
+        }),
+    }
+}
+
 /// 中文说明：生成导入 v2 消息响应，供取消会话等无需 data payload 的路由复用。
 #[tracing::instrument(level = "debug", skip_all)]
 fn import_v2_message_response(

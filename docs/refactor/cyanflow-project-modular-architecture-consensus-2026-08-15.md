@@ -432,7 +432,9 @@ C0 已于 2026-08-16 以 `C0_EXIT_PASS / C1_ENTRY_OPEN` 关闭：固定 64 文�
 - Entry：C2 提供 typed server snapshot，C3 提供稳定 use-case result；当前 REST/冲突行为和 legacy client 调用有 characterization/telemetry。
 - 工作：preview/query/mutation/decision/confirm additive typed 化；先暴露 row version，再切当前 web client 到 expected-version/409；desktop/mobile 迁到同一中性 model/store；清理 C1 未涉及的 raw response fallback、重复 signal parser 和其他长期状态。
 - 固定工件：Rust/TS JSON fixture、route contract diff、legacy-client telemetry、409 E2E、desktop/mobile selector parity、weak-type inventory。
-- Exit：migrated API 的 `Record<string, unknown>`/`any` 为 0；当前 web client 竞争 mutation 全部发送 version 并处理 409；server 对缺失 version 的 legacy 分支显式可观测，尚未获 breaking 批准时不得强制必填；前端不存在第二份持久 signal/issue 状态。
+- Exit：migrated API 的 `Record<string, unknown>`/`any` 为 0；当前 web client 竞争 mutation 全部发送 version 并处理 409；server 对缺失 row/session version 统一返回类型化 428 且零写入，terminal confirm receipt replay 保持优先；前端不存在第二份持久 signal/issue 状态。
+
+2026-08-24 C4 收口：本地运行日志未观察到 `legacy_missing_version` 命中，用户已明确批准 breaking contract。单行 update、非空 reclassify、携带 preview patch 的 selection/action、recurring、transfer、learning、LLM/matching preview decision 全部要求正整数 `expected_row_version`；active confirm 要求正整数 `expected_session_version`，同 fingerprint terminal replay 仍可无 token 幂等返回。缺失 token 统一聚合记录后返回 428，不进入业务 writer；desktop/mobile typed models、services 和草稿构造器均在发请求前失败关闭。
 
 ### C5：数据库 expand/contract
 
@@ -441,16 +443,20 @@ C0 已于 2026-08-16 以 `C0_EXIT_PASS / C1_ENTRY_OPEN` 关闭：固定 64 文�
 - 固定工件：migration SQL/restore rehearsal、backfill watermark、`EXPLAIN (ANALYZE, BUFFERS)`、写入退化/索引体积、active-session ledger、old/new parity 和 compatibility ledger。
 - Exit：约束在真实 PostgreSQL 拒绝非法状态/归属/重复；未解释 backfill/parity diff 为 0；新 session 只有 canonical writer；公开新 create/mutation/confirm 未同时 ready 时保持旧合同；旧 business writer 已关闭。active legacy session 未归零时保留兼容读取，超期只显式 cancel，不隐式升级。
 
+2026-08-24 C5 目标库 rollout 已完成：29/29 migration、237,910 行 signal 全量物化、逐行与 49 个查询 case parity 为 0；read audit `eligible_for_read_cutover=true`，排除 autovacuum 干扰后的 performance audit `performance_gate_passed=true`。公共 page/filter/count/facet/preview_ids 已切 typed columns，未物化 session 失败关闭，legacy SQL function 只保留 backfill/shadow/read-audit oracle，不再拥有生产读取权。
+
 ### C6：Confirm 边界净化
 
 - Entry：C4 typed command/client 和 C5 session/schema contract 已稳定；新旧 confirm 的纯 plan/write-set fixture 可比较；terminal receipt restore/replay 已验证。
 - 工作：保留锁、CAS、history、bill、receipt、cleanup 单事务；mutation intent 在锁内执行后重读权威 rows；DB 返回 typed `ConfirmOutcome`，HTTP 生成 envelope；shadow 只比较内部 plan/write-set，不双执行真实 effect。
 - 固定工件：plan/write-set parity、真实 PostgreSQL concurrency/failure-injection、同/异 fingerprint replay/conflict、staging retry/cleanup、64-file browser SLA 和 receipt compatibility report。
-- Exit：任一步失败无部分 effect且 staging 可重试；成功后 receipt 先于 cleanup 持久化；同 fingerprint replay、异 fingerprint conflict；DB/core 的 HTTP response ownership 为 0；active legacy session 为 0 后删除旧 reader/oracle；连续三次真实 browser `<=60s` 且查询 p95/recognition quality 达标。任何 required PostgreSQL/Playwright case skip 或 executed=0 均失败。
+- Exit：任一步失败无部分 effect且 staging 可重试；成功后 receipt 先于 cleanup 持久化；同 fingerprint replay、异 fingerprint conflict；DB/core 的 HTTP response ownership 为 0；active legacy session 为 0 后从目标运行读取权威移除旧 reader/oracle，durable receipt 编解码与显式配置回滚适配器可保留但不得拥有 writer 或目标读取权；连续三次真实 browser `<=60s` 且查询 p95/recognition quality 达标。任何 required PostgreSQL/Playwright case skip 或 executed=0 均失败。
 
-C6a 已完成独立 typed receipt 空表 expand；C6b 已从现有唯一 confirm transaction seam 增加 metadata + typed receipt 同事务双投影，并以真实 PostgreSQL 故障注入证明 typed insert 或后续 cleanup 失败时全部 effect 整体回滚。C6c 已提供只面向历史 confirmed metadata receipt 的有界运维回填：严格 migration ledger、普通行锁与 advisory lock、低水位缺口拒绝、提交后 JSON checkpoint、逐批全量字段 parity 和历史确认时间保留共同构成恢复边界；回填写入复用生产 writer 的唯一 typed insert 映射，但不参与 confirm 业务 effect。C6d 已提供独立的全目标只读 shadow snapshot audit：一个 `REPEATABLE READ, READ ONLY` transaction 内按 session 主键有界扫描，复用 canonical metadata parser 与共享 migration ledger validator，只报告缺失、意外、字段 mismatch 和批次/快照统计，任何 drift 或合同错误失败关闭且不泄露 receipt/fingerprint。C6e-a 已在现有唯一 confirm port 上增加显式 terminal receipt read source：默认和兼容入口仍为 `metadata`，`typed_v1` 只读取同一事务、同一 user/session scope 下的 typed row，缺失或非法时失败关闭且绝不回退 metadata；新确认无论读取源都继续由同一 writer 同事务双投影，不增加第二 writer 或真实 confirm 双执行。HTTP 仅通过启动配置选择该 port，未知值启动失败，代码合并不会激活 typed 默认。C6f-a 已把该 repository port 的首次提交与 replay 统一收敛为 transport-neutral `ConfirmOutcome`，HTTP adapter 负责生成未变化的公开成功 envelope；durable receipt v1 的旧 envelope 只保留在隔离的兼容编解码器和唯一持久 writer 中，DB/core 对外不再暴露 HTTP status/body ownership。C6g-a 已从混合 confirm orchestration 中抽出无 SQL、无 HTTP、无持久化的纯 `ConfirmPlan`：纯计划统一拥有未知信号/history acknowledgement/身份/review 校验，并产出 history writes 与 bill drafts；现有 SQLx transaction executor 仍是唯一 writer，副作用顺序、receipt、cleanup、schema、API 和运行配置均未改变，也没有真实 confirm 双执行。C6h-a 已把 generic preview mutation、confirm patch 与 learning decision 的重复 patch 映射收敛为同一个纯 `PreviewPatchProjection`：字段/值组合校验、preview/payload 更新、manual ownership、active identity 校验及 signal projection 只有一个语义 owner；三个适配器仍分别拥有既有 row/session CAS、锁、SQL writer、effect 顺序和遥测标签，不新增 trait、通用 UnitOfWork、第二 writer 或公开契约。当前仍没有对生产数据库执行回填或目标 corpus 审计；只有目标库完成 C6c 且 C6d 报告零缺失、零意外、零 mismatch 后，才允许独立 rollout 把公开配置切到 `typed_v1`；在旧 receipt 合同删除门禁满足前也不得删除 v1 compatibility adapter。
+C6a 已完成独立 typed receipt 空表 expand；C6b 已从现有唯一 confirm transaction seam 增加 metadata + typed receipt 同事务双投影，并以真实 PostgreSQL 故障注入证明 typed insert 或后续 cleanup 失败时全部 effect 整体回滚。C6c 已提供只面向历史 confirmed metadata receipt 的有界运维回填：严格 migration ledger、普通行锁与 advisory lock、低水位缺口拒绝、提交后 JSON checkpoint、逐批全量字段 parity 和历史确认时间保留共同构成恢复边界；回填写入复用生产 writer 的唯一 typed insert 映射，但不参与 confirm 业务 effect。C6d 已提供独立的全目标只读 shadow snapshot audit：一个 `REPEATABLE READ, READ ONLY` transaction 内按 session 主键有界扫描，复用 canonical metadata parser 与共享 migration ledger validator，只报告缺失、意外、字段 mismatch 和批次/快照统计，任何 drift 或合同错误失败关闭且不泄露 receipt/fingerprint。C6e-a 已在现有唯一 confirm port 上增加显式 terminal receipt read source：默认和兼容入口仍为 `metadata`，`typed_v1` 只读取同一事务、同一 user/session scope 下的 typed row，缺失或非法时失败关闭且绝不回退 metadata；新确认无论读取源都继续由同一 writer 同事务双投影，不增加第二 writer 或真实 confirm 双执行。HTTP 仅通过启动配置选择该 port，未知值启动失败，代码合并不会激活 typed 默认。C6f-a 已把该 repository port 的首次提交与 replay 统一收敛为 transport-neutral `ConfirmOutcome`，HTTP adapter 负责生成未变化的公开成功 envelope；durable receipt v1 的旧 envelope 只保留在隔离的兼容编解码器和唯一持久 writer 中，DB/core 对外不再暴露 HTTP status/body ownership。C6g-a 已从混合 confirm orchestration 中抽出无 SQL、无 HTTP、无持久化的纯 `ConfirmPlan`：纯计划统一拥有未知信号/history acknowledgement/身份/review 校验，并产出 history writes 与 bill drafts；现有 SQLx transaction executor 仍是唯一 writer，副作用顺序、receipt、cleanup、schema、API 和运行配置均未改变，也没有真实 confirm 双执行。C6h-a 已把 generic preview mutation、confirm patch 与 learning decision 的重复 patch 映射收敛为同一个纯 `PreviewPatchProjection`：字段/值组合校验、preview/payload 更新、manual ownership、active identity 校验及 signal projection 只有一个语义 owner；三个适配器仍分别拥有既有 row/session CAS、锁、SQL writer、effect 顺序和遥测标签，不新增 trait、通用 UnitOfWork、第二 writer 或公开契约。该门禁已于 2026-08-24 在明确目标库闭合：C6c 回填 9/9，C6d 报告零缺失、零意外、零 mismatch，公开本地配置已独立切到 `typed_v1`；v1 compatibility adapter 继续承担 durable receipt 编解码和配置回滚，不拥有第二 writer。
 
 C6i-a 已把 confirm/general preview 与 learning 分别维护的 active account/category SQL 收敛到中立 `identity_persistence`：六个生产调用点借用现有事务重新读取当前 user-scoped identities，纯 `identity_validation` 不接触 SQLx。该切片不创建 transaction owner、cache、trait、port 或第二 writer，也不改变任何 CAS、锁、effect、API、schema、receipt 或配置合同。
+
+2026-08-24 C6 目标库 rollout 已完成：9/9 terminal metadata receipt 已在受控窗口内回填为 typed row，全目标 read audit 为零缺失、零意外、零字段 mismatch，目标运行配置已显式切至 `typed_v1`。切换前已完成 custom-format 备份与隔离恢复演练；新确认仍由唯一事务 writer 双投影，代码缺省 metadata reader 仅作为新环境/配置回滚兼容，不参与当前目标运行读取。
 
 ### C7：全域持续迁移
 
@@ -509,12 +515,12 @@ C7f-a transition ledger：此前 `categories.path`/`name` 到主/子分类的同
 
 ## 10. 验收标准
 
-> 2026-08-24 current-main reconciliation：以 `main@8bd57d639f8d0e7401e4a4439a72f79958832cba`、C0 current-main runtime audit、C1-C7s transition ledgers、PR/main exact-head Actions 为证据重新核对。`[x]` 表示该合同已有可定位证据；未勾选项必须带 `OPEN` 或 `BLOCKED` 原因，不能再把清单空白误读为“尚未开始”，也不能据此自动授权生产库或 breaking-contract 操作。机器可读矩阵见 `docs/refactor/evidence/cyanflow-consensus-acceptance-reconciliation-2026-08-24.json`。
+> 2026-08-24 final reconciliation：C0-C7s transition ledgers、C5/C6 目标库 rollout、C4 breaking-contract enforcement、真实 PostgreSQL/前端覆盖率与 PR/main exact-head Actions 共同作为证据。`[x]` 表示合同已有可定位证据；机器可读最终矩阵由 C4 closeout evidence 与 `docs/refactor/evidence/cyanflow-c5-c6-target-rollout-2026-08-24.json` 共同组成。
 
 | 状态 | 数量 | 含义 |
 | --- | ---: | --- |
-| evidence-closed | 25 / 28 | 已有代码、迁移、真实 PostgreSQL、浏览器、fresh-build runtime 或 exact-head CI 证据 |
-| open / blocked | 3 / 28 | 1 个 breaking-contract 批准、2 个目标库 rollout 门禁 |
+| evidence-closed | 28 / 28 | 已有代码、迁移、目标库、真实 PostgreSQL、浏览器、fresh-build runtime 或 exact-head CI 证据 |
+| open / blocked | 0 / 28 | C4 breaking contract 与 C5/C6 目标库 rollout 均已闭合 |
 
 ### 10.1 架构
 
@@ -530,15 +536,15 @@ C7f-a transition ledger：此前 `categories.path`/`name` 到主/子分类的同
 - [x] import lifecycle 合法值有数据库约束，恢复 corpus 的历史 validation/parity 无未解释差异；C5b 在 237,870 条 preview row 的独立恢复库验证全部目标约束并失败关闭脏状态。
 - [x] session/user 归属在数据库层不可伪造；C5b 的 `(id,user_id)` 复合目标与六条子表复合外键已由真实 PostgreSQL 跨用户写入拒绝验证。
 - [x] nullable member uniqueness 在真实 PostgreSQL 中能拒绝重复；三类 partial unique index 与合法 multi-ref 已由 C5b 验证。
-- [ ] **OPEN(breaking-contract)** preview 竞争 mutation 已完成 additive row version、current client cutover、409 snapshot 与 legacy telemetry，但缺 version 仍兼容接受；只有 `legacy_missing_version` 连续为 0、兼容期限/外部影响记录且另获 breaking-contract 批准后才能 enforce。
+- [x] preview 竞争 mutation 与 active confirm 已完成必需版本前置条件：当前客户端全部发送 token，stale 返回权威 409 snapshot，缺失 token 返回类型化 428 且零写入；terminal receipt replay 优先级保持不变。
 - [x] terminal typed receipt 以 session 主键唯一、复合 user scope、数据库 immutable trigger 与同事务双投影保证可重放；普通 staging cleanup 不删除或改写 typed row。
 - [x] confirm failure-injection matrix 证明任一步失败无部分正式交易、无重复 effect、无 receipt 丢失，staging 可重试；C6b/C6g 仍只有一个 transaction writer。
-- [ ] **BLOCKED(target-db/C6 rollout)** 同一 session 的 writer/contract 已固定，但 metadata reader 仍是安全默认；目标库必须完成 C6c 回填、C6d 全量零缺失/零意外/零 mismatch、active legacy/TTL/cancel-drain ledger 后，才允许切 `typed_v1` 并删除兼容读取。
+- [x] C6 目标库 typed receipt rollout 已完成：9/9 回填，全量 audit 零缺失/零意外/零 mismatch，受控窗口无待 drain 活跃连接，目标运行配置为 `typed_v1`；metadata 路径只保留新环境缺省与配置回滚兼容，不是当前目标读取权威。
 
 ### 10.3 导入业务
 
 - [x] exactly-one parser、generic mapping、整数分金额和 Stage 1/2 顺序均有 characterization；C0/C3 固定 64 文件保持 15,041 parsed、13,082 preview、0 unmatched。
-- [ ] **BLOCKED(target-db/C5 rollout)** Rust fixture、在线 typed writer、API snapshot 与 desktop/mobile mapping 已统一，但公开 page/filter/count/facet 仍显式读取 `LegacyPayload`；目标库必须先完成 C5e backfill、C5f-b `eligible_for_read_cutover=true` 与 C5f-c `performance_gate_passed=true`，才能切 typed SQL reader并删除 JSON oracle。
+- [x] C5 目标库 signal rollout 已完成：237,910 行全量物化，read audit 与 post-vacuum performance audit 均通过，公开 page/filter/count/facet/preview_ids 统一读取 typed columns；legacy JSON function 只保留无写权的 backfill/shadow/read-audit oracle。
 - [x] 合法分类保存后 missing-category issue 在同一 tick、server ack、翻页、刷新、重新进入后均为 false；C1 canary 与 2026-08-24 focused current-main E2E 均通过。
 - [x] transfer authority、likely-transfer 双 membership、accept 保留人工字段、reject 两行重算均由 C2 fixture、C3/C4 decision 与真实 PostgreSQL 合同覆盖。
 - [x] no-op edit、reclassify、learning/LLM/history lifecycle 和 confirm replay 已由 C4-C6 focused/真实 PostgreSQL/端到端矩阵覆盖，current-main exact-head CI 无退化。

@@ -23,7 +23,7 @@ export type ImportPreviewMatchingPayload = ImportMatchingPayload & {
 
 export interface ImportPreviewRecord {
     id: number;
-    row_version?: number;
+    row_version: number;
     category_id?: number | string | null;
     categoryId?: number | string | null;
     preview_type?: string;
@@ -72,7 +72,7 @@ export type ImportPreviewDecisionName = 'accept' | 'reject' | 'clear';
 
 export interface ImportPreviewExpectedState {
     sessionId: string;
-    rowVersion?: number;
+    rowVersion: number;
     reviewStatus?: string;
     previewType?: string;
     categoryId?: number | null;
@@ -113,8 +113,8 @@ export interface ImportPreviewDecisionResponse {
 
 export interface ImportPreviewPatchPayload {
     [field: string]: unknown;
-    id?: number;
-    expected_row_version?: number;
+    id: number;
+    expected_row_version: number;
     preview_type?: string;
     preview_amount_cents?: number;
     preview_destination_amount_cents?: number;
@@ -181,7 +181,7 @@ export interface ImportPreviewConfirmCommand {
     sessionId: string;
     previewUpdates?: ImportPreviewPatchPayload[];
     preserveUnpatchedSelection?: boolean;
-    expectedSessionVersion?: number;
+    expectedSessionVersion: number;
     historyRewriteAcknowledgement?: ImportPreviewHistoryRewriteAcknowledgement | null;
 }
 
@@ -189,7 +189,7 @@ export interface ImportPreviewConfirmPayload {
     session_id: string;
     preserve_unpatched_selection: boolean;
     preview_updates: ImportPreviewPatchPayload[];
-    expected_session_version?: number;
+    expected_session_version: number;
     history_rewrite_acknowledgement?: ImportPreviewHistoryRewriteAcknowledgement;
 }
 

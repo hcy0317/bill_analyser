@@ -786,7 +786,8 @@ describe('services shared runtime shell', () => {
         };
         await services.confirmImportPreview({
             sessionId: 'session/a',
-            previewUpdates: [{ id: 7, type: '支出' }],
+            expectedSessionVersion: 11,
+            previewUpdates: [{ id: 7, expected_row_version: 3, type: '支出' }],
             preserveUnpatchedSelection: true,
             historyRewriteAcknowledgement
         });
@@ -804,8 +805,9 @@ describe('services shared runtime shell', () => {
             'bills/import/v2/confirm',
             {
                 session_id: 'session/a',
+                expected_session_version: 11,
                 preserve_unpatched_selection: true,
-                preview_updates: [{ id: 7, type: '支出' }],
+                preview_updates: [{ id: 7, expected_row_version: 3, type: '支出' }],
                 history_rewrite_acknowledgement: historyRewriteAcknowledgement
             },
             expect.objectContaining({

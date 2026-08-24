@@ -48,6 +48,7 @@ function makeTransaction(overrides: Partial<ImportTransaction> = {}): ImportPrev
 
     Object.assign(transaction, overrides);
     transaction._previewId = 42;
+    transaction._rowVersion = 7;
     return transaction;
 }
 
@@ -63,6 +64,7 @@ describe('import preview update helper', () => {
 
         expect(update).toEqual({
             id: 42,
+            expected_row_version: 7,
             preview_type: '转账',
             preview_amount_cents: 1234,
             preview_destination_amount_cents: 5678,
@@ -161,14 +163,15 @@ describe('import preview update helper', () => {
         expect(getPreviewUpdateId({})).toBeNull();
     });
 
-    test('extracts only positive integer row versions from preview drafts', () => {
+    test('requires positive integer row versions from preview drafts', () => {
         const transaction = makeTransaction();
         transaction._rowVersion = 9;
         expect(getPreviewRowVersionFromImportTransaction(transaction)).toBe(9);
 
         for (const invalidVersion of [0, -1, 1.5, Number.NaN]) {
             transaction._rowVersion = invalidVersion;
-            expect(getPreviewRowVersionFromImportTransaction(transaction)).toBeUndefined();
+            expect(() => getPreviewRowVersionFromImportTransaction(transaction))
+                .toThrow('Import preview row version is required.');
         }
 
         syncPreviewRowVersionToImportTransaction(transaction, { id: 42, row_version: 12 });
@@ -177,21 +180,21 @@ describe('import preview update helper', () => {
         expect(transaction._rowVersion).toBe(12);
     });
 
-    test('adds a valid row version to preview update payloads without inventing legacy tokens', () => {
+    test('always adds a valid row version and rejects legacy preview drafts', () => {
         const versioned = makeTransaction();
         versioned._rowVersion = 9;
         expect(buildImportPreviewUpdateFromTransaction(versioned, {
-            categoryPath,
-            includeExpectedRowVersion: true
+            categoryPath
         }))
             .toMatchObject({ id: 42, expected_row_version: 9 });
 
         const legacy = makeTransaction();
-        expect(buildImportPreviewUpdateFromTransaction(legacy, { categoryPath }))
-            .not.toHaveProperty('expected_row_version');
+        legacy._rowVersion = undefined;
+        expect(() => buildImportPreviewUpdateFromTransaction(legacy, { categoryPath }))
+            .toThrow('Import preview row version is required.');
         legacy._rowVersion = 0;
-        expect(buildImportPreviewUpdateFromTransaction(legacy, { categoryPath }))
-            .not.toHaveProperty('expected_row_version');
+        expect(() => buildImportPreviewUpdateFromTransaction(legacy, { categoryPath }))
+            .toThrow('Import preview row version is required.');
     });
 
     test('rebases learning text sync fields from the authoritative conflict row', () => {

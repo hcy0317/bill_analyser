@@ -62,7 +62,7 @@ interface MatchingPairOperationResponse {
 
 interface UpdateImportPreviewItemPayload {
     id: number;
-    expectedRowVersion?: number;
+    expectedRowVersion: number;
     type?: string;
     amountCents?: number;
     destinationAmountCents?: number;
@@ -242,9 +242,7 @@ const importPreviewServices = {
         payload: UpdateImportPreviewItemPayload
     }): ApiResponsePromise<UpdateImportPreviewItemResponse> => {
         const { expectedRowVersion, ...previewPayload } = payload;
-        const requestPayload = expectedRowVersion === undefined
-            ? previewPayload
-            : { ...previewPayload, expected_row_version: expectedRowVersion };
+        const requestPayload = { ...previewPayload, expected_row_version: expectedRowVersion };
         return axios.put<{ success?: boolean, data?: { updated?: boolean, previewItem?: ImportPreviewRecord } }>(`bills/import/v2/preview/${encodeURIComponent(sessionId)}/update`, requestPayload).then(response => {
             return buildApiResponse(response, {
                 updated: !!(response.data?.data?.updated ?? response.data?.success),

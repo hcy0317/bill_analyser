@@ -57,6 +57,7 @@ describe('import preview category resolution', () => {
     test('prefers persisted preview category id over same-name fallback matches', () => {
         expect(resolveImportPreviewCategoryId({
             id: 1,
+            row_version: 1,
             category_id: 11,
             preview_main_category: '餐饮',
             preview_sub_category: '咖啡'
@@ -66,6 +67,7 @@ describe('import preview category resolution', () => {
     test('does not fall back by name when canonical category identity is invalid', () => {
         expect(resolveImportPreviewCategoryId({
             id: 2,
+            row_version: 1,
             category_id: 999,
             preview_main_category: '餐饮',
             preview_sub_category: '咖啡'
@@ -73,6 +75,7 @@ describe('import preview category resolution', () => {
 
         expect(resolveImportPreviewCategoryId({
             id: 3,
+            row_version: 1,
             preview_main_category: '不存在',
             preview_sub_category: '咖啡'
         }, categoriesById)).toBe('');
@@ -81,6 +84,7 @@ describe('import preview category resolution', () => {
     test('normalizes string category ids and ignores zero-like persisted values', () => {
         expect(resolveImportPreviewCategoryId({
             id: 4,
+            row_version: 1,
             category_id: ' 11 ',
             preview_main_category: '餐饮',
             preview_sub_category: '咖啡'
@@ -88,6 +92,7 @@ describe('import preview category resolution', () => {
 
         expect(resolveImportPreviewCategoryId({
             id: 5,
+            row_version: 1,
             category_id: ' 0 ',
             preview_main_category: '餐饮',
             preview_sub_category: '咖啡'
@@ -97,6 +102,7 @@ describe('import preview category resolution', () => {
     test('returns empty when no preview category names are available', () => {
         expect(resolveImportPreviewCategoryId({
             id: 6,
+            row_version: 1,
             category_id: null,
             categoryId: undefined,
             preview_main_category: '',
@@ -107,6 +113,7 @@ describe('import preview category resolution', () => {
     test('does not resolve top-level categories from display names', () => {
         expect(resolveImportPreviewCategoryId({
             id: 7,
+            row_version: 1,
             preview_main_category: '餐饮',
             preview_sub_category: ''
         }, {
@@ -118,6 +125,7 @@ describe('import preview category resolution', () => {
     test('does not resolve nested categories from display names', () => {
         expect(resolveImportPreviewCategoryId({
             id: 8,
+            row_version: 1,
             preview_main_category: '餐饮',
             preview_sub_category: '咖啡'
         }, {
@@ -129,6 +137,7 @@ describe('import preview category resolution', () => {
     test('does not scan same-name top-level categories without canonical identity', () => {
         expect(resolveImportPreviewCategoryId({
             id: 9,
+            row_version: 1,
             preview_main_category: '咖啡',
             preview_sub_category: ''
         }, {
@@ -172,6 +181,7 @@ describe('import preview category resolution', () => {
 
         expect(resolveImportPreviewCategoryId({
             id: 10,
+            row_version: 1,
             category_id: 'expenseSub',
             preview_type: '转账',
             preview_main_category: '账户互转',
@@ -180,6 +190,7 @@ describe('import preview category resolution', () => {
 
         expect(resolveImportPreviewCategoryId({
             id: 11,
+            row_version: 1,
             preview_type: '转账',
             preview_main_category: '餐饮',
             preview_sub_category: '咖啡'
@@ -373,6 +384,7 @@ describe('import preview identity-safe update/query payloads', () => {
     test('preview update payload drops zero and non-map-backed account ids', () => {
         const transaction = {
             _previewId: 99,
+            _rowVersion: 4,
             type: TransactionType.Expense,
             sourceAmountCents: 1234,
             destinationAmountCents: 0,

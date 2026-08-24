@@ -915,8 +915,7 @@ import {
 } from '../checkDataLearning.ts';
 import {
     buildImportCheckDecisionExpectedState,
-    buildImportCheckLearningDecisionExpectedState,
-    withImportPreviewRowVersion
+    buildImportCheckLearningDecisionExpectedState
 } from '../checkDataCandidateReview.ts';
 import {
     buildLLMSignalMemoryMap,
@@ -2200,18 +2199,16 @@ function isLLMDecisionBusy(item: ImportTransaction): boolean {
 }
 
 function getTransferDecisionExpectedState(item: ImportTransaction): ImportPreviewExpectedState {
-    return withImportPreviewRowVersion(
-        buildImportCheckDecisionExpectedState({
-            sessionId: props.sessionId || '',
-            reviewStatus: item.getTransferSuggestionReviewStatus(),
-            type: item.type,
-            categoryId: item.categoryId,
-            recurringTemplateId: item.recurringTemplateId,
-            sourceAccountId: item.sourceAccountId,
-            destinationAccountId: item.destinationAccountId
-        }),
-        getPreviewRowVersionFromImportTransaction(item)
-    );
+    return buildImportCheckDecisionExpectedState({
+        sessionId: props.sessionId || '',
+        rowVersion: getPreviewRowVersionFromImportTransaction(item),
+        reviewStatus: item.getTransferSuggestionReviewStatus(),
+        type: item.type,
+        categoryId: item.categoryId,
+        recurringTemplateId: item.recurringTemplateId,
+        sourceAccountId: item.sourceAccountId,
+        destinationAccountId: item.destinationAccountId
+    });
 }
 
 function getLearningDecisionExpectedState(item: ImportTransaction): ImportPreviewExpectedState {
@@ -2228,18 +2225,16 @@ function getLearningDecisionExpectedState(item: ImportTransaction): ImportPrevie
 }
 
 function getLLMDecisionExpectedState(item: ImportTransaction): ImportPreviewExpectedState {
-    return withImportPreviewRowVersion(
-        buildImportCheckDecisionExpectedState({
-            sessionId: props.sessionId || '',
-            reviewStatus: item.matching?.llm?.review_status || '',
-            type: item.type,
-            categoryId: item.categoryId,
-            recurringTemplateId: item.recurringTemplateId,
-            sourceAccountId: item.sourceAccountId,
-            destinationAccountId: item.destinationAccountId
-        }),
-        getPreviewRowVersionFromImportTransaction(item)
-    );
+    return buildImportCheckDecisionExpectedState({
+        sessionId: props.sessionId || '',
+        rowVersion: getPreviewRowVersionFromImportTransaction(item),
+        reviewStatus: item.matching?.llm?.review_status || '',
+        type: item.type,
+        categoryId: item.categoryId,
+        recurringTemplateId: item.recurringTemplateId,
+        sourceAccountId: item.sourceAccountId,
+        destinationAccountId: item.destinationAccountId
+    });
 }
 
 function getActionErrorMessage(error: unknown, fallbackMessage: string): string {
@@ -2860,7 +2855,7 @@ async function reclassifySelected(): Promise<void> {
     logger.info(`[重新分类] 开始重新分类，session_id=${props.sessionId}`);
 
     try {
-        const previewUpdates = buildSelectedPreviewUpdates(true);
+        const previewUpdates = buildSelectedPreviewUpdates();
         const response = await services.reclassifyImportPreview({
             sessionId: props.sessionId,
             previewUpdates
@@ -2904,8 +2899,7 @@ async function reclassifySelected(): Promise<void> {
 }
 
 function buildPreviewUpdatesForTransactions(
-    transactions: ImportTransaction[],
-    includeExpectedRowVersion = false
+    transactions: ImportTransaction[]
 ): ImportPreviewUpdatePayload[] {
     const validAccountIds = new Set(allVisibleAccounts.value.map(account => String(account.id)));
 
@@ -2921,8 +2915,7 @@ function buildPreviewUpdatesForTransactions(
             clearTransferDecision,
             clearLearningDecision,
             clearLlmDecision,
-            includeSuggestionDecisionClears: true,
-            includeExpectedRowVersion
+            includeSuggestionDecisionClears: true
         });
     }).filter(item => !!item.id);
 }
@@ -2935,20 +2928,16 @@ function captureImportPreviewEditableDraftState(
 
 function buildPreviewUpdates(options: {
     selectedOnly: boolean;
-    includeExpectedRowVersion?: boolean;
 }): ImportPreviewUpdatePayload[] {
     cacheCurrentPageDrafts();
     const transactions = getTrackedTransactionsForSelection().filter(transaction => (
         !options.selectedOnly || transaction.selected
     ));
-    return buildPreviewUpdatesForTransactions(
-        transactions,
-        options.includeExpectedRowVersion === true
-    );
+    return buildPreviewUpdatesForTransactions(transactions);
 }
 
-function buildSelectedPreviewUpdates(includeExpectedRowVersion = false): ImportPreviewUpdatePayload[] {
-    return buildPreviewUpdates({ selectedOnly: true, includeExpectedRowVersion });
+function buildSelectedPreviewUpdates(): ImportPreviewUpdatePayload[] {
+    return buildPreviewUpdates({ selectedOnly: true });
 }
 
 function buildTrackedPreviewUpdates(): ImportPreviewUpdatePayload[] {
@@ -2970,8 +2959,7 @@ function buildConditionalSelectionPreviewUpdates(
         return [];
     }
     return buildPreviewUpdatesForTransactions(
-        getTrackedTransactionsForSelection().filter(hasServerPagedValidityDraftChanges),
-        true
+        getTrackedTransactionsForSelection().filter(hasServerPagedValidityDraftChanges)
     );
 }
 
@@ -3094,7 +3082,7 @@ async function applyLLMPreviewRecommendations(): Promise<void> {
         return;
     }
 
-    const previewUpdates = buildSelectedPreviewUpdates(true);
+    const previewUpdates = buildSelectedPreviewUpdates();
     llmPreviewRecommending.value = true;
     try {
         const response = await services.llmPreviewRecommend({
@@ -3162,7 +3150,7 @@ async function analyzeSelectedPreviewWithLLM(): Promise<void> {
         return;
     }
 
-    const previewUpdates = buildSelectedPreviewUpdates(true);
+    const previewUpdates = buildSelectedPreviewUpdates();
     llmSessionAnalyzing.value = true;
     try {
         const response = await services.analyzeLLMTransactions({
@@ -3212,7 +3200,7 @@ async function promoteSelectedToLongTermLearning(): Promise<void> {
         return;
     }
 
-    const previewUpdates = buildSelectedPreviewUpdates(true);
+    const previewUpdates = buildSelectedPreviewUpdates();
     try {
         const suggestionsResponse = await services.getImportLearningSuggestions({
             sessionId: props.sessionId,

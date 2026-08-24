@@ -10,12 +10,14 @@ describe('checkDataCandidateReview helpers', () => {
     test('builds generic matching expectedState with the supplied review status family', () => {
         expect(buildImportCheckDecisionExpectedState({
             sessionId: 'session-investment-review',
+            rowVersion: 7,
             reviewStatus: 'accepted',
             type: TransactionType.Investment,
             categoryId: '42',
             recurringTemplateId: ''
         })).toStrictEqual({
             sessionId: 'session-investment-review',
+            rowVersion: 7,
             reviewStatus: 'accepted',
             previewType: '投资',
             categoryId: 42,
@@ -47,12 +49,12 @@ describe('checkDataCandidateReview helpers', () => {
         });
     });
 
-    test('omits an invalid row version from the learning expectedState', () => {
-        expect(buildImportCheckLearningDecisionExpectedState({
+    test('rejects an invalid row version before building expectedState', () => {
+        expect(() => buildImportCheckLearningDecisionExpectedState({
             sessionId: 'session-learning-legacy',
             rowVersion: 0,
             reviewStatus: 'pending',
             type: TransactionType.Expense
-        })).not.toHaveProperty('rowVersion');
+        })).toThrow('Import preview row version is required.');
     });
 });

@@ -119,15 +119,43 @@
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn confirm_without_session_version_remains_compatible_for_legacy_clients() {
+    async fn confirm_requires_session_version_but_terminal_replay_remains_compatible() {
         let Some((state, user_id, session_id)) = import_postgres_test_state().await else {
             return;
         };
+        let runtime = state
+            .open_postgres_repository_runtime("confirm-session-version-required")
+            .expect("postgres runtime");
+        let canonical_user = UserId::new(user_id as u64).expect("positive user id");
+        let before = get_import_session(runtime.pool(), &session_id, canonical_user)
+            .expect("session lookup")
+            .expect("session row");
+
+        let (missing_status, missing_body) = import_test_response(
+            import_confirm_runtime_handler(
+                State(state.clone()),
+                import_test_headers(user_id),
+                Json(json!({"session_id": session_id.clone()})),
+            )
+            .await,
+        )
+        .await;
+        assert_eq!(missing_status, StatusCode::PRECONDITION_REQUIRED);
+        assert_eq!(missing_body["code"], "IMPORT_SESSION_VERSION_REQUIRED");
+        let after_missing = get_import_session(runtime.pool(), &session_id, canonical_user)
+            .expect("session lookup after missing token")
+            .expect("session row after missing token");
+        assert_eq!(after_missing.status, before.status);
+        assert_eq!(after_missing.version, before.version);
+
         let (status, body) = import_test_response(
             import_confirm_runtime_handler(
-                State(state),
+                State(state.clone()),
                 import_test_headers(user_id),
-                Json(json!({"session_id": session_id})),
+                Json(json!({
+                    "session_id": session_id.clone(),
+                    "expected_session_version": before.version
+                })),
             )
             .await,
         )
@@ -136,4 +164,16 @@
         assert_eq!(status, StatusCode::OK, "body: {body}");
         assert_eq!(body["success"], true);
         assert_eq!(body["data"]["imported_count"], 0);
+
+        let (replay_status, replay_body) = import_test_response(
+            import_confirm_runtime_handler(
+                State(state),
+                import_test_headers(user_id),
+                Json(json!({"session_id": session_id})),
+            )
+            .await,
+        )
+        .await;
+        assert_eq!(replay_status, StatusCode::OK, "body: {replay_body}");
+        assert_eq!(replay_body["success"], true);
     }

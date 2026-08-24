@@ -350,18 +350,18 @@ mod preview_mutation_helper_tests {
     }
 
     #[test]
-    fn expected_row_version_parser_keeps_legacy_absence_and_rejects_invalid_tokens() {
-        assert_eq!(
-            expected_row_version_from_payload(&Map::new()).expect("legacy payload"),
-            None
-        );
+    fn expected_row_version_parser_requires_token_and_rejects_invalid_values() {
+        let missing = expected_row_version_from_payload(&Map::new())
+            .expect_err("missing row version must fail closed");
+        assert_eq!(missing.status_code, 428);
+        assert_eq!(missing.body["code"], "PREVIEW_ROW_VERSION_REQUIRED");
         assert_eq!(
             expected_row_version_from_payload(&Map::from_iter([(
                 "expected_row_version".to_string(),
                 json!(7),
             )]))
             .expect("snake case token"),
-            Some(7)
+            7
         );
         assert_eq!(
             expected_row_version_from_payload(&Map::from_iter([(
@@ -369,7 +369,7 @@ mod preview_mutation_helper_tests {
                 json!("8"),
             )]))
             .expect("camel case token"),
-            Some(8)
+            8
         );
         for value in [json!(0), json!(-1), json!(true), json!(1.5)] {
             let error = expected_row_version_from_payload(&Map::from_iter([(

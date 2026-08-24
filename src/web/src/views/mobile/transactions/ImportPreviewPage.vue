@@ -323,10 +323,10 @@ function historyOperation(row: MobileImportPreviewRow): ImportPreviewHistoryRewr
         reconciliationDestructiveAckRequired: !!reconciliation?.destructive_ack_required
     });
 }
-
 function buildPreviewUpdates(): ImportPreviewPatchPayload[] {
     return rows.value.map(row => ({
         id: row.id,
+        expected_row_version: withImportPreviewRowVersion({ sessionId }, row.record.row_version).rowVersion,
         selected: row.selected
     }));
 }

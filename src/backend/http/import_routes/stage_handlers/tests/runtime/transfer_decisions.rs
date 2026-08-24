@@ -1,11 +1,42 @@
     #[tokio::test(flavor = "multi_thread")]
-    async fn legacy_transfer_accept_clear_returns_session_and_canonical_preview_items() {
+    async fn transfer_accept_clear_requires_versions_and_returns_canonical_preview_items() {
         let Some((state, user_id, session_id)) = import_postgres_test_state().await else {
             return;
         };
         let preview_id =
             insert_legacy_same_batch_transfer_fixture(&state, user_id, &session_id).await;
         let headers = import_test_headers(user_id);
+        let runtime = state
+            .open_postgres_repository_runtime("transfer-version-required")
+            .expect("postgres runtime");
+        let canonical_user = UserId::new(user_id as u64).expect("positive user id");
+        let before = get_preview_bill_by_id(runtime.pool(), preview_id, canonical_user)
+            .expect("preview lookup")
+            .expect("preview row");
+
+        let (missing_status, missing_body) = import_test_response(
+            preview_transfer_decision_runtime_handler(
+                State(state.clone()),
+                Path(preview_id),
+                headers.clone(),
+                Json(json!({
+                    "decision": "accept",
+                    "expectedState": { "sessionId": session_id }
+                })),
+            )
+            .await,
+        )
+        .await;
+        assert_eq!(
+            missing_status,
+            StatusCode::PRECONDITION_REQUIRED,
+            "body: {missing_body}"
+        );
+        assert_eq!(missing_body["code"], "PREVIEW_ROW_VERSION_REQUIRED");
+        let after_missing = get_preview_bill_by_id(runtime.pool(), preview_id, canonical_user)
+            .expect("preview lookup after missing token")
+            .expect("preview row after missing token");
+        assert_eq!(after_missing.version, before.version);
 
         let (accept_status, accept_body) = import_test_response(
             preview_transfer_decision_runtime_handler(
@@ -16,6 +47,7 @@
                     "decision": "accept",
                     "expectedState": {
                         "sessionId": session_id,
+                        "rowVersion": before.version,
                         "type": "转账",
                         "mainCategory": "",
                         "subCategory": ""
@@ -51,6 +83,9 @@
                 ["review_status"],
             "accepted"
         );
+        let mut current_version = accept_body["data"]["upsertedPreviewItems"][0]["row_version"]
+            .as_i64()
+            .expect("versioned accept row version");
 
         for attempt in 0..2 {
             let (clear_status, clear_body) = import_test_response(
@@ -62,6 +97,7 @@
                         "decision": "clear",
                         "expectedState": {
                             "sessionId": session_id,
+                            "rowVersion": current_version,
                             "type": "转账",
                             "mainCategory": "",
                             "subCategory": ""
@@ -94,6 +130,9 @@
                     ["transfer"]["review_status"],
                 "pending"
             );
+            current_version = clear_body["data"]["upsertedPreviewItems"][0]["row_version"]
+                .as_i64()
+                .expect("versioned clear row version");
         }
     }
 
@@ -396,6 +435,7 @@
                     "decision": "reject",
                     "expectedState": {
                         "sessionId": session_id,
+                        "rowVersion": manually_patched.version,
                         "type": "转账",
                         "mainCategory": "人工转账",
                         "subCategory": "人工分类"

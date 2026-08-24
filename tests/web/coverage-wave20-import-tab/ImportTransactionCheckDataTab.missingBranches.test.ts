@@ -276,6 +276,7 @@ function createTransaction(id: number, options: Record<string, unknown> = {}): I
         ...options
     } as never, id);
     (transaction as ImportTransaction & { _previewId: number })._previewId = id;
+    (transaction as ImportTransaction & { _rowVersion: number })._rowVersion = 5;
     Object.assign(transaction, options);
     return transaction;
 }
@@ -283,6 +284,7 @@ function createTransaction(id: number, options: Record<string, unknown> = {}): I
 function previewFor(transaction: ImportTransaction, overrides: Record<string, unknown> = {}): Record<string, unknown> {
     return {
         id: (transaction as ImportTransaction & { _previewId?: number })._previewId,
+        row_version: (transaction as ImportTransaction & { _rowVersion?: number })._rowVersion,
         preview_type: 'expense',
         preview_category_id: '8',
         preview_source_account_id: 'wallet',
@@ -407,7 +409,7 @@ describe('ImportTransactionCheckDataTab uncovered category and recurring branche
         expect(mockUpdateImportPreviewRecurringMatch).toHaveBeenCalledWith({
             previewId: 2,
             recurringId: 17,
-            expectedState: expect.not.objectContaining({ rowVersion: expect.anything() })
+            expectedState: expect.objectContaining({ rowVersion: 5 })
         });
 
         mockUpdateImportPreviewRecurringMatch.mockRejectedValueOnce({
@@ -509,7 +511,7 @@ describe('ImportTransactionCheckDataTab uncovered decision and refresh branches'
         expect(transaction.sourceAccountId).toBe('');
     });
 
-    test('transfer review uses the atomic replacement path without a token', async () => {
+    test('transfer review uses the atomic replacement path with the current token', async () => {
         const transaction = createTransaction(12);
         const { bindings, emit } = createBindings([transaction]);
         mockReviewImportTransferDecision.mockResolvedValueOnce({
@@ -528,7 +530,7 @@ describe('ImportTransactionCheckDataTab uncovered decision and refresh branches'
             payload: expect.objectContaining({ responseMode: 'preview-item' })
         }));
         const request = mockReviewImportTransferDecision.mock.calls[0]?.[0];
-        expect(request.payload.expectedState).not.toHaveProperty('rowVersion');
+        expect(request.payload.expectedState).toHaveProperty('rowVersion', 5);
         expect(emit).toHaveBeenCalledWith('reclassified', expect.any(Array), [12]);
     });
 

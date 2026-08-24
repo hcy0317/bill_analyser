@@ -157,7 +157,7 @@ pub async fn import_preview_selection_runtime_handler(
             Ok(expected_row_version) => expected_row_version,
             Err(response) => return route_response(response),
         };
-        present_row_versions += usize::from(expected_row_version.is_some());
+        present_row_versions += 1;
         let patch = match build_preview_patch_from_payload_with_loaded_categories(
             preview_id,
             item,
@@ -166,7 +166,7 @@ pub async fn import_preview_selection_runtime_handler(
             Ok(patch) => patch,
             Err(response) => return route_response(response),
         };
-        patches.push(attach_optional_expected_row_version(
+        patches.push(attach_expected_row_version(
             patch,
             expected_row_version,
         ));

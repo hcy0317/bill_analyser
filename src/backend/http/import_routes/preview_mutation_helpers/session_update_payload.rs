@@ -49,7 +49,7 @@ fn preview_id_from_payload(object: &Map<String, Value>) -> Result<i64, ImportV2R
 
 fn expected_row_version_from_payload(
     object: &Map<String, Value>,
-) -> Result<Option<i64>, ImportV2RouteResponse> {
+) -> Result<i64, ImportV2RouteResponse> {
     let Some(value) = first_value(
         object,
         &[
@@ -59,10 +59,12 @@ fn expected_row_version_from_payload(
             "rowVersion",
         ],
     ) else {
-        return Ok(None);
+        return Err(import_version_required_response("row_version"));
     };
+    if value.is_null() {
+        return Err(import_version_required_response("row_version"));
+    }
     value_to_i64(value)
         .filter(|version| *version > 0)
-        .map(Some)
         .ok_or_else(|| import_v2_error_response(400, "Invalid expected_row_version"))
 }

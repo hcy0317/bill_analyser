@@ -81,13 +81,9 @@ async fn llm_preview_recommend_review_response(
         }
     };
     let suggestion_value = first_value(object, &["suggestion"]).cloned();
-    let expected_state = if first_value(object, &["expectedState", "expected_state"]).is_some() {
-        match expected_state_from_payload(object) {
-            Ok(expected_state) => Some(expected_state),
-            Err(response) => return route_response(response),
-        }
-    } else {
-        None
+    let expected_state = match expected_state_from_payload(object) {
+        Ok(expected_state) => Some(expected_state),
+        Err(response) => return route_response(response),
     };
     observe_import_version_contract(
         "llm_preview_decision",

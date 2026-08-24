@@ -26,7 +26,7 @@ async fn insert_recurring_decision_preview_fixture(
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn recurring_decision_current_versions_increment_and_legacy_absence_remains_compatible() {
+async fn recurring_decision_current_versions_increment_and_missing_version_writes_nothing() {
     let Some((state, user_id, session_id)) = import_postgres_test_state().await else {
         return;
     };
@@ -106,7 +106,7 @@ async fn recurring_decision_current_versions_increment_and_legacy_absence_remain
     let after_delete = get_preview_bill_by_id(pool, preview_id, canonical_user)
         .expect("preview lookup after delete")
         .expect("preview row after delete");
-    let (legacy_status, legacy_body) = import_test_response(
+    let (missing_status, missing_body) = import_test_response(
         preview_recurring_match_put_runtime_handler(
             State(state),
             Path(preview_id),
@@ -120,12 +120,17 @@ async fn recurring_decision_current_versions_increment_and_legacy_absence_remain
         .await,
     )
     .await;
-    assert_eq!(legacy_status, StatusCode::OK, "body: {legacy_body}");
     assert_eq!(
-        legacy_body["data"]["previewItem"]["row_version"],
-        after_delete.version + 1
+        missing_status,
+        StatusCode::PRECONDITION_REQUIRED,
+        "body: {missing_body}"
     );
-    assert_eq!(legacy_body["data"]["previewItem"]["preview_recurring_id"], 23);
+    assert_eq!(missing_body["code"], "PREVIEW_ROW_VERSION_REQUIRED");
+    let after_missing = get_preview_bill_by_id(pool, preview_id, canonical_user)
+        .expect("preview lookup after missing token")
+        .expect("preview row after missing token");
+    assert_eq!(after_missing.version, after_delete.version);
+    assert_eq!(after_missing.preview_recurring_id, after_delete.preview_recurring_id);
 }
 
 #[tokio::test(flavor = "multi_thread")]

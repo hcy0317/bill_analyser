@@ -73,18 +73,29 @@ fn matching_candidate_action_response(
         Ok(value) => value,
         Err(response) => return *response,
     };
+    let has_row_version = request
+        .expected_state
+        .as_ref()
+        .and_then(|state| state.expected_row_version)
+        .is_some();
     observe_import_version_contract(
         "matching_candidate_decision",
         "row_version",
         1,
-        usize::from(
-            request
-                .expected_state
-                .as_ref()
-                .and_then(|state| state.expected_row_version)
-                .is_some(),
-        ),
+        usize::from(has_row_version),
     );
+    if !has_row_version {
+        return (
+            StatusCode::PRECONDITION_REQUIRED,
+            Json(json!({
+                "success": false,
+                "error": "Preview row version is required",
+                "code": "PREVIEW_ROW_VERSION_REQUIRED",
+                "data": {"required_token": "expected_row_version"},
+            })),
+        )
+            .into_response();
+    }
     let runtime = match open_postgres_runtime(state, "matching") {
         Ok(value) => value,
         Err(response) => return *response,

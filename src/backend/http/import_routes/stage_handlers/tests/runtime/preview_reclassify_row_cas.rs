@@ -1,10 +1,6 @@
     #[test]
-    fn optional_row_version_attaches_only_the_supplied_token() {
-        let legacy_patch = attach_optional_expected_row_version(ImportPreviewPatch::new(11), None);
-        assert_eq!(legacy_patch.expected_row_version, None);
-
-        let versioned_patch =
-            attach_optional_expected_row_version(ImportPreviewPatch::new(12), Some(7));
+    fn required_row_version_attaches_the_supplied_token() {
+        let versioned_patch = attach_expected_row_version(ImportPreviewPatch::new(12), 7);
         assert_eq!(versioned_patch.expected_row_version, Some(7));
     }
 

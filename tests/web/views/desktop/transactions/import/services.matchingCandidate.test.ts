@@ -63,6 +63,7 @@ describe('import learning matching candidate service contract', () => {
         const payload: ImportPreviewCandidateActionPayload = {
             expectedState: {
                 sessionId: 'session-1',
+                rowVersion: 8,
                 reviewStatus: 'pending'
             },
             responseMode: 'preview-item'

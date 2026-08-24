@@ -1,5 +1,5 @@
     #[tokio::test(flavor = "multi_thread")]
-    async fn preview_mutation_handlers_cover_auth_payload_lookup_and_empty_reclassify() {
+    async fn preview_mutation_handlers_reject_empty_reclassify_without_writing() {
         let unauthenticated = import_preview_update_runtime_handler(
             State(HttpAppState::new(HttpShellConfig::default()).expect("default state")),
             Path("missing".into()),
@@ -18,7 +18,13 @@
             (json!([]), StatusCode::BAD_REQUEST),
             (json!({}), StatusCode::BAD_REQUEST),
             (json!({"previewId": "bad"}), StatusCode::BAD_REQUEST),
-            (json!({"previewId": 9_999_999_999_i64}), StatusCode::NOT_FOUND),
+            (
+                json!({
+                    "previewId": 9_999_999_999_i64,
+                    "expected_row_version": 1
+                }),
+                StatusCode::NOT_FOUND,
+            ),
         ] {
             let (status, body) = import_test_response(
                 import_preview_update_runtime_handler(
@@ -119,11 +125,9 @@
             .await,
         )
         .await;
-        assert_eq!(status, StatusCode::OK, "body: {body}");
-        assert_eq!(body["data"]["updated"], 0);
-        assert_eq!(body["data"]["total"], 1);
-        assert_eq!(body["data"]["preview"].as_array().map(Vec::len), Some(1));
-        assert_eq!(body["data"]["preview"][0]["id"], preview_id);
+        assert_eq!(status, StatusCode::PRECONDITION_REQUIRED, "body: {body}");
+        assert_eq!(body["success"], false);
+        assert_eq!(body["code"], "PREVIEW_ROW_VERSION_REQUIRED");
         let version_after: i64 = sqlx::query_scalar(
             "SELECT version FROM import_preview_rows WHERE id=$1 AND user_id=$2",
         )
@@ -132,10 +136,7 @@
         .fetch_one(runtime.pool())
         .await
         .expect("preview version after empty update reclassify");
-        assert!(
-            version_after > version_before,
-            "empty preview_updates must reclassify the full session"
-        );
+        assert_eq!(version_after, version_before, "rejected empty reclassify must not write");
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -274,6 +275,7 @@
                 Json(json!({
                     "preview_updates": [{
                         "id": preview_id,
+                        "expected_row_version": manually_patched.version,
                         "preview_type": "转账",
                         "category_id": category_id,
                         "preview_source_account_id": source_account_id,
@@ -386,6 +388,14 @@
             },
         )
         .expect("insert preview");
+        let preview_version = bill_analyser_db::get_preview_bill_by_id(
+            pool,
+            preview_id,
+            canonical_user,
+        )
+        .expect("load conditional selection preview")
+        .expect("conditional selection preview exists")
+        .version;
 
         let (status, body) = import_test_response(
             import_preview_selection_runtime_handler(
@@ -397,6 +407,7 @@
                     "filters": {},
                     "preview_updates": [{
                         "id": preview_id,
+                        "expected_row_version": preview_version,
                         "preview_type": "支出",
                         "category_id": category_id,
                         "preview_source_account_id": account_id,
@@ -468,6 +479,14 @@
             },
         )
         .expect("insert foreign preview");
+        let foreign_preview_version = bill_analyser_db::get_preview_bill_by_id(
+            pool,
+            foreign_preview_id,
+            canonical_user,
+        )
+        .expect("load foreign preview version")
+        .expect("foreign preview exists")
+        .version;
         let (status, body) = import_test_response(
             import_preview_selection_runtime_handler(
                 State(state.clone()),
@@ -477,6 +496,7 @@
                     "selectionAction": "select_valid",
                     "preview_updates": [{
                         "id": foreign_preview_id,
+                        "expected_row_version": foreign_preview_version,
                         "category_id": category_id,
                         "selected": false
                     }]
@@ -508,6 +528,14 @@
             },
         )
         .expect("insert rollback preview");
+        let rollback_preview_version = bill_analyser_db::get_preview_bill_by_id(
+            pool,
+            rollback_preview_id,
+            canonical_user,
+        )
+        .expect("load rollback preview version")
+        .expect("rollback preview exists")
+        .version;
         let trigger_name = format!("fail_conditional_selection_{rollback_preview_id}");
         let function_name = format!("fail_conditional_selection_fn_{rollback_preview_id}");
         sqlx::query(&format!(
@@ -532,6 +560,7 @@
                     "selectionAction": "select_valid",
                     "preview_updates": [{
                         "id": rollback_preview_id,
+                        "expected_row_version": rollback_preview_version,
                         "preview_type": "支出",
                         "category_id": category_id,
                         "preview_source_account_id": account_id,

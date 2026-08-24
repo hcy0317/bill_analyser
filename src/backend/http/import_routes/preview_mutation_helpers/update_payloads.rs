@@ -10,15 +10,23 @@ fn apply_preview_updates_preserving_selection_from_payload(
     let mut patches = Vec::with_capacity(update_items.len());
     for item in update_items {
         let preview_id = preview_id_from_payload(item)?;
+        let expected_row_version = expected_row_version_from_payload(item)?;
         match get_preview_bill_by_id(runtime.connection(), preview_id, user_id) {
             Ok(Some(preview)) if preview.session_id == session_id => {}
             Ok(_) => return Err(import_v2_error_response(404, "Preview bill not found")),
             Err(error) => return Err(db_error_response(error)),
         }
-        patches.push(build_preview_patch_from_payload_with_category_lookup(
+        let patch = build_preview_patch_from_payload_with_category_lookup(
             runtime.connection(), user_id, preview_id, item,
-        )?);
+        )?;
+        patches.push(attach_expected_row_version(patch, expected_row_version));
     }
+    observe_import_version_contract(
+        "learning_promote_preflush",
+        "row_version",
+        patches.len(),
+        patches.len(),
+    );
     apply_preview_patches_preserving_selection(runtime.connection_mut(), session_id, user_id, &patches)
         .map_err(db_error_response)
 }
@@ -59,11 +67,11 @@ fn expected_state_from_payload(
 ) -> Result<ImportPreviewExpectedState, ImportV2RouteResponse> {
     let expected_state = first_value(object, &["expectedState", "expected_state"])
         .and_then(Value::as_object)
-        .ok_or_else(|| import_v2_error_response(400, "Invalid request"))?;
+        .ok_or_else(|| import_version_required_response("row_version"))?;
     Ok(ImportPreviewExpectedState {
         session_id: first_value(expected_state, &["sessionId", "session_id"])
             .and_then(value_to_text),
-        expected_row_version: expected_row_version_from_payload(expected_state)?,
+        expected_row_version: Some(expected_row_version_from_payload(expected_state)?),
         review_status: first_value(
             expected_state,
             &["reviewStatus", "review_status", "status"],

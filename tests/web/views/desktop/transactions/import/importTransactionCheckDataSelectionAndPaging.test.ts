@@ -206,6 +206,7 @@ function createTransaction(options: TransactionOptions): ImportTransaction {
         }
     } as never, options.id);
     (transaction as ImportTransaction & { _previewId: number })._previewId = options.id;
+    (transaction as ImportTransaction & { _rowVersion: number })._rowVersion = 5;
     return transaction;
 }
 

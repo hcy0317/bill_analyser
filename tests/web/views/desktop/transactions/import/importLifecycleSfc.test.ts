@@ -253,6 +253,7 @@ function registerUiStubs(app: any): void {
 function createDesktopDecisionTransaction(): any {
     return {
         _previewId: 77,
+        _rowVersion: 5,
         type: 3,
         categoryId: '',
         recurringTemplateId: '',
@@ -521,6 +522,7 @@ describe('P3 import lifecycle production SFC coverage', () => {
 
         const updateTransaction: any = {
             _previewId: 81,
+            _rowVersion: 3,
             type: 3,
             sourceAmountCents: -100,
             destinationAmountCents: 0,
@@ -619,7 +621,10 @@ describe('P3 import lifecycle production SFC coverage', () => {
             );
             const row = {
                 id: 44,
-                record: { matching: { learning: { review_status: 'pending' } } },
+                record: {
+                    row_version: 5,
+                    matching: { learning: { review_status: 'pending' } }
+                },
                 selected: true,
                 signal: {},
                 busy: false
@@ -630,7 +635,7 @@ describe('P3 import lifecycle production SFC coverage', () => {
             expect(mockAcceptMatchingCandidate).toHaveBeenCalledWith({
                 candidateId: 'preview:44:learning',
                 payload: {
-                    expectedState: { sessionId: 'session-mobile' },
+                    expectedState: { sessionId: 'session-mobile', rowVersion: 5 },
                     responseMode: 'preview-item'
                 }
             });
@@ -1049,6 +1054,7 @@ describe('P3 import lifecycle production SFC coverage', () => {
             const row = {
                 id: 45,
                 record: {
+                    row_version: 5,
                     matching: {
                         llm: {
                             review_status: 'pending',
@@ -1068,7 +1074,7 @@ describe('P3 import lifecycle production SFC coverage', () => {
                 sessionId: 'session-mobile',
                 previewId: 45,
                 suggestion: row.record.matching.llm,
-                expectedState: { sessionId: 'session-mobile' }
+                expectedState: { sessionId: 'session-mobile', rowVersion: 5 }
             });
             expect(mockGetImportPreviewPage).toHaveBeenCalledWith({
                 sessionId: 'session-mobile',
@@ -2126,7 +2132,11 @@ describe('P3 import lifecycle production SFC coverage', () => {
                 planned_operation: 'update_history',
                 history_bill_id: 7
             });
-            expect(bindings.buildPreviewUpdates()).toEqual([{ id: 91, selected: true }]);
+            expect(bindings.buildPreviewUpdates()).toEqual([{
+                id: 91,
+                expected_row_version: 5,
+                selected: true
+            }]);
             expect(bindings.buildHistoryAcknowledgement()).toMatchObject({
                 selection_scope: { mode: 'mobile-visible-preview', selected_visible_count: 1 }
             });
@@ -2280,6 +2290,7 @@ describe('P3 import lifecycle production SFC coverage', () => {
         try {
             const record: any = {
                 id: 101,
+                row_version: 5,
                 selected: true,
                 preview_payment_method: 'Cash',
                 preview_amount_cents: 'not-a-number',

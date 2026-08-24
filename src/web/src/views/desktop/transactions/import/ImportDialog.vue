@@ -379,6 +379,7 @@ import {
     buildImportTransactionFromPreviewRecord,
     type ImportPreviewTransactionDraft
 } from './importPreviewTransaction.ts';
+import type { ImportPreviewPatchPayload } from '@/models/import_preview.ts';
 import {
     buildImportPreviewUpdateFromTransaction,
     getPreviewIdFromImportTransaction,
@@ -1492,7 +1493,7 @@ async function buildHistoryRewriteConfirmAcknowledgement({
     selectedCount
 }: {
     selectedTransactions: ImportTransaction[];
-    selectedPreviewUpdates: Record<string, unknown>[];
+    selectedPreviewUpdates: ImportPreviewPatchPayload[];
     selectedCount: number;
 }): Promise<ImportPreviewHistoryRewriteAcknowledgement | null> {
     const selectedPreviewIds = new Set<number>();
@@ -1560,7 +1561,7 @@ async function submit(): Promise<void> {
 
     // 收集用户选中的交易
     const selectedTransactions: ImportTransaction[] = [];
-    let selectedPreviewUpdates: Record<string, unknown>[] = [];
+    let selectedPreviewUpdates: ImportPreviewPatchPayload[] = [];
     let selectedCount = 0;
 
     if (serverSessionId.value && serverPagedPreviewMode.value) {

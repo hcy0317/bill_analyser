@@ -91,6 +91,31 @@ pub fn confirm_import_command_with_receipt_read_source(
     command: &ConfirmCommand,
     read_source: ConfirmReceiptReadSource,
 ) -> DbResult<ConfirmOutcome> {
+    confirm_import_command_with_version_requirement(
+        pool,
+        user_id,
+        command,
+        read_source,
+        false,
+    )
+}
+
+pub fn confirm_versioned_import_command_with_receipt_read_source(
+    pool: &PostgresPool,
+    user_id: UserId,
+    command: &ConfirmCommand,
+    read_source: ConfirmReceiptReadSource,
+) -> DbResult<ConfirmOutcome> {
+    confirm_import_command_with_version_requirement(pool, user_id, command, read_source, true)
+}
+
+fn confirm_import_command_with_version_requirement(
+    pool: &PostgresPool,
+    user_id: UserId,
+    command: &ConfirmCommand,
+    read_source: ConfirmReceiptReadSource,
+    require_session_version: bool,
+) -> DbResult<ConfirmOutcome> {
     tracing::info!(
         domain = "import_confirm",
         operation = "confirm",
@@ -101,8 +126,13 @@ pub fn confirm_import_command_with_receipt_read_source(
         response_schema_version = CONFIRM_RESPONSE_SCHEMA_VERSION,
         "import confirmation started"
     );
-    let result =
-        confirm_import_command_in_transaction(pool, user_id, command, read_source);
+    let result = confirm_import_command_in_transaction(
+        pool,
+        user_id,
+        command,
+        read_source,
+        require_session_version,
+    );
     match &result {
         Ok(outcome) => tracing::info!(
             domain = "import_confirm",
@@ -167,6 +197,7 @@ fn confirm_import_command_in_transaction(
     user_id: UserId,
     command: &ConfirmCommand,
     read_source: ConfirmReceiptReadSource,
+    require_session_version: bool,
 ) -> DbResult<ConfirmOutcome> {
     block_on_db(async move {
         let user_id = user_id_i64(user_id)?;
@@ -242,10 +273,16 @@ fn confirm_import_command_in_transaction(
                 replayed: true,
             });
         }
-        if command
-            .expected_session_version
-            .is_some_and(|expected| expected != session.version)
-        {
+        let expected_session_version = match command.expected_session_version {
+            Some(version) => version,
+            None if require_session_version => {
+                return Err(DbError::InvalidOperation(
+                    "expected_session_version is required".to_string(),
+                ));
+            }
+            None => session.version,
+        };
+        if expected_session_version != session.version {
             tracing::warn!(
                 domain = "import_confirm",
                 operation = "validation",
@@ -258,7 +295,7 @@ fn confirm_import_command_in_transaction(
             );
             return Err(DbError::import_session_version_conflict(
                 &command.session_id,
-                command.expected_session_version.unwrap_or_default(),
+                expected_session_version,
                 session.version,
             ));
         }
@@ -367,6 +404,11 @@ fn confirm_rollback_reason(error: &DbError) -> &'static str {
     match error {
         DbError::InvalidOperation(message) if message.contains("fingerprint conflict") => {
             "fingerprint_conflict"
+        }
+        DbError::InvalidOperation(message)
+            if message == "expected_session_version is required" =>
+        {
+            "session_version_required"
         }
         DbError::ImportSessionVersionConflict { .. } => "session_version_conflict",
         DbError::InvalidOperation(message)

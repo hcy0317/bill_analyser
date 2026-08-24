@@ -164,6 +164,7 @@ describe('import preview transaction helper', () => {
     test('keeps structured transfer matching feedback visible as a signal', () => {
         const transaction = buildImportTransactionFromPreviewRecord({
             id: 43,
+            row_version: 5,
             preview_type: '转账',
             preview_date: '2026-06-01T00:00:00Z',
             preview_amount_cents: -1234,
@@ -197,6 +198,7 @@ describe('import preview transaction helper', () => {
     test('keeps structured LLM matching feedback visible on full preview rows', () => {
         const transaction = buildImportTransactionFromPreviewRecord({
             id: 44,
+            row_version: 5,
             preview_type: '支出',
             preview_date: '2026-06-01T00:00:00Z',
             preview_amount_cents: -1234,
@@ -239,6 +241,7 @@ describe('import preview transaction helper', () => {
     test('preserves invalid-date fallback and expense category/name mapping', () => {
         const transaction = buildImportTransactionFromPreviewRecord({
             id: 9,
+            row_version: 5,
             category_id: 'expenseSub',
             preview_type: '支出',
             preview_date: 'not-a-date',
@@ -275,6 +278,7 @@ describe('import preview transaction helper', () => {
     test('keeps illegal category and account raw text out of canonical ids', () => {
         const transaction = buildImportTransactionFromPreviewRecord({
             id: 10,
+            row_version: 5,
             category_id: '/',
             preview_type: '支出',
             preview_date: '2026-06-01T00:00:00Z',
@@ -303,6 +307,7 @@ describe('import preview transaction helper', () => {
     test('does not use payment-method placeholders as account or category identity fallbacks', () => {
         const transaction = buildImportTransactionFromPreviewRecord({
             id: 11,
+            row_version: 5,
             category_id: null,
             preview_type: '支出',
             preview_date: '2026-06-01T00:00:00Z',
@@ -329,6 +334,7 @@ describe('import preview transaction helper', () => {
     test('uses explicit investment destination amount instead of source fallback', () => {
         const transaction = buildImportTransactionFromPreviewRecord({
             id: 77,
+            row_version: 5,
             category_id: 'investmentParent',
             preview_type: '投资',
             preview_amount_cents: 1000,
@@ -352,6 +358,7 @@ describe('import preview transaction helper', () => {
     ])('does not truncate invalid preview cents from backend payloads: %s', (_name, value) => {
         const transaction = buildImportTransactionFromPreviewRecord({
             id: 78,
+            row_version: 5,
             category_id: 'investmentParent',
             preview_type: '投资',
             preview_amount_cents: value as number,

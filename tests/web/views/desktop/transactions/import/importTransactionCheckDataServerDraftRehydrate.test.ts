@@ -138,6 +138,7 @@ function createTransaction(id: number): ImportTransaction {
         }
     } as never, id);
     (transaction as ImportTransaction & { _previewId: number })._previewId = id;
+    (transaction as ImportTransaction & { _rowVersion: number })._rowVersion = 5;
     return transaction;
 }
 

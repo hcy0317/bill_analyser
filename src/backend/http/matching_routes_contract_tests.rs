@@ -57,6 +57,26 @@ async fn matching_response_helpers_pin_data_error_and_message_envelopes() {
 }
 
 #[tokio::test]
+async fn preview_matching_missing_row_version_returns_typed_precondition_before_db_open() {
+    let response = matching_candidate_action_response(
+        &matching_test_state(),
+        &trusted_headers(),
+        "preview:44:learning".to_string(),
+        "accept",
+        Some(Json(json!({
+            "expectedState": {"sessionId": "session-http"},
+            "responseMode": "preview-item"
+        }))),
+    );
+    let (status, body) = response_value(response).await;
+
+    assert_eq!(status, StatusCode::PRECONDITION_REQUIRED);
+    assert_eq!(body["success"], false);
+    assert_eq!(body["code"], "PREVIEW_ROW_VERSION_REQUIRED");
+    assert_eq!(body["data"]["required_token"], "expected_row_version");
+}
+
+#[tokio::test]
 async fn learning_row_version_conflict_returns_the_authoritative_preview_snapshot() {
     let latest = ImportPreviewRow {
         id: 44,
@@ -383,8 +403,8 @@ fn stale_preview_actions_keep_conflict_contract_without_resurrecting_removed_sig
         "state conflicts must return 409 before the direct LLM success response"
     );
     let expected_state_start = direct_llm_source
-        .find("let expected_state = if first_value(object, &[\"expectedState\", \"expected_state\"])")
-        .expect("direct LLM optional expected-state guard");
+        .find("let expected_state = match expected_state_from_payload(object)")
+        .expect("direct LLM required expected-state guard");
     let expected_state_end = direct_llm_source[expected_state_start..]
         .find("let user_correction =")
         .map(|offset| expected_state_start + offset)
@@ -392,8 +412,8 @@ fn stale_preview_actions_keep_conflict_contract_without_resurrecting_removed_sig
     let compact_expected_state = direct_llm_source[expected_state_start..expected_state_end]
         .split_whitespace()
         .collect::<String>();
-    assert!(compact_expected_state.contains("Some(expected_state)"));
-    assert!(compact_expected_state.contains("}else{None};"));
+    assert!(compact_expected_state.contains("Ok(expected_state)=>Some(expected_state)"));
+    assert!(compact_expected_state.contains("Err(response)=>returnroute_response(response)"));
 
     let learning_guard = learning_db_source
         .find("match preview_terminal_action(")

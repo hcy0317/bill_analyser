@@ -65,6 +65,7 @@ function makeDraft(): ImportPreviewTransactionDraft {
         selected: true
     }, 0) as ImportPreviewTransactionDraft;
     transaction._previewId = 7;
+    transaction._rowVersion = 5;
     return transaction;
 }
 
@@ -189,6 +190,7 @@ describe('import signal system RED contracts', () => {
     test('keeps normalized auxiliary row sections available without adding six-family filters', () => {
         const transaction = buildImportTransactionFromPreviewRecord({
             id: 45,
+            row_version: 5,
             preview_type: '支出',
             preview_amount_cents: 1234,
             preview_source_account_id: 101,
@@ -249,6 +251,7 @@ describe('import signal system RED contracts', () => {
     test('maps full and lightweight index fixtures to the same LLM family', () => {
         const transaction = buildImportTransactionFromPreviewRecord({
             id: 44,
+            row_version: 5,
             preview_type: '支出',
             preview_amount_cents: 1234,
             preview_source_account_id: 101,

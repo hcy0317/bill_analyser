@@ -2,13 +2,17 @@
   "schema_version": 1,
   "date": "2026-08-24",
   "cyanflow_slice": "C5 signal and C6 confirm receipt target rollout",
-  "status": "target_rollout_and_local_reader_green",
+  "status": "target_rollout_and_public_readers_delivered",
   "source": {
     "prerequisite_merge_sha": "71aa956f8f64f53d9413bb8ce9d7fff6af944656",
     "prerequisite_pr": 359,
     "prerequisite_pr_ci_run": 16437,
     "prerequisite_main_ci_run": 16438,
-    "reader_cutover_branch": "codex/c5-target-signal-read-cutover"
+    "reader_cutover_branch": "codex/c5-target-signal-read-cutover",
+    "reader_cutover_pr": 360,
+    "reader_cutover_pr_run": 16446,
+    "reader_cutover_merge_sha": "cee2adbaedcc25e55769a9168daa59e94474c77d",
+    "reader_cutover_main_run": 16449
   },
   "recovery": {
     "backup_format": "pg_dump custom",
@@ -121,9 +125,6 @@
       "status": "pass"
     }
   },
-  "open_gates": [
-    "deliver the C5 public typed reader through PR and exact-head CI",
-    "complete C4 missing-version enforcement",
-    "reconcile the final consensus ledger to 28 of 28"
-  ]
+  "open_gates": [],
+  "closeout_reference": "cyanflow-c4-version-precondition-enforcement-2026-08-24.json"
 }

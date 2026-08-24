@@ -29,6 +29,7 @@ function parseOptionalId(value: string | null | undefined): number | null {
 
 interface ImportCheckDecisionExpectedStateInput {
     sessionId: string;
+    rowVersion: number;
     reviewStatus: string;
     type: number;
     categoryId?: string | null;
@@ -37,39 +38,37 @@ interface ImportCheckDecisionExpectedStateInput {
     destinationAccountId?: string | null;
 }
 
-type ImportCheckLearningDecisionExpectedStateInput = ImportCheckDecisionExpectedStateInput & {
-    rowVersion?: number;
-};
+type ImportCheckLearningDecisionExpectedStateInput = ImportCheckDecisionExpectedStateInput;
 
-export function withImportPreviewRowVersion<T extends ImportPreviewExpectedState>(
+export function withImportPreviewRowVersion<T extends Omit<ImportPreviewExpectedState, 'rowVersion'>>(
     expectedState: T,
     rowVersion: unknown
-): T & { rowVersion?: number } {
+): T & { rowVersion: number } {
     if (Number.isInteger(rowVersion) && Number(rowVersion) > 0) {
         return { ...expectedState, rowVersion: Number(rowVersion) };
     }
-    return { ...expectedState };
+    throw new Error('Import preview row version is required.');
 }
 
 export function buildImportCheckDecisionExpectedState(
     input: ImportCheckDecisionExpectedStateInput
 ): ImportPreviewExpectedState {
-    return {
-        sessionId: input.sessionId,
-        reviewStatus: input.reviewStatus,
-        previewType: getImportCheckPreviewTypeText(input.type),
-        categoryId: parseOptionalId(input.categoryId),
-        recurringId: parseOptionalId(input.recurringTemplateId),
-        sourceAccountId: parseOptionalId(input.sourceAccountId),
-        destinationAccountId: parseOptionalId(input.destinationAccountId)
-    };
+    return withImportPreviewRowVersion(
+        {
+            sessionId: input.sessionId,
+            reviewStatus: input.reviewStatus,
+            previewType: getImportCheckPreviewTypeText(input.type),
+            categoryId: parseOptionalId(input.categoryId),
+            recurringId: parseOptionalId(input.recurringTemplateId),
+            sourceAccountId: parseOptionalId(input.sourceAccountId),
+            destinationAccountId: parseOptionalId(input.destinationAccountId)
+        },
+        input.rowVersion
+    );
 }
 
 export function buildImportCheckLearningDecisionExpectedState(
     input: ImportCheckLearningDecisionExpectedStateInput
 ): ImportPreviewExpectedState {
-    return withImportPreviewRowVersion(
-        buildImportCheckDecisionExpectedState(input),
-        input.rowVersion
-    );
+    return buildImportCheckDecisionExpectedState(input);
 }
