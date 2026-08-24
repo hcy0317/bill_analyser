@@ -1212,9 +1212,9 @@ fn ac002_truthy_corpus_parity_and_signal_projection() {
     );
 
     // --- Unicode whitespace trim (NBSP, ideographic space, etc.) ---
-    let nbsp_value = json!(format!("\u{00A0}true\u{00A0}"));
+    let nbsp_value = json!("\u{00A0}true\u{00A0}".to_string());
     assert!(import_preview_signal_value_is_truthy(&nbsp_value));
-    let ideographic = json!(format!("\u{3000}yes\u{3000}"));
+    let ideographic = json!("\u{3000}yes\u{3000}".to_string());
     assert!(import_preview_signal_value_is_truthy(&ideographic));
 
     // --- Status alias projection: first-nonempty priority ---
@@ -1348,7 +1348,7 @@ fn ac002_truthy_corpus_parity_and_signal_projection() {
         "preview_amount_cents": -1000,
         "preview_matching_feedback": {
             "reconciliation": {
-                "planned_operation": format!("\u{00A0}update_history\u{00A0}"),
+                "planned_operation": "\u{00A0}update_history\u{00A0}".to_string(),
                 "history_bill_id": 5001,
                 "history_bill_version": 2,
                 "group_key": "hist:5001"

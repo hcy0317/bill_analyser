@@ -1,4 +1,5 @@
 use super::*;
+use bill_analyser_core::{OutboundHostClass, OutboundHttpUrl, OutboundHttpUrlParseError};
 
 /// 刷新 provider auth profile，先校验 token endpoint，再发起受限 JSON refresh 请求。
 pub(super) async fn refresh_provider_auth_profile(
@@ -12,10 +13,8 @@ pub(super) async fn refresh_provider_auth_profile(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .ok_or(ProviderAuthRefreshError)?;
-    validate_provider_token_endpoint(token_endpoint, provider_base_url)
+    let mut url = validate_provider_token_endpoint(token_endpoint, provider_base_url)
         .map_err(|_| ProviderAuthRefreshError)?;
-
-    let mut url = Url::parse(token_endpoint).map_err(|_| ProviderAuthRefreshError)?;
     if let Some(params) = credential_config
         .get("refresh_params")
         .and_then(Value::as_object)
@@ -112,16 +111,16 @@ fn merge_refreshed_provider_auth_profile(current: &Value, response: &Value) -> O
 fn validate_provider_token_endpoint(
     token_endpoint: &str,
     provider_base_url: &str,
-) -> Result<(), String> {
+) -> Result<Url, String> {
     let parsed = parse_provider_runtime_url(token_endpoint)?;
-    if !parsed.username().is_empty() || parsed.password().is_some() {
-        return Err("token endpoint must not contain credentials".to_string());
+    if provider_url_host_is_never_allowed(&parsed) {
+        return Err("token endpoint is not allowed".to_string());
     }
-    if provider_url_is_same_origin(&parsed, provider_base_url)
+    if parsed.same_origin(provider_base_url)
         || provider_url_is_allowlisted(&parsed, "BILL_ANALYSER_LLM_TOKEN_URL_ALLOWLIST")
     {
-        if parsed.scheme() == "https" || provider_url_is_local_http(&parsed) {
-            return Ok(());
+        if parsed.is_https() || provider_url_is_local_http(&parsed) {
+            return Ok(parsed.into_url());
         }
         return Err("token endpoint must use https unless it is local".to_string());
     }
@@ -130,59 +129,44 @@ fn validate_provider_token_endpoint(
 
 /// 解析 provider runtime URL，拒绝空值、控制字符、反斜杠、非 http/https 或无 host 输入。
 #[tracing::instrument(level = "debug", skip_all)]
-fn parse_provider_runtime_url(value: &str) -> Result<Url, String> {
-    let trimmed = value.trim();
-    if trimmed.is_empty() || trimmed.contains('\\') || trimmed.chars().any(char::is_control) {
-        return Err("provider url is not allowed".to_string());
-    }
-    let parsed = Url::parse(trimmed).map_err(|_| "provider url must be valid".to_string())?;
-    if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
-        return Err("provider url must use http or https with a host".to_string());
-    }
-    Ok(parsed)
-}
-
-fn provider_url_is_same_origin(parsed: &Url, other_url: &str) -> bool {
-    Url::parse(other_url)
-        .map(|other| {
-            parsed.scheme() == other.scheme()
-                && parsed.host_str().map(str::to_ascii_lowercase)
-                    == other.host_str().map(str::to_ascii_lowercase)
-                && parsed.port_or_known_default() == other.port_or_known_default()
-        })
-        .unwrap_or(false)
+fn parse_provider_runtime_url(value: &str) -> Result<OutboundHttpUrl, String> {
+    OutboundHttpUrl::parse(value).map_err(|error| match error {
+        OutboundHttpUrlParseError::Empty | OutboundHttpUrlParseError::UnsafeText => {
+            "provider url is not allowed".to_string()
+        }
+        OutboundHttpUrlParseError::Invalid => "provider url must be valid".to_string(),
+        OutboundHttpUrlParseError::UnsupportedScheme
+        | OutboundHttpUrlParseError::MissingHost => {
+            "provider url must use http or https with a host".to_string()
+        }
+        OutboundHttpUrlParseError::Credentials => {
+            "token endpoint must not contain credentials".to_string()
+        }
+    })
 }
 
 /// 判断 token endpoint 是否位于环境变量 allowlist 中，支持完整 URL 或 origin。
-fn provider_url_is_allowlisted(parsed: &Url, env_key: &str) -> bool {
-    let origin = provider_url_origin(parsed);
-    let full = parsed.as_str().trim_end_matches('/').to_ascii_lowercase();
-    env::var(env_key)
-        .unwrap_or_default()
-        .split([',', ';'])
-        .map(str::trim)
-        .filter(|entry| !entry.is_empty())
-        .map(|entry| entry.trim_end_matches('/').to_ascii_lowercase())
-        .any(|entry| entry == full || entry == origin)
+fn provider_url_is_allowlisted(parsed: &OutboundHttpUrl, env_key: &str) -> bool {
+    parsed.matches_exact_or_origin_allowlist(&env::var(env_key).unwrap_or_default())
 }
 
 /// 仅允许本地 HTTP 例外，其他非 HTTPS token endpoint 必须被拒绝。
-fn provider_url_is_local_http(parsed: &Url) -> bool {
-    parsed.scheme() == "http"
-        && parsed.host_str().is_some_and(|host| {
-            host.eq_ignore_ascii_case("localhost")
-                || host.ends_with(".localhost")
-                || host == "127.0.0.1"
-                || host == "::1"
-        })
+fn provider_url_is_local_http(parsed: &OutboundHttpUrl) -> bool {
+    !parsed.is_https()
+        && matches!(
+            parsed.host_class(),
+            OutboundHostClass::Localhost | OutboundHostClass::Loopback
+        )
 }
 
-fn provider_url_origin(parsed: &Url) -> String {
-    let host = parsed.host_str().unwrap_or_default().to_ascii_lowercase();
-    match parsed.port() {
-        Some(port) => format!("{}://{}:{port}", parsed.scheme(), host),
-        None => format!("{}://{}", parsed.scheme(), host),
-    }
+fn provider_url_host_is_never_allowed(parsed: &OutboundHttpUrl) -> bool {
+    matches!(
+        parsed.host_class(),
+        OutboundHostClass::Metadata
+            | OutboundHostClass::Unspecified
+            | OutboundHostClass::LinkLocal
+            | OutboundHostClass::Multicast
+    )
 }
 
 fn header_value_text(value: &Value) -> Option<String> {
@@ -194,3 +178,7 @@ fn header_value_text(value: &Value) -> Option<String> {
     }
     .filter(|value| !value.is_empty())
 }
+
+#[cfg(test)]
+#[path = "provider_auth_refresh_tests.rs"]
+mod tests;

@@ -189,6 +189,27 @@ fn endpoint_allowlist_accepts_full_or_origin_https_entries() {
 }
 
 #[test]
+fn endpoint_allowlist_never_overrides_metadata_or_non_routable_hosts() {
+    let _guard = endpoint_allowlist(Some(
+        "https://metadata.google.internal;https://169.254.169.254;https://0.0.0.0;https://224.0.0.1",
+    ));
+
+    for endpoint in [
+        "https://metadata.google.internal/backups",
+        "https://169.254.169.254/backups",
+        "https://0.0.0.0/backups",
+        "https://224.0.0.1/backups",
+    ] {
+        let error = endpoint_error("webdav", endpoint);
+        assert_eq!(error.status_code, 400, "{endpoint}");
+        assert_eq!(
+            error.message, "backup sync endpoint host is not allowed",
+            "{endpoint}"
+        );
+    }
+}
+
+#[test]
 fn validate_sync_upload_config_keeps_provider_specific_required_fields() {
     let _guard = endpoint_allowlist(None);
     let s3 = sync_contract("s3", true);

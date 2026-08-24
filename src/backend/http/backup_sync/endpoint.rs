@@ -1,5 +1,6 @@
-use std::{env, net::IpAddr};
+use std::env;
 
+use bill_analyser_core::{OutboundHostClass, OutboundHttpUrl, OutboundHttpUrlParseError};
 use serde_json::Value;
 use url::Url;
 
@@ -9,50 +10,50 @@ use super::types::{CloudBackupUploadError, BACKUP_SYNC_ENDPOINT_ALLOWLIST_ENV};
 /// 解析并校验云备份 endpoint，集中执行 scheme、凭据、SSRF、allowlist 和 provider 域名规则。
 pub(super) fn endpoint_url(config: &Value, provider: &str) -> Result<Url, CloudBackupUploadError> {
     let endpoint = require_non_empty(config, "endpoint")?;
-    let url = Url::parse(endpoint)
-        .map_err(|_| CloudBackupUploadError::config("endpoint must be a valid URL"))?;
-    if !matches!(url.scheme(), "http" | "https") {
-        return Err(CloudBackupUploadError::config(
-            "endpoint scheme must be http or https",
-        ));
-    }
-    if !url.username().is_empty()
-        || url.password().is_some()
-        || url.query().is_some()
-        || url.fragment().is_some()
-    {
+    let endpoint = OutboundHttpUrl::parse(endpoint).map_err(|error| match error {
+        OutboundHttpUrlParseError::UnsupportedScheme => {
+            CloudBackupUploadError::config("endpoint scheme must be http or https")
+        }
+        OutboundHttpUrlParseError::Credentials => CloudBackupUploadError::config(
+            "endpoint must not include credentials, query, or fragment",
+        ),
+        OutboundHttpUrlParseError::Empty
+        | OutboundHttpUrlParseError::UnsafeText
+        | OutboundHttpUrlParseError::Invalid
+        | OutboundHttpUrlParseError::MissingHost => {
+            CloudBackupUploadError::config("endpoint must be a valid URL")
+        }
+    })?;
+    if endpoint.has_query_or_fragment() {
         return Err(CloudBackupUploadError::config(
             "endpoint must not include credentials, query, or fragment",
         ));
     }
-    let Some(host) = url.host_str() else {
-        return Err(CloudBackupUploadError::config("endpoint host is required"));
-    };
-    if backup_sync_endpoint_host_is_never_allowed(host) {
+    if backup_sync_endpoint_host_is_never_allowed(&endpoint) {
         return Err(CloudBackupUploadError::config(
             "backup sync endpoint host is not allowed",
         ));
     }
-    if backup_sync_endpoint_is_allowlisted(&url) {
-        if url.scheme() == "https" || backup_sync_endpoint_is_self_hosted_plain_http(&url) {
-            return Ok(url);
+    if backup_sync_endpoint_is_allowlisted(&endpoint) {
+        if endpoint.is_https() || backup_sync_endpoint_is_self_hosted_plain_http(&endpoint) {
+            return Ok(endpoint.into_url());
         }
         return Err(CloudBackupUploadError::config(
             "backup sync endpoint must use https unless allowlisting a local or private endpoint",
         ));
     }
-    if backup_sync_endpoint_host_is_restricted(host) {
+    if backup_sync_endpoint_host_is_restricted(&endpoint) {
         return Err(CloudBackupUploadError::config(
             "backup sync endpoint host is not allowed",
         ));
     }
-    if url.scheme() != "https" {
+    if !endpoint.is_https() {
         return Err(CloudBackupUploadError::config(
             "backup sync endpoint must use https",
         ));
     }
-    if backup_sync_endpoint_matches_provider(&url, provider) {
-        return Ok(url);
+    if backup_sync_endpoint_matches_provider(endpoint.as_url(), provider) {
+        return Ok(endpoint.into_url());
     }
     Err(CloudBackupUploadError::config(format!(
         "backup sync endpoint is not allowed; configure {BACKUP_SYNC_ENDPOINT_ALLOWLIST_ENV}"
@@ -148,80 +149,34 @@ fn backup_sync_endpoint_matches_provider(url: &Url, provider: &str) -> bool {
 }
 
 /// 检查 endpoint 是否命中显式 allowlist，支持 origin 或完整 URL 两种配置粒度。
-fn backup_sync_endpoint_is_allowlisted(url: &Url) -> bool {
-    let origin = backup_sync_endpoint_origin(url);
-    let full = url.as_str().trim_end_matches('/').to_ascii_lowercase();
-    env::var(BACKUP_SYNC_ENDPOINT_ALLOWLIST_ENV)
-        .unwrap_or_default()
-        .split([',', ';'])
-        .map(str::trim)
-        .filter(|entry| !entry.is_empty())
-        .map(|entry| entry.trim_end_matches('/').to_ascii_lowercase())
-        .any(|entry| entry == full || entry == origin)
-}
-
-fn backup_sync_endpoint_origin(url: &Url) -> String {
-    let host = url.host_str().unwrap_or_default().to_ascii_lowercase();
-    match url.port() {
-        Some(port) => format!("{}://{}:{port}", url.scheme(), host),
-        None => format!("{}://{}", url.scheme(), host),
-    }
+fn backup_sync_endpoint_is_allowlisted(endpoint: &OutboundHttpUrl) -> bool {
+    endpoint.matches_exact_or_origin_allowlist(
+        &env::var(BACKUP_SYNC_ENDPOINT_ALLOWLIST_ENV).unwrap_or_default(),
+    )
 }
 
 /// 判断 allowlist 命中的 HTTP endpoint 是否限定在本机或私有网段，避免公开明文上传。
-fn backup_sync_endpoint_is_self_hosted_plain_http(url: &Url) -> bool {
-    if url.scheme() != "http" {
-        return false;
-    }
-    let Some(host) = url.host_str() else {
-        return false;
-    };
-    if host.eq_ignore_ascii_case("localhost") || host.ends_with(".localhost") {
-        return true;
-    }
-    let Ok(address) = host.parse::<IpAddr>() else {
-        return false;
-    };
-    match address {
-        IpAddr::V4(address) => address.is_loopback() || address.is_private(),
-        IpAddr::V6(address) => address.is_loopback() || address.is_unique_local(),
-    }
+fn backup_sync_endpoint_is_self_hosted_plain_http(endpoint: &OutboundHttpUrl) -> bool {
+    !endpoint.is_https()
+        && matches!(
+            endpoint.host_class(),
+            OutboundHostClass::Localhost | OutboundHostClass::Loopback | OutboundHostClass::Private
+        )
 }
 
 /// 识别默认禁止访问的内网/本地地址，除非用户显式 allowlist 后再按 HTTP 例外收窄。
-fn backup_sync_endpoint_host_is_restricted(host: &str) -> bool {
-    if host.eq_ignore_ascii_case("localhost") || host.ends_with(".localhost") {
-        return true;
-    }
-    let Ok(address) = host.parse::<IpAddr>() else {
-        return false;
-    };
-    if address.is_unspecified() || address.is_loopback() || address.is_multicast() {
-        return true;
-    }
-    match address {
-        IpAddr::V4(address) => address.is_private() || address.is_link_local(),
-        IpAddr::V6(address) => address.is_unique_local() || address.is_unicast_link_local(),
-    }
+fn backup_sync_endpoint_host_is_restricted(endpoint: &OutboundHttpUrl) -> bool {
+    !matches!(endpoint.host_class(), OutboundHostClass::Public)
 }
 
 /// 识别即使 allowlist 也不允许访问的云元数据和 link-local 地址，防止 SSRF 打到敏感元数据服务。
-fn backup_sync_endpoint_host_is_never_allowed(host: &str) -> bool {
-    if host.eq_ignore_ascii_case("metadata.google.internal") {
-        return true;
-    }
-    let Ok(address) = host.parse::<IpAddr>() else {
-        return false;
-    };
+fn backup_sync_endpoint_host_is_never_allowed(endpoint: &OutboundHttpUrl) -> bool {
     matches!(
-        address,
-        IpAddr::V4(address)
-            if address.octets() == [169, 254, 169, 254]
-                || address.octets() == [100, 100, 100, 200]
-                || address.is_link_local()
-    ) || matches!(
-        address,
-        IpAddr::V6(address) if address.is_unicast_link_local()
+        endpoint.host_class(),
+        OutboundHostClass::Metadata
+            | OutboundHostClass::Unspecified
+            | OutboundHostClass::LinkLocal
+            | OutboundHostClass::Multicast
     )
 }
 

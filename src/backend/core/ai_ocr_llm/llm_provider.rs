@@ -3,11 +3,11 @@
 // 不变式：金额单位、用户可见类型和API payload 在进入或离开本层时必须显式转换。
 
 use serde_json::Value;
-use std::{env, net::IpAddr};
-use url::Url;
+use std::env;
 
 use super::types::{LlmProviderConfigContract, LLM_AVAILABLE_PROVIDERS};
 use super::value_helpers::first_non_empty_field;
+use crate::{OutboundHostClass, OutboundHttpUrl, OutboundHttpUrlParseError};
 
 const LLM_BASE_URL_ALLOWLIST_ENV: &str = "BILL_ANALYSER_LLM_BASE_URL_ALLOWLIST";
 
@@ -131,19 +131,22 @@ fn default_llm_base_url(provider: &str) -> Option<&'static str> {
 #[tracing::instrument(level = "debug", skip_all)]
 fn validate_llm_base_url(provider: &str, base_url: &str, explicit: bool) -> Result<(), String> {
     let parsed = parse_llm_base_url(base_url)?;
+    if llm_url_host_is_never_allowed(&parsed) {
+        return Err("LLM provider base_url host is not allowed".to_string());
+    }
     if !explicit {
         return Ok(());
     }
-    if provider == "ollama" && llm_url_origin_matches(&parsed, "http://localhost:11434") {
+    if provider == "ollama" && parsed.same_origin("http://localhost:11434") {
         return Ok(());
     }
     if let Some(default_url) = default_llm_base_url(provider) {
-        if provider != "openai_compatible" && llm_url_origin_matches(&parsed, default_url) {
+        if provider != "openai_compatible" && parsed.same_origin(default_url) {
             return Ok(());
         }
     }
     if llm_url_is_allowlisted(&parsed) {
-        if parsed.scheme() == "https" || llm_url_is_local_plain_http_endpoint(&parsed) {
+        if parsed.is_https() || llm_url_is_local_plain_http_endpoint(&parsed) {
             return Ok(());
         }
         return Err(
@@ -162,11 +165,14 @@ fn validate_llm_base_url(provider: &str, base_url: &str, explicit: bool) -> Resu
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn validate_llm_vision_base_url(base_url: &str) -> Result<(), String> {
     let parsed = parse_llm_base_url(base_url)?;
+    if llm_url_host_is_never_allowed(&parsed) {
+        return Err("LLM provider base_url host is not allowed".to_string());
+    }
     if llm_url_matches_openai_compatible_default(&parsed) {
         return Ok(());
     }
     if llm_url_is_allowlisted(&parsed) {
-        if parsed.scheme() == "https" || llm_url_is_local_plain_http_endpoint(&parsed) {
+        if parsed.is_https() || llm_url_is_local_plain_http_endpoint(&parsed) {
             return Ok(());
         }
         return Err(
@@ -183,77 +189,55 @@ pub fn validate_llm_vision_base_url(base_url: &str) -> Result<(), String> {
 
 /// 解析 provider URL 并拒绝控制字符、反斜杠、非 http/https、凭据和无 host 输入。
 #[tracing::instrument(level = "debug", skip_all)]
-fn parse_llm_base_url(base_url: &str) -> Result<Url, String> {
-    let trimmed = base_url.trim();
-    if trimmed.is_empty() {
-        return Err("LLM provider base_url is required".to_string());
-    }
-    if trimmed.contains('\\') || trimmed.chars().any(char::is_control) {
-        return Err("LLM provider base_url is not allowed".to_string());
-    }
-    let parsed =
-        Url::parse(trimmed).map_err(|_| "LLM provider base_url must be a valid URL".to_string())?;
-    if !matches!(parsed.scheme(), "http" | "https") {
-        return Err("LLM provider base_url must use http or https".to_string());
-    }
-    if !parsed.username().is_empty() || parsed.password().is_some() {
-        return Err("LLM provider base_url must not contain credentials".to_string());
-    }
-    let Some(host) = parsed.host_str() else {
-        return Err("LLM provider base_url must include a host".to_string());
-    };
-    if host.eq_ignore_ascii_case("metadata.google.internal") {
-        return Err("LLM provider base_url host is not allowed".to_string());
-    }
-    Ok(parsed)
+fn parse_llm_base_url(base_url: &str) -> Result<OutboundHttpUrl, String> {
+    OutboundHttpUrl::parse(base_url).map_err(|error| match error {
+        OutboundHttpUrlParseError::Empty => "LLM provider base_url is required".to_string(),
+        OutboundHttpUrlParseError::UnsafeText => "LLM provider base_url is not allowed".to_string(),
+        OutboundHttpUrlParseError::Invalid => {
+            "LLM provider base_url must be a valid URL".to_string()
+        }
+        OutboundHttpUrlParseError::UnsupportedScheme => {
+            "LLM provider base_url must use http or https".to_string()
+        }
+        OutboundHttpUrlParseError::Credentials => {
+            "LLM provider base_url must not contain credentials".to_string()
+        }
+        OutboundHttpUrlParseError::MissingHost => {
+            "LLM provider base_url must include a host".to_string()
+        }
+    })
 }
 
-fn llm_url_host_is_forbidden(parsed: &Url) -> bool {
-    let Some(host) = parsed.host_str() else {
-        return true;
-    };
-    if host.eq_ignore_ascii_case("localhost")
-        || host.ends_with(".localhost")
-        || host.eq_ignore_ascii_case("metadata.google.internal")
-    {
-        return true;
-    }
-    let Ok(address) = host.parse::<IpAddr>() else {
-        return false;
-    };
-    if address.is_unspecified() || address.is_loopback() || address.is_multicast() {
-        return true;
-    }
-    match address {
-        IpAddr::V4(address) => address.is_private() || address.is_link_local(),
-        IpAddr::V6(address) => address.is_unique_local() || address.is_unicast_link_local(),
-    }
+fn llm_url_host_is_never_allowed(parsed: &OutboundHttpUrl) -> bool {
+    matches!(
+        parsed.host_class(),
+        OutboundHostClass::Metadata
+            | OutboundHostClass::Unspecified
+            | OutboundHostClass::LinkLocal
+            | OutboundHostClass::Multicast
+    )
 }
 
-fn llm_url_origin_matches(parsed: &Url, allowed_url: &str) -> bool {
-    Url::parse(allowed_url)
-        .map(|allowed| {
-            parsed.scheme() == allowed.scheme()
-                && parsed.host_str().map(str::to_ascii_lowercase)
-                    == allowed.host_str().map(str::to_ascii_lowercase)
-                && parsed.port_or_known_default() == allowed.port_or_known_default()
-        })
-        .unwrap_or(false)
+fn llm_url_host_is_forbidden(parsed: &OutboundHttpUrl) -> bool {
+    matches!(
+        parsed.host_class(),
+        OutboundHostClass::Localhost
+            | OutboundHostClass::Metadata
+            | OutboundHostClass::Unspecified
+            | OutboundHostClass::Loopback
+            | OutboundHostClass::Private
+            | OutboundHostClass::LinkLocal
+            | OutboundHostClass::Multicast
+    )
 }
 
-fn llm_url_is_allowlisted(parsed: &Url) -> bool {
-    let origin = llm_url_origin(parsed);
-    let full = parsed.as_str().trim_end_matches('/').to_ascii_lowercase();
-    env::var(LLM_BASE_URL_ALLOWLIST_ENV)
-        .unwrap_or_default()
-        .split([',', ';'])
-        .map(str::trim)
-        .filter(|entry| !entry.is_empty())
-        .map(|entry| entry.trim_end_matches('/').to_ascii_lowercase())
-        .any(|entry| entry == full || entry == origin)
+fn llm_url_is_allowlisted(parsed: &OutboundHttpUrl) -> bool {
+    parsed.matches_exact_or_origin_allowlist(
+        &env::var(LLM_BASE_URL_ALLOWLIST_ENV).unwrap_or_default(),
+    )
 }
 
-fn llm_url_matches_openai_compatible_default(parsed: &Url) -> bool {
+fn llm_url_matches_openai_compatible_default(parsed: &OutboundHttpUrl) -> bool {
     [
         "openai",
         "deepseek",
@@ -266,30 +250,15 @@ fn llm_url_matches_openai_compatible_default(parsed: &Url) -> bool {
     ]
     .iter()
     .filter_map(|provider| default_llm_base_url(provider))
-    .any(|default_url| llm_url_origin_matches(parsed, default_url))
+    .any(|default_url| parsed.same_origin(default_url))
 }
 
-fn llm_url_is_local_plain_http_endpoint(parsed: &Url) -> bool {
-    if parsed.scheme() != "http" {
-        return false;
-    }
-    let Some(host) = parsed.host_str() else {
-        return false;
-    };
-    if host.eq_ignore_ascii_case("localhost") || host.ends_with(".localhost") {
-        return true;
-    }
-    host.parse::<IpAddr>()
-        .map(|address| address.is_loopback())
-        .unwrap_or(false)
-}
-
-fn llm_url_origin(parsed: &Url) -> String {
-    let host = parsed.host_str().unwrap_or_default().to_ascii_lowercase();
-    match parsed.port() {
-        Some(port) => format!("{}://{}:{port}", parsed.scheme(), host),
-        None => format!("{}://{}", parsed.scheme(), host),
-    }
+fn llm_url_is_local_plain_http_endpoint(parsed: &OutboundHttpUrl) -> bool {
+    !parsed.is_https()
+        && matches!(
+            parsed.host_class(),
+            OutboundHostClass::Localhost | OutboundHostClass::Loopback
+        )
 }
 
 /// 检查 Azure OpenAI base_url 是否为 https 且 host 位于 openai.azure.com 名下。

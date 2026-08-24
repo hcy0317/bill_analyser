@@ -83,6 +83,10 @@ name = "ops_contracts"
 path = "../../../tests/backend/core/ops_contracts.rs"
 
 [[test]]
+name = "outbound_http_url_contracts"
+path = "../../../tests/backend/core/outbound_http_url_contracts.rs"
+
+[[test]]
 name = "provider_auth_contracts"
 path = "../../../tests/backend/core/provider_auth_contracts.rs"
 

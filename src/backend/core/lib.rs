@@ -23,6 +23,7 @@ pub mod import_pipeline_learning;
 pub mod ledger;
 pub mod matching;
 pub mod ops;
+pub mod outbound_http_url;
 pub mod primitives;
 pub mod response;
 pub mod runtime;
@@ -170,6 +171,7 @@ pub use ops::{
     BACKUP_PREFIX, BACKUP_ZIP_SUFFIX, DEFAULT_BACKUP_SYNC_PREFIX, SUPPORTED_SYNC_PROVIDERS,
     VALID_REPORT_EXPORT_FORMATS,
 };
+pub use outbound_http_url::{OutboundHostClass, OutboundHttpUrl, OutboundHttpUrlParseError};
 pub use primitives::{
     normalize_bill_date_text, parse_bill_datetime, AuthContext, BillDateTime, CurrencyCode,
     EntityId, Money, Pagination, SortField, SortOrder, TransactionType, UnixTimestampSeconds,

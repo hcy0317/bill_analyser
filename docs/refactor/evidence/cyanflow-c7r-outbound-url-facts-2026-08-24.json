@@ -1,0 +1,149 @@
+{
+  "schema_version": "cyanflow-slice-evidence.v1",
+  "slice": "C7r",
+  "work_id": "bill-analyser-cyanflow-c7r-outbound-url-facts-20260824",
+  "base_commit": "b47e6d36d087bc35ceb9c68cf3a6a3095ad76b5a",
+  "branch": "codex/c7r-outbound-url-facts",
+  "objective": "Give LLM/OCR, provider token refresh, and cloud backup one typed owner for outbound HTTP URL parsing, allowlist matching, and SSRF-relevant host facts without centralizing their domain policies.",
+  "architecture": {
+    "owner": "bill_analyser_core::OutboundHttpUrl",
+    "production_adapters": [
+      "LLM and vision OCR provider base URL validation",
+      "OAuth-style provider token endpoint refresh validation",
+      "cloud backup WebDAV, OSS, S3, COS, and Azure endpoint validation"
+    ],
+    "shared_facts": [
+      "strict trimmed HTTP/HTTPS URL parsing with control-character, backslash, credential, and missing-host rejection",
+      "normalized same-origin and exact-or-origin allowlist matching",
+      "localhost, metadata, loopback, private, link-local, unspecified, multicast, and public host classification"
+    ],
+    "adapter_owned_policy": [
+      "provider default host lists and same-origin decisions",
+      "existing environment variable names and reads",
+      "which local HTTP scopes are allowed",
+      "backup query and fragment rejection",
+      "domain-specific public error messages and response mapping"
+    ],
+    "rejected_expansion": [
+      "a network client or request executor in core",
+      "a trait, service, port, policy DSL, UnitOfWork, cache, or second config source",
+      "a universal provider policy that would erase domain differences",
+      "additional matching action or BillCreateDraft abstraction without a second real adapter"
+    ]
+  },
+  "security_change": {
+    "never_allowlisted_host_classes": [
+      "metadata",
+      "link-local",
+      "unspecified",
+      "multicast"
+    ],
+    "retained_exceptions": [
+      "LLM/OCR and token refresh may use allowlisted localhost or loopback plain HTTP",
+      "backup sync may use allowlisted localhost, loopback, or private plain HTTP",
+      "private and loopback HTTPS still require the existing domain allowlist/default decision"
+    ]
+  },
+  "tdd": {
+    "red": [
+      {
+        "command": "cargo test -p bill-analyser-core --test outbound_http_url_contracts -- --nocapture",
+        "result": "compile failure because OutboundHttpUrl, OutboundHostClass, and OutboundHttpUrlParseError did not exist"
+      },
+      {
+        "command": "cargo test -p bill-analyser-http --test import_runtime_contract outbound_http_url_security_facts_have_one_core_owner -- --exact --nocapture",
+        "result": "failed because the three adapters still owned duplicate URL facts"
+      },
+      {
+        "command": "cargo test -p bill-analyser-http --lib token_endpoint_policy_preserves_same_origin_and_fails_closed_for_metadata -- --nocapture",
+        "result": "failed because an allowlisted metadata token endpoint returned Ok"
+      }
+    ],
+    "green": [
+      "3 outbound URL core contract tests passed",
+      "6 LLM and vision OCR contracts passed",
+      "2 token endpoint policy and pre-network rejection contracts passed",
+      "10 backup endpoint contracts passed",
+      "16 import runtime ownership and compatibility contracts passed"
+    ]
+  },
+  "verification": {
+    "focused_tests": "passed",
+    "cargo_fmt_check": "passed",
+    "cargo_clippy_workspace_all_targets_deny_warnings": "passed",
+    "cargo_test_workspace": "passed with BILL_ANALYSER_TEST_POSTGRES_URL pointed to the local isolated PostgreSQL test dependency; every emitted test batch reported zero failed and zero ignored",
+    "cargo_llvm_cov_workspace": "passed after the final Rust 1.98 compatibility follow-up with 56308 of 80942 executable lines covered, 69.57 percent, above the 35 percent full-runtime baseline",
+    "changed_line_coverage": "passed with 170 of 180 executable changed lines covered, 94.44 percent; every eligible business file matched LCOV, provider_auth_refresh.rs and the compatibility-only executable lines reached 100 percent",
+    "backend_doc_map": "passed",
+    "git_diff_check": "passed",
+    "ci_compatibility": {
+      "failed_runs": [
+        {
+          "run": 16413,
+          "job": "backend-ci 19698, Run Rust clippy",
+          "root_cause": "the runner advanced stable Rust from 1.97.1 to 1.98.0 and enabled three existing useless_format findings plus six existing chunks_exact_to_as_chunks findings outside the C7r URL implementation"
+        },
+        {
+          "run": 16414,
+          "job": "backend-ci 19702, Run Rust backend structure check",
+          "root_cause": "the first as_chunks repair caused rustfmt to grow xls_preflight.rs from the 719-line structure baseline to 727 lines"
+        },
+        {
+          "run": 16417,
+          "job": "backend-ci 19708, Setup Rust stable, attempt 1",
+          "root_cause": "static.rust-lang.org returned a TLS handshake EOF before any repository check ran"
+        },
+        {
+          "run": 16417,
+          "job": "backend-ci 19712, Prepare required actions, attempt 2",
+          "root_cause": "github.com returned EOF while the runner fetched actions/checkout before any repository check ran"
+        },
+        {
+          "run": 16417,
+          "job": "backend-ci 19716, Run Rust clippy, attempt 3",
+          "root_cause": "Rust 1.98 newly rejected the existing import-config authentication helper because its direct Axum Response error exceeded the result_large_err threshold"
+        }
+      ],
+      "repair": "replace the three literal-only format calls with to_string; retain intentional remainder-dropping chunks_exact semantics behind an unknown-lint-compatible module allowance; keep the equivalent reserved-sector predicate compact so the XLS file remains one line below its structure baseline; scope result_large_err to the import-config authentication helper because all five handlers directly return the existing Response",
+      "local_verification": "the Rust backend structure gate, affected parser tests, import pipeline contracts, five import-config unit tests, one import-config handler contract, workspace Clippy, and a fresh full-workspace coverage run passed; local Rust 1.98 installation was abandoned after a stalled TLS download, so exact 1.98 confirmation remains assigned to the next exact-head Gitea run"
+    },
+    "security_review": {
+      "result": "passed",
+      "findings": [],
+      "evidence": [
+        "credentials, control characters, backslashes, non-HTTP schemes, and missing hosts fail before adapter policy or network use",
+        "metadata, known metadata IP, link-local, unspecified, and multicast classes fail before allowlist acceptance in all three adapters",
+        "the core owner reads no environment variables, resolves no DNS, creates no client, logs no secret, and sends no request",
+        "provider token refresh reuses the validated Url and the negative async contract proves rejection before request dispatch"
+      ]
+    },
+    "dual_axis_review": {
+      "comparison_point": "b47e6d36d087bc35ceb9c68cf3a6a3095ad76b5a",
+      "reviewed_diff": "working tree on codex/c7r-outbound-url-facts, including the zero-behavior Rust 1.98 Clippy compatibility follow-up for XLS parsing and import-config authentication, and excluding the unrelated user-owned .claude/settings.local.json change",
+      "standards": {
+        "result": "passed",
+        "findings": [],
+        "evidence": "The shared value object is process-local and pure; environment reads, provider domains, HTTP exceptions, public errors, and request execution remain adapter-owned. The CI follow-up retains the existing fixed-width parser and direct Axum Response behavior behind narrow version-compatible lint scopes and changes only equivalent reserved-sector membership and owned test-string construction. No trait, service, port, policy DSL, cache, database, API, schema, money, or user-scope expansion was introduced."
+      },
+      "spec": {
+        "result": "passed",
+        "findings": [],
+        "evidence": "LLM and vision OCR, provider token refresh, and backup sync all consume OutboundHttpUrl; the three duplicate origin helpers are absent; never-allowlisted classes and retained localhost, loopback, and private policy differences are pinned by behavior and ownership contracts."
+      },
+      "test_gaps": [
+        "request-time DNS resolution and DNS rebinding are not exercised because the accepted slice owns lexical URL facts only",
+        "redirect destinations and proxy routing retain their existing client behavior and are not claimed as C7r coverage"
+      ]
+    },
+    "delivery_evidence": "Pending exact-head Gitea PR, Actions, squash merge, and source-branch deletion."
+  },
+  "residual_risks": [
+    "URL host classification is lexical and does not resolve DNS, so DNS rebinding protection remains the responsibility of request-time network policy.",
+    "Adapters intentionally retain distinct allowlist variables and HTTP exceptions; future adapters must not bypass the typed parse/classification boundary.",
+    "Explicit proxy behavior and redirect targets are outside this pure URL-facts slice; current provider clients retain their existing redirect policy."
+  ],
+  "environment_hygiene": {
+    "provider_strategy": "No live LLM, OCR, OAuth token, backup upload, or other paid external request is executed.",
+    "secrets": "Tests use synthetic URLs and never print or persist allowlist credentials, tokens, request bodies, or headers."
+  }
+}

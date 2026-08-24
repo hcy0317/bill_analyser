@@ -1,12 +1,12 @@
-// Minimal, read-only MS-CFB/BIFF preflight. It runs before calamine so hostile
-// worksheet dimensions cannot trigger calamine's dense Range allocation first.
+#![allow(unknown_lints)]
+#![allow(clippy::chunks_exact_to_as_chunks)] // Incomplete CFB tails are intentionally ignored.
 
-use std::collections::HashSet;
-
+// Minimal, read-only MS-CFB/BIFF preflight runs before calamine so hostile worksheet dimensions cannot trigger calamine's dense Range allocation first.
 use super::{
     SpreadsheetValidationError, MAX_SPREADSHEET_ARCHIVE_ENTRIES, MAX_SPREADSHEET_CELLS,
     MAX_SPREADSHEET_COLUMNS, MAX_SPREADSHEET_INPUT_BYTES, MAX_SPREADSHEET_ROWS,
 };
+use std::collections::HashSet;
 
 const END_OF_CHAIN: u32 = 0xffff_fffe;
 const FREE_SECTOR: u32 = 0xffff_ffff;
@@ -489,10 +489,7 @@ fn validate_shape(rows: usize, columns: usize) -> Result<(), SpreadsheetValidati
 }
 
 fn valid_regular_sector(value: u32) -> bool {
-    !matches!(
-        value,
-        FREE_SECTOR | END_OF_CHAIN | FAT_SECTOR | DIFAT_SECTOR
-    )
+    ![FREE_SECTOR, END_OF_CHAIN, FAT_SECTOR, DIFAT_SECTOR].contains(&value)
 }
 
 fn push_fat_sector(

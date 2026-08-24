@@ -633,6 +633,45 @@ fn ocr_llm_vision_runtime_validates_url_and_caps_payload_before_network_post() {
 }
 
 #[test]
+fn outbound_http_url_security_facts_have_one_core_owner() {
+    let core = source("src/backend/core/outbound_http_url.rs");
+    assert!(core.contains("struct OutboundHttpUrl"));
+    assert!(core.contains("enum OutboundHostClass"));
+
+    for adapter_path in [
+        "src/backend/core/ai_ocr_llm/llm_provider.rs",
+        "src/backend/http/import_routes/multipart_and_ocr/provider_auth_refresh.rs",
+        "src/backend/http/backup_sync/endpoint.rs",
+    ] {
+        let adapter = source(adapter_path);
+        assert!(
+            adapter.contains("OutboundHttpUrl"),
+            "{adapter_path} must consume the shared outbound URL facts"
+        );
+    }
+
+    for (adapter_path, forbidden_definition) in [
+        (
+            "src/backend/core/ai_ocr_llm/llm_provider.rs",
+            "fn llm_url_origin(",
+        ),
+        (
+            "src/backend/http/import_routes/multipart_and_ocr/provider_auth_refresh.rs",
+            "fn provider_url_origin(",
+        ),
+        (
+            "src/backend/http/backup_sync/endpoint.rs",
+            "fn backup_sync_endpoint_origin(",
+        ),
+    ] {
+        assert!(
+            !source(adapter_path).contains(forbidden_definition),
+            "{adapter_path} must not retain duplicate origin normalization"
+        );
+    }
+}
+
+#[test]
 fn ocr_provider_adapters_use_one_typed_failure_boundary() {
     let provider_runtime =
         source("src/backend/http/import_routes/multipart_and_ocr/provider_runtime.rs");

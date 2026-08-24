@@ -112,6 +112,22 @@ fn llm_vision_base_url_reuses_llm_ssrf_allowlist_contract() {
         "http://127.0.0.1:11434",
     );
     assert!(validate_llm_vision_base_url("http://127.0.0.1:11434/v1").is_ok());
+
+    env::set_var(
+        "BILL_ANALYSER_LLM_BASE_URL_ALLOWLIST",
+        "https://metadata.google.internal;https://169.254.169.254;https://0.0.0.0;https://224.0.0.1",
+    );
+    for never_allowed in [
+        "https://metadata.google.internal/v1",
+        "https://169.254.169.254/v1",
+        "https://0.0.0.0/v1",
+        "https://224.0.0.1/v1",
+    ] {
+        assert!(
+            validate_llm_vision_base_url(never_allowed).is_err(),
+            "allowlist must not override non-routable or metadata host: {never_allowed}"
+        );
+    }
 }
 
 #[test]

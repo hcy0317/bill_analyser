@@ -200,6 +200,7 @@ pub async fn delete_import_config_handler(
     }
 }
 
+#[allow(clippy::result_large_err)] // Axum handlers return this response directly on auth failure.
 async fn authenticate(
     headers: &HeaderMap,
     state: &HttpAppState,
