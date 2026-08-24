@@ -15,6 +15,9 @@ Bill Analyser 是一个多来源账单导入、智能去重、自动分类、预
 - 当前 API 主链：`REST /api/...`
 - HTTP bind：Rust 与 `start_backend.ps1`、`一键启动.ps1`、`停止服务器.ps1` 共享 IP/`localhost` + 非零端口解析合同；wildcard 监听使用 loopback 做健康探测，停止脚本只定位配置端口的监听 PID。
 - 本地托管入口：`scripts/dev.ps1` 提供 `start/status/logs/stop/check`；后台启动复用 `一键启动.ps1`，以 manifest 记录 wrapper、监听 PID、路径和启动时间，停止时校验进程身份。`一键启动.bat` 是 PowerShell 7 双击启动入口，`一键结束.bat` 是双击托管停止入口；两者共享同一套日志与 manifest，停止默认保留 PostgreSQL 和 Weaviate 容器。
+- 容器部署入口：根目录 `compose.yml` 以同一 `bill_analyser` project 管理 PostgreSQL、Weaviate、Rust backend 和 Nginx frontend。backend 只在 Compose 网络内监听 `0.0.0.0:5000`；frontend 把 `127.0.0.1:18082` 作为唯一应用宿主入口并将 `/api/...` 反代到 backend；PostgreSQL/Weaviate 不向宿主发布端口。需要宿主开发端口时仍使用独立的 `docker-compose.postgres.yml`。现有 `bill_analyser_*` named volumes、仓库 `data/` 与 `backup/` 持久化边界保持不变。
+- 容器配置边界：`scripts/prepare_docker_runtime.ps1` 生成受保护且 Git 忽略的 `.runtime/docker/postgres.env` 与 `backend.env`；前者只含 PostgreSQL 的 DB/user/password，后者只含内部数据库 URL、JWT/操作密码等应用配置，避免跨容器暴露无关秘密。生成器优先复用现有身份与秘密；镜像、Compose 和文档不保存密钥。backend 镜像包含 Tesseract 中英文运行时，frontend 镜像只承载 Vite 构建产物和同源 API 代理。
+- 运维与访问入口：LocalOps 通过 project/working directory/config files 三元组收藏 exact Compose resource，启动调用 `up --detach`，停止调用 `stop`，不删除容器卷。Tailscale `svc:hcy-bill` 经 `tag:hcy-server` service-host 和回环身份网关转发到 frontend，公开给授权 tailnet 用户的地址为 `https://hcy-bill.long-antares.ts.net`。
 
 本地启动要求 PostgreSQL 与 Weaviate 同时可达。PostgreSQL 是唯一业务数据库；Weaviate 是导入 learning recall 与派生向量索引的必需服务。
 

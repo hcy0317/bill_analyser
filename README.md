@@ -150,6 +150,23 @@ $env:BILL_ANALYSER_WEAVIATE_ENDPOINT = "http://127.0.0.1:8088"
 
 `/api/health` 会显示 `database_backend`、`route_repository_backend`、`postgres_authority_status`、`postgres_configured`、`postgres_url_redacted`、`weaviate_required` 和 `weaviate_status`，其中 Postgres URL 只输出脱敏形式。`route_repository_backend=postgres_authority` 表示 HTTP 仓储边界已以 PostgreSQL 为权威。Weaviate 必须通过 `/v1/.well-known/ready` 返回 ready，健康状态才可能为 `ok`。
 
+### Docker 完整部署
+
+生产式本机部署由根目录 `compose.yml` 统一拥有 PostgreSQL、Weaviate、Rust backend 和静态 frontend。首次启动前生成 Git 忽略且仅当前用户/管理员可读的两个运行环境文件：`postgres.env` 只含数据库容器所需的三项身份，`backend.env` 只含应用配置与内部数据库 URL。生成器会优先复用现有 Postgres 容器身份与 `.env` 中的 JWT/操作密码，不在终端输出密钥：
+
+```powershell
+.\scripts\prepare_docker_runtime.ps1
+docker compose --project-name bill_analyser --file .\compose.yml up --detach --build
+```
+
+前端只发布到 `http://127.0.0.1:18082`，`/api/...` 由同一 Nginx 入口转发给容器内 Rust 服务；生产 Compose 不向宿主发布 PostgreSQL 或 Weaviate 端口。需要宿主开发端口时继续使用 `docker-compose.postgres.yml` 这一开发辅助入口。`data/`、`backup/` 与既有 `bill_analyser_*` named volumes 均保留，停止时使用 `docker compose ... stop`，不要使用 `down --volumes`。
+
+LocalOps 应收藏以下精确 Compose 身份，以一张卡片控制整套服务：project `bill_analyser`、working directory 为当前仓库绝对路径、config file 为根目录 `compose.yml`。Tailscale 入口由独立的 `svc:hcy-bill` 身份网关提供：`https://hcy-bill.long-antares.ts.net`。部署后的联合核验命令为：
+
+```powershell
+.\scripts\verify_docker_deployment.ps1
+```
+
 ### 手动启动
 
 ```powershell

@@ -1,0 +1,109 @@
+name: bill_analyser
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: bill-analyser-postgres
+    restart: unless-stopped
+    env_file:
+      - path: ./.runtime/docker/postgres.env
+        format: raw
+    volumes:
+      - bill_analyser_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  weaviate:
+    image: ${BILL_ANALYSER_WEAVIATE_IMAGE:-cr.weaviate.io/semitechnologies/weaviate:1.37.4}
+    container_name: bill-analyser-weaviate
+    restart: unless-stopped
+    command:
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+      - --scheme
+      - http
+    environment:
+      QUERY_DEFAULTS_LIMIT: ${BILL_ANALYSER_WEAVIATE_QUERY_LIMIT:-25}
+      AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: ${BILL_ANALYSER_WEAVIATE_ANONYMOUS_ACCESS:-true}
+      PERSISTENCE_DATA_PATH: /var/lib/weaviate
+      CLUSTER_HOSTNAME: node1
+    volumes:
+      - bill_analyser_weaviate_data:/var/lib/weaviate
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8080/v1/.well-known/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: backend-runtime
+    image: bill-analyser-backend:local
+    container_name: bill-analyser-backend
+    restart: unless-stopped
+    env_file:
+      - path: ./.runtime/docker/backend.env
+        format: raw
+    environment:
+      BILL_ANALYSER_HTTP_BIND: 0.0.0.0:5000
+      BILL_ANALYSER_DATABASE_BACKEND: postgres
+      BILL_ANALYSER_WEAVIATE_ENABLED: "true"
+      BILL_ANALYSER_WEAVIATE_ENDPOINT: http://weaviate:8080
+      BILL_ANALYSER_DATA_DIR: /app/data
+      BILL_ANALYSER_UPLOADS_DIR: /app/data/uploads
+      BILL_ANALYSER_BACKUP_DIR: /app/backup
+      BILL_ANALYSER_PUBLIC_BASE_URL: https://hcy-bill.long-antares.ts.net
+      BILL_ANALYSER_RUNTIME_PROFILE: production
+      RUST_LOG: ${BILL_ANALYSER_RUST_LOG:-info}
+      TZ: Asia/Shanghai
+    depends_on:
+      postgres:
+        condition: service_healthy
+      weaviate:
+        condition: service_healthy
+    volumes:
+      - ./data:/app/data
+      - ./backup:/app/backup
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "--show-error", "http://127.0.0.1:5000/api/health/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    security_opt:
+      - no-new-privileges:true
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: frontend-runtime
+    image: bill-analyser-frontend:local
+    container_name: bill-analyser-frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${BILL_ANALYSER_WEB_PORT:-18082}:8080"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  bill_analyser_postgres_data:
+  bill_analyser_weaviate_data:

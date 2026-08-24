@@ -491,6 +491,8 @@ tests/.runtime/
 .omx/
 .cyaness/evidence/
 coverage.json
+.runtime/
+backup/
 
 # Playwright browser E2E artifacts
 src/web/playwright-report/
