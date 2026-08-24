@@ -1,3 +1,31 @@
+# SQLx hashes the exact migration bytes. Preserve the line endings used when each
+# immutable migration was first deployed so Windows and Linux builds agree.
+src/backend/db/postgres/migrations/0001_initial_authoritative_schema.sql text eol=crlf
+src/backend/db/postgres/migrations/0002_transaction_templates.sql text eol=crlf
+src/backend/db/postgres/migrations/0003_budgets.sql text eol=crlf
+src/backend/db/postgres/migrations/0004_transaction_template_minor_units.sql text eol=crlf
+src/backend/db/postgres/migrations/0005_budget_history.sql text eol=lf
 src/backend/db/postgres/migrations/0006_recurring_suggestions.sql text eol=lf
+src/backend/db/postgres/migrations/0007_auth_sessions_two_factor.sql text eol=lf
+src/backend/db/postgres/migrations/0008_auth_external_links.sql text eol=lf
+src/backend/db/postgres/migrations/0009_backup_ops.sql text eol=lf
+src/backend/db/postgres/migrations/0010_llm_import_runtime.sql text eol=crlf
+src/backend/db/postgres/migrations/0011_import_session_key.sql text eol=crlf
+src/backend/db/postgres/migrations/0012_drop_account_rule_scope_columns.sql text eol=crlf
+src/backend/db/postgres/migrations/0013_account_initial_balance_cents_backfill.sql text eol=crlf
 src/backend/db/postgres/migrations/0014_recurring_suggestion_amount_cents_comment.sql text eol=lf
 src/backend/db/postgres/migrations/0015_import_preview_filter_indexes.sql text eol=lf
+src/backend/db/postgres/migrations/0016_import_staging_cleanup_fk_indexes.sql text eol=lf
+src/backend/db/postgres/migrations/0017_import_staging_cleanup_indexes_retained.sql text eol=lf
+src/backend/db/postgres/migrations/0018_import_decision_group_operations.sql text eol=lf
+src/backend/db/postgres/migrations/0019_import_preview_time_page_index.sql text eol=crlf
+src/backend/db/postgres/migrations/0020_import_preview_signal_flags.sql text eol=crlf
+src/backend/db/postgres/migrations/0021_token_session_authority_lookup.sql text eol=lf
+src/backend/db/postgres/migrations/0022_import_configs.sql text eol=lf
+src/backend/db/postgres/migrations/0023_llm_account_rule_candidates.sql text eol=lf
+src/backend/db/postgres/migrations/0024_import_preview_signal_status_fail_closed.sql text eol=crlf
+src/backend/db/postgres/migrations/0025_import_schema_invariants.sql text eol=lf
+src/backend/db/postgres/migrations/0026_import_signal_projection_columns.sql text eol=lf
+src/backend/db/postgres/migrations/0027_import_confirm_receipts.sql text eol=lf
+src/backend/db/postgres/migrations/0028_budget_period_type_constraint.sql text eol=lf
+src/backend/db/postgres/migrations/0029_import_parser_signal_evidence.sql text eol=lf

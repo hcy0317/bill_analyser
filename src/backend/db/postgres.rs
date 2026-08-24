@@ -54,7 +54,7 @@ mod tests {
     #[test]
     fn postgres_manifest_points_to_existing_initial_schema() {
         let manifest = postgres_migration_manifest();
-        assert_eq!(manifest.len(), 28);
+        assert_eq!(manifest.len(), 29);
         assert_eq!(manifest[0].version, 1);
         assert_eq!(manifest[0].file_name, POSTGRES_INITIAL_SCHEMA_FILE);
         for (index, descriptor) in manifest.iter().enumerate() {
@@ -88,6 +88,24 @@ mod tests {
                 .collect::<Vec<_>>(),
             "migration directory and manifest must contain the same ordered SQL files"
         );
+    }
+
+    #[test]
+    fn postgres_migration_files_preserve_deployed_line_endings() {
+        const CRLF_VERSIONS: &[i64] = &[1, 2, 3, 4, 10, 11, 12, 13, 19, 20, 24];
+
+        for descriptor in postgres_migration_manifest() {
+            let bytes = fs::read(postgres_migrations_dir().join(descriptor.file_name)).unwrap();
+            let expected_crlf = CRLF_VERSIONS.contains(&descriptor.version);
+            let has_crlf = bytes.windows(2).any(|pair| pair == b"\r\n");
+            let has_bare_cr = bytes
+                .iter()
+                .enumerate()
+                .any(|(index, byte)| *byte == b'\r' && bytes.get(index + 1) != Some(&b'\n'));
+
+            assert!(!has_bare_cr, "{} contains a bare CR", descriptor.file_name);
+            assert_eq!(has_crlf, expected_crlf, "{}", descriptor.file_name);
+        }
     }
 
     #[test]
@@ -326,6 +344,20 @@ mod tests {
         assert!(migration.contains("reconciliation_status = ANY(canonical_statuses)"));
         assert!(migration.contains("transfer_status = ANY(canonical_statuses)"));
         assert!(migration.contains("PARALLEL SAFE"));
+    }
+
+    #[test]
+    fn import_parser_signal_evidence_migration_requires_parser_identity() {
+        let migration = fs::read_to_string(
+            postgres_migrations_dir().join("0029_import_parser_signal_evidence.sql"),
+        )
+        .unwrap();
+
+        assert!(migration.contains("CREATE OR REPLACE FUNCTION import_preview_parser_evidence"));
+        assert!(migration.contains("parser_section->>'parser_id'"));
+        assert!(migration.contains("parser_section->'parser_tags'"));
+        assert!(migration.contains("parser_source := import_preview_parser_evidence(payload)"));
+        assert!(!migration.contains("feedback ? 'parser'"));
     }
 
     #[test]

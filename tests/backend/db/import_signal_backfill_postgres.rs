@@ -201,6 +201,52 @@ async fn signal_backfill_is_resumable_and_never_overwrites_online_projection(
 }
 
 #[tokio::test]
+async fn signal_backfill_ignores_parser_details_without_parser_identity(
+) -> Result<(), Box<dyn Error>> {
+    let isolated = strict_isolated_postgres_database("import_signal_parser_identity").await?;
+    let result = async {
+        let (user_id, session_id) = create_session(&isolated.pool, "parser-identity").await?;
+        let preview_id = insert_legacy_preview(
+            &isolated.pool,
+            user_id,
+            session_id,
+            "parser-detail-only",
+            json!({
+                "preview_parser_id": "",
+                "preview_parser_tags": [],
+                "preview_matching_feedback": {
+                    "parser": {
+                        "parser_id": "",
+                        "parser_tags": [],
+                        "counterparty": "legacy parser detail"
+                    }
+                }
+            }),
+        )
+        .await?;
+
+        let report =
+            backfill_import_preview_signal_projection_batch(&isolated.pool, 0, 10).await?;
+        assert_eq!(report.updated_rows, 1);
+        assert_eq!(report.mismatch_rows, 0);
+
+        let row = sqlx::query(
+            "SELECT signal_parser, import_preview_signal_flags(preview_payload)->>'parser' AS legacy_parser FROM import_preview_rows WHERE id=$1",
+        )
+        .bind(preview_id)
+        .fetch_one(&isolated.pool)
+        .await?;
+        assert!(!row.try_get::<bool, _>("signal_parser")?);
+        assert_eq!(row.try_get::<String, _>("legacy_parser")?, "false");
+
+        Ok::<(), Box<dyn Error>>(())
+    }
+    .await;
+    isolated.cleanup().await?;
+    result
+}
+
+#[tokio::test]
 async fn signal_backfill_rejects_unsafe_watermarks_limits_and_poison_rows(
 ) -> Result<(), Box<dyn Error>> {
     let isolated = strict_isolated_postgres_database("import_signal_backfill_guards").await?;

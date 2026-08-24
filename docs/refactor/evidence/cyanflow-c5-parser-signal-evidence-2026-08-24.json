@@ -1,0 +1,97 @@
+{
+  "schema_version": 1,
+  "date": "2026-08-24",
+  "cyanflow_slice": "C5 target rollout prerequisite: parser signal evidence parity",
+  "status": "rehearsal_green_target_untouched",
+  "source": {
+    "base_head": "6769f7c71cd6fec9a68d66c8ec752b57d1a8d5a4",
+    "branch": "codex/migration-eol-checksum-contract",
+    "target_database_written": false
+  },
+  "backup": {
+    "format": "pg_dump custom",
+    "bytes": 60223766,
+    "sha256": "971a9eb2e21f563474afcd9ac652fdf779142810cabeb7cb328b7b127cd860d5",
+    "restore_verified": true
+  },
+  "migration_checksum_contract": {
+    "failure": "Windows core.autocrlf changed migration 25 worktree bytes before compile",
+    "database_and_git_sha384": "340e09a58c1d97ec467e9bd0fd3932f6d3823e1c35f70185a793b4613feb0b2f0ee29af11bbe4398323cfc52cc8718c3",
+    "pre_fix_windows_worktree_sha384": "e3dfe05ac0ef836ec1de7ea30df01404f2af85d1b76e0bc244bd90f0f929a4d34cb0e285aa59951e184059c1a87aedd1",
+    "resolution": "freeze deployed per-migration line endings and test the byte contract"
+  },
+  "rehearsal": {
+    "source_migrations": 25,
+    "final_migrations": 29,
+    "preview_rows": 237910,
+    "initial_backfill": {
+      "batches": 238,
+      "scanned_rows": 237910,
+      "updated_rows": 237910,
+      "mismatch_rows": 136
+    },
+    "mismatch_pattern": {
+      "rows": 136,
+      "legacy_parser": true,
+      "typed_parser": false,
+      "other_signal_mismatches": 0,
+      "cause": "matching.parser detail object existed without a non-empty parser id or parser tag"
+    },
+    "forward_fix": {
+      "migration": 29,
+      "file": "src/backend/db/postgres/migrations/0029_import_parser_signal_evidence.sql",
+      "writes_business_rows": false,
+      "legacy_function_replaced": true,
+      "in_memory_compatibility_filter_aligned": true
+    },
+    "read_audit": {
+      "eligible_for_read_cutover": true,
+      "unmaterialized_rows": 0,
+      "row_mismatch_rows": 0,
+      "query_audit_sessions": 7,
+      "query_audit_cases": 49,
+      "query_mismatch_cases": 0,
+      "duration_ms": 66578
+    },
+    "performance_audit": {
+      "performance_gate_passed": true,
+      "query_mismatch_cases": 0,
+      "query_regression_cases": 0,
+      "write_rows": 13084,
+      "write_p95_regression_percent": -2.0292264446658184,
+      "transaction_rolled_back": true,
+      "duration_ms": 277598
+    }
+  },
+  "security_review": {
+    "json_type_checks": true,
+    "dynamic_sql": false,
+    "user_or_transaction_fields_logged": false,
+    "unknown_or_malformed_parser_evidence": "fail_closed"
+  },
+  "verification": {
+    "cargo_fmt": "pass",
+    "cargo_clippy_workspace_all_targets": "pass",
+    "db_lib_tests": "179 passed",
+    "signal_backfill_postgres_tests": "7 passed",
+    "workspace_coverage": {
+      "lines_found": 81010,
+      "lines_hit": 56374,
+      "percent": 69.5889,
+      "baseline_percent": 35,
+      "status": "pass"
+    },
+    "changed_line_coverage": {
+      "executable_lines": 45,
+      "covered_lines": 45,
+      "percent": 100,
+      "threshold": 90,
+      "status": "pass"
+    }
+  },
+  "open_gates": [
+    "merge this prerequisite before writing the target database",
+    "rerun C5 backfill, read audit, and performance audit on the target database",
+    "activate the public typed signal reader only after the target reports remain green"
+  ]
+}

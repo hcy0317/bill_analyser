@@ -282,7 +282,30 @@ fn preview_parser_signal_matches(row: &ImportPreviewRow) -> bool {
             .preview_parser_tags
             .iter()
             .any(|tag| !trim_import_preview_signal_text(tag).is_empty())
-        || preview_feedback_key_exists(&row.preview_matching_feedback, "parser")
+        || preview_parser_feedback_has_identity(&row.preview_matching_feedback)
+}
+
+fn preview_parser_feedback_has_identity(feedback: &Value) -> bool {
+    let Some(parser) = feedback.get("parser").and_then(Value::as_object) else {
+        return false;
+    };
+    ["id", "parser_id"].iter().any(|key| {
+        parser
+            .get(*key)
+            .and_then(Value::as_str)
+            .is_some_and(|value| !trim_import_preview_signal_text(value).is_empty())
+    }) || ["tags", "parser_tags"].iter().any(|key| {
+        parser
+            .get(*key)
+            .and_then(Value::as_array)
+            .is_some_and(|values| {
+                values.iter().any(|value| {
+                    value
+                        .as_str()
+                        .is_some_and(|value| !trim_import_preview_signal_text(value).is_empty())
+                })
+            })
+    })
 }
 
 fn preview_has_specific_visible_signal(row: &ImportPreviewRow) -> bool {
@@ -423,12 +446,6 @@ fn preview_dedup_type(row: &ImportPreviewRow) -> String {
         .unwrap_or_default()
         .trim_matches(|ch| IMPORT_PREVIEW_SIGNAL_TRIM_CHARS.contains(ch))
         .to_ascii_lowercase()
-}
-
-fn preview_feedback_key_exists(feedback: &Value, key: &str) -> bool {
-    feedback
-        .as_object()
-        .is_some_and(|object| object.contains_key(key))
 }
 
 fn preview_feedback_family_contains_status(feedback: &Value, family: &str, status: &str) -> bool {

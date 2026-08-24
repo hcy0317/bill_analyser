@@ -198,6 +198,8 @@ const LLM_ACCOUNT_RULE_CANDIDATE_TABLES: &[&str] = &["llm_candidates"];
 const LLM_ACCOUNT_RULE_CANDIDATE_INDEXES: &[&str] = &[];
 const IMPORT_PREVIEW_SIGNAL_STATUS_TABLES: &[&str] = &["import_preview_rows"];
 const IMPORT_PREVIEW_SIGNAL_STATUS_INDEXES: &[&str] = &[];
+const IMPORT_PARSER_SIGNAL_EVIDENCE_TABLES: &[&str] = &["import_preview_rows"];
+const IMPORT_PARSER_SIGNAL_EVIDENCE_INDEXES: &[&str] = &[];
 const IMPORT_SCHEMA_INVARIANT_TABLES: &[&str] = &[
     "import_sessions",
     "import_sources",
@@ -415,5 +417,12 @@ const POSTGRES_MIGRATION_MANIFEST: &[PostgresMigrationDescriptor] = &[
         description: "fail closed unknown budget period types at the PostgreSQL boundary",
         required_tables: BUDGET_TABLES,
         required_indexes: BUDGET_INDEXES,
+    },
+    PostgresMigrationDescriptor {
+        version: 29,
+        file_name: "0029_import_parser_signal_evidence.sql",
+        description: "require parser identity evidence before exposing the parser signal",
+        required_tables: IMPORT_PARSER_SIGNAL_EVIDENCE_TABLES,
+        required_indexes: IMPORT_PARSER_SIGNAL_EVIDENCE_INDEXES,
     },
 ];

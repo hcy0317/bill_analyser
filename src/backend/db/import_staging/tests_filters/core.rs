@@ -233,6 +233,37 @@ fn llm_filter_rejects_non_actionable_payloads_and_leaves_them_parser_visible() {
 }
 
 #[test]
+fn parser_filter_requires_parser_identity_evidence() {
+    assert!(preview_parser_feedback_has_identity(&json!({
+        "parser": {"parser_tags": ["wechat"]}
+    })));
+
+    let mut row = preview_row(250);
+    row.preview_parser_id.clear();
+    row.preview_parser_tags.clear();
+    row.preview_matching_feedback = json!({
+        "parser": {
+            "parser_id": "",
+            "parser_tags": [],
+            "counterparty": "legacy parser detail"
+        }
+    });
+
+    let parser_rows = apply_preview_filters(
+        vec![row],
+        &ImportPreviewQueryFilters {
+            signal: Some("parser".to_string()),
+            ..ImportPreviewQueryFilters::default()
+        },
+    );
+
+    assert!(
+        parser_rows.is_empty(),
+        "parser detail without parser id or tags must not create a parser signal"
+    );
+}
+
+#[test]
 fn preview_metadata_counts_always_contains_the_six_visible_families() {
     let parser = preview_row(301);
     let mut platform_duplicate = preview_row(302);
