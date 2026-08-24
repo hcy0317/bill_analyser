@@ -57,7 +57,11 @@ async fn quick_add_category_rule_handler(
             json!({"success": true, "message": "Rule added successfully"}),
         ),
         Ok(false) => bad_request("Failed to add rule"),
-        Err(error) => error_response(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
+        Err(error) => bill_internal_error_response(
+            BillInternalErrorKind::Database,
+            "quick_add_postgres_category_rule",
+            error,
+        ),
     }
 }
 
@@ -102,7 +106,11 @@ async fn refresh_bill_categories_handler(
                     },
                 }),
             ),
-            Err(error) => error_response(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
+            Err(error) => bill_internal_error_response(
+                BillInternalErrorKind::Database,
+                "refresh_category_for_bills_postgres",
+                error,
+            ),
         };
 }
 

@@ -45,7 +45,7 @@ async fn batch_create_bills_handler(
                 Ok(value) => value,
                 Err(error) => {
                     return batch_create_persist_error_response(
-                        error.to_string(),
+                        error,
                         0,
                         Vec::new(),
                         Vec::new(),
@@ -88,7 +88,7 @@ fn batch_create_prepare_error_response(
 }
 
 fn batch_create_persist_error_response(
-    error: impl ToString,
+    error: impl std::fmt::Display,
     failed_index: usize,
     created_items: Vec<Value>,
     created_ids: Vec<String>,
@@ -99,7 +99,15 @@ fn batch_create_persist_error_response(
         created_ids,
     ))
     .expect("batch create failure result should serialize");
-    error_result(StatusCode::INTERNAL_SERVER_ERROR, error, result)
+    error_result(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        bill_internal_error_public_message(
+            BillInternalErrorKind::Database,
+            "batch_create_postgres_bills",
+            error,
+        ),
+        result,
+    )
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -241,7 +249,11 @@ mod batch_response_tests {
         .await;
         assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
         assert_eq!(persist_error["success"], false);
-        assert_eq!(persist_error["error"], "db failed");
+        assert_eq!(
+            persist_error["error"],
+            "Rust bills route runtime DB error"
+        );
+        assert!(!persist_error.to_string().contains("db failed"));
         assert_eq!(persist_error["result"]["failedIndex"], 2);
         assert_eq!(persist_error["result"]["createdCount"], 1);
         assert_eq!(persist_error["result"]["ids"], json!(["1"]));

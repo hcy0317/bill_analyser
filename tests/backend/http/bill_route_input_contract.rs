@@ -150,4 +150,18 @@ fn bill_route_transport_response_owner_is_http_private() {
     );
     assert!(http.contains("fn success_result"));
     assert!(http.contains("fn error_response"));
+    assert!(
+        http.contains("BillInternalErrorKind"),
+        "bill HTTP must own a closed internal-failure projection"
+    );
+    for forbidden_echo in [
+        "picture_internal_error_response(error.to_string())",
+        "reconciliation_internal_error_response(error.to_string())",
+        "error_response(StatusCode::INTERNAL_SERVER_ERROR, error.to_string())",
+    ] {
+        assert!(
+            !http.contains(forbidden_echo),
+            "bill HTTP must not echo an internal Display value through {forbidden_echo}"
+        );
+    }
 }

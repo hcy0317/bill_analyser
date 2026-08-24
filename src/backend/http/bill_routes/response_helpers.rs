@@ -71,10 +71,61 @@ fn not_found(message: impl ToString) -> Response {
     error_response(StatusCode::NOT_FOUND, message)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BillInternalErrorKind {
+    Database,
+    Picture,
+    Reconciliation,
+}
+
+impl BillInternalErrorKind {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Database => "database",
+            Self::Picture => "picture",
+            Self::Reconciliation => "reconciliation",
+        }
+    }
+
+    fn public_message(self) -> &'static str {
+        match self {
+            Self::Database => "Rust bills route runtime DB error",
+            Self::Picture => "Rust bills picture runtime error",
+            Self::Reconciliation => "Rust bills reconciliation runtime error",
+        }
+    }
+}
+
+fn bill_internal_error_public_message(
+    kind: BillInternalErrorKind,
+    operation: &'static str,
+    error: impl std::fmt::Display,
+) -> &'static str {
+    tracing::error!(
+        domain = "bills",
+        operation,
+        failure_kind = kind.label(),
+        error = %error,
+        "bill route internal failure"
+    );
+    kind.public_message()
+}
+
+fn bill_internal_error_response(
+    kind: BillInternalErrorKind,
+    operation: &'static str,
+    error: impl std::fmt::Display,
+) -> Response {
+    error_response(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        bill_internal_error_public_message(kind, operation, error),
+    )
+}
+
 fn db_error_response() -> Response {
     error_response(
         StatusCode::INTERNAL_SERVER_ERROR,
-        "Rust bills route runtime DB error",
+        BillInternalErrorKind::Database.public_message(),
     )
 }
 
@@ -120,6 +171,30 @@ mod response_helper_tests {
             status_or_internal(0),
             StatusCode::INTERNAL_SERVER_ERROR
         );
+    }
+
+    #[test]
+    fn internal_error_kinds_have_closed_log_labels_and_public_messages() {
+        for (kind, label, public_message) in [
+            (
+                BillInternalErrorKind::Database,
+                "database",
+                "Rust bills route runtime DB error",
+            ),
+            (
+                BillInternalErrorKind::Picture,
+                "picture",
+                "Rust bills picture runtime error",
+            ),
+            (
+                BillInternalErrorKind::Reconciliation,
+                "reconciliation",
+                "Rust bills reconciliation runtime error",
+            ),
+        ] {
+            assert_eq!(kind.label(), label);
+            assert_eq!(kind.public_message(), public_message);
+        }
     }
 
     #[tokio::test]

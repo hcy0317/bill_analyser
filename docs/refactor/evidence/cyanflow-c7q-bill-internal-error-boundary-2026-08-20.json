@@ -1,0 +1,104 @@
+{
+  "schema_version": "cyanflow-slice-evidence.v1",
+  "slice": "C7q",
+  "work_id": "bill-analyser-cyanflow-c7q-bill-internal-error-boundary-20260820",
+  "base_commit": "f0a927e04098ae123cc28a7699012107e23196ee",
+  "branch": "codex/c7q-bill-internal-error-boundary",
+  "objective": "Stop Bill HTTP 500 responses from echoing database, file, multipart, serialization, and reconciliation Display details while preserving public validation and feature-local envelopes.",
+  "architecture": {
+    "owner": "crate-private src/backend/http/bill_routes BillInternalErrorKind and internal failure projection",
+    "production_paths": [
+      "transaction picture multipart, byte read, directory creation, file write, and file removal",
+      "reconciliation query serialization/internal errors and PostgreSQL statement reads",
+      "batch bill persistence",
+      "quick-add category rule and category refresh persistence"
+    ],
+    "closed_public_messages": {
+      "database": "Rust bills route runtime DB error",
+      "picture": "Rust bills picture runtime error",
+      "reconciliation": "Rust bills reconciliation runtime error"
+    },
+    "retained_contracts": [
+      "all existing REST paths and 400, 404, and 500 status decisions",
+      "picture success/error, batch failure result, and reconciliation compatibility envelope shapes",
+      "all public 400 validation messages and reconciliation parse order",
+      "PostgreSQL user scope, schema, queries, transactions, writers, and integer-cent amount semantics"
+    ],
+    "rejected_expansion": [
+      "one universal response envelope that would erase feature-local compatibility fields",
+      "a core or DB transport error carrier",
+      "a parallel typed BillCreateDraft while the existing PostgreSQL mutation already owns normalization",
+      "a trait, service, port, UnitOfWork, cache, transaction owner, or repository-wide error framework"
+    ]
+  },
+  "tdd": {
+    "red": {
+      "command": "cargo test -p bill-analyser-http --lib bill_routes::picture_helper_tests::picture_response_projection_preserves_compatibility_envelopes -- --exact --nocapture",
+      "result": "failed at compile time because the existing picture and reconciliation internal-error functions accepted only one echoable error string"
+    },
+    "green": [
+      {
+        "command": "cargo test -p bill-analyser-http --lib bill_routes -- --nocapture",
+        "executed": 18,
+        "failed": 0,
+        "ignored": 0
+      },
+      {
+        "command": "cargo test -p bill-analyser-http --test bill_route_input_contract -- --nocapture",
+        "executed": 3,
+        "failed": 0,
+        "ignored": 0
+      },
+      {
+        "command": "cargo test -p bill-analyser-http --lib bill_routes::response_helpers::tests::internal_error_kinds_have_closed_log_labels_and_public_messages -- --exact --nocapture",
+        "executed": 1,
+        "failed": 0,
+        "ignored": 0
+      }
+    ]
+  },
+  "verification": {
+    "cargo_fmt_check": "passed",
+    "focused_tests": "passed",
+    "cargo_clippy_workspace_all_targets_deny_warnings": "passed",
+    "cargo_test_workspace": {
+      "command": "cargo test --workspace -- --test-threads=1",
+      "result": "passed against per-test isolated PostgreSQL databases",
+      "failed": 0,
+      "ignored": 0
+    },
+    "cargo_llvm_cov_workspace": {
+      "command": "cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 35 -- --test-threads=1",
+      "result": "passed",
+      "executable_lines": 80980,
+      "covered_lines": 56209,
+      "line_coverage_percent": 69.41
+    },
+    "changed_line_coverage": {
+      "command": "node scripts/governance-normalizers.mjs changed-coverage --lcov workspace.lcov --diff .git/ai/c7q-rust-changed.diff --threshold 90 --require-matched-files --require-executable-lines --allow-no-business-files",
+      "result": "passed",
+      "executable_changed_lines": 83,
+      "covered_changed_lines": 81,
+      "coverage_percent": 97.59
+    },
+    "git_diff_check": "passed",
+    "public_error_echo_hits": 0,
+    "review": {
+      "base_ref": "f0a927e04098ae123cc28a7699012107e23196ee",
+      "standards": "passed: safe public 500 allowlist, server-only structured diagnostics, unchanged user scope/status/envelopes/cents, no trait/service/port or parallel carrier",
+      "spec": "passed: all four accepted production families use the closed projection, public 400 contracts and reconciliation parse order remain pinned",
+      "blocking_findings": 0
+    },
+    "money_review": "No amount field, conversion, storage, or API amount contract changed; existing integer-cent semantics remain untouched.",
+    "delivery_evidence": "Pending exact-head Gitea PR, Actions, squash merge, and source-branch deletion."
+  },
+  "residual_risks": [
+    "Other HTTP domains retain their own error policies and require independent evidence before any repository-wide consolidation.",
+    "Existing no-cause db_error_response call sites remain generic but do not record the discarded cause; observability widening is a separate slice.",
+    "BillCreateDraft remains a raw DB-boundary carrier because introducing a second typed draft would currently duplicate PostgresBillMutation rather than deepen a proven seam."
+  ],
+  "environment_hygiene": {
+    "provider_strategy": "No OCR provider, LLM, payment, or other paid external call is executed by this slice.",
+    "secrets": "Tests use synthetic error markers; no credential, request body, header, or transaction payload is added to logs or committed. Underlying error Display diagnostics remain server-only and can contain implementation detail, so log access remains an operational trust boundary."
+  }
+}

@@ -18,7 +18,10 @@ async fn upload_transaction_picture_handler(
         let next_field = match multipart.next_field().await {
             Ok(value) => value,
             Err(error) => {
-                return picture_internal_error_response(error.to_string());
+                return picture_internal_error_response(
+                    "read_transaction_picture_multipart",
+                    error,
+                );
             }
         };
         let Some(field) = next_field else {
@@ -43,7 +46,7 @@ async fn upload_transaction_picture_handler(
         let picture_bytes = match field.bytes().await {
             Ok(value) => value,
             Err(error) => {
-                return picture_internal_error_response(error.to_string());
+                return picture_internal_error_response("read_transaction_picture_bytes", error);
             }
         };
         let picture_uuid = match random_picture_uuid_hex() {
@@ -56,11 +59,11 @@ async fn upload_transaction_picture_handler(
         };
         let upload_root = FsPath::new(&state.config.uploads_dir);
         if let Err(error) = fs::create_dir_all(upload_root) {
-            return picture_internal_error_response(error.to_string());
+            return picture_internal_error_response("create_transaction_picture_directory", error);
         }
         let file_path = upload_root.join(&picture_id);
         if let Err(error) = fs::write(&file_path, picture_bytes.as_ref()) {
-            return picture_internal_error_response(error.to_string());
+            return picture_internal_error_response("write_transaction_picture", error);
         }
 
         let encoded = general_purpose::STANDARD.encode(picture_bytes.as_ref());
@@ -94,7 +97,7 @@ async fn remove_unused_transaction_picture_handler(
         transaction_picture_delete_path(FsPath::new(&state.config.uploads_dir), &picture_id);
     if file_path.is_file() {
         if let Err(error) = fs::remove_file(&file_path) {
-            return picture_internal_error_response(error.to_string());
+            return picture_internal_error_response("remove_transaction_picture", error);
         }
     }
 
@@ -113,8 +116,11 @@ fn picture_upload_success_response(
     success_result(StatusCode::OK, result)
 }
 
-fn picture_internal_error_response(error: impl ToString) -> Response {
-    error_response(StatusCode::INTERNAL_SERVER_ERROR, error)
+fn picture_internal_error_response(
+    operation: &'static str,
+    error: impl std::fmt::Display,
+) -> Response {
+    bill_internal_error_response(BillInternalErrorKind::Picture, operation, error)
 }
 
 fn random_picture_uuid_hex() -> RouteResult<String> {
@@ -194,7 +200,7 @@ mod picture_helper_tests {
             })
         );
 
-        let response = picture_internal_error_response("picture boom");
+        let response = picture_internal_error_response("picture_test", "picture boom");
         assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
         let body: Value = serde_json::from_slice(
             &to_bytes(response.into_body(), usize::MAX)
@@ -204,7 +210,8 @@ mod picture_helper_tests {
         .expect("picture error JSON");
         assert_eq!(
             body,
-            json!({"success": false, "error": "picture boom"})
+            json!({"success": false, "error": "Rust bills picture runtime error"})
         );
+        assert!(!body.to_string().contains("picture boom"));
     }
 }

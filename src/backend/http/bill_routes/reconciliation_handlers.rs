@@ -33,7 +33,10 @@ async fn reconciliation_statements_handler(
     match reconciliation_statement_payload_postgres(runtime.pool(), user_id, &params).await {
         Ok(Some(result)) => success_result(StatusCode::OK, result),
         Ok(None) => not_found("Account not found"),
-        Err(error) => reconciliation_internal_error_response(error.to_string()),
+        Err(error) => reconciliation_internal_error_response(
+            "reconciliation_statement_payload_postgres",
+            error,
+        ),
     }
 }
 
@@ -41,17 +44,24 @@ fn reconciliation_query_error_response(error: RuntimeError) -> Response {
     match error.code {
         ErrorCode::InvalidInput => bad_request(error.message),
         ErrorCode::SerializationError | ErrorCode::InternalError => {
-            reconciliation_internal_error_response(error.message)
+            reconciliation_internal_error_response("parse_reconciliation_query", error)
         }
     }
 }
 
-fn reconciliation_internal_error_response(error: impl ToString) -> Response {
+fn reconciliation_internal_error_response(
+    operation: &'static str,
+    error: impl std::fmt::Display,
+) -> Response {
     json_response(
         StatusCode::INTERNAL_SERVER_ERROR,
         json!({
             "success": false,
-            "error": error.to_string(),
+            "error": bill_internal_error_public_message(
+                BillInternalErrorKind::Reconciliation,
+                operation,
+                error,
+            ),
             "message": "Failed to retrieve reconciliation statements",
         }),
     )
@@ -244,10 +254,11 @@ mod reconciliation_response_tests {
             body,
             json!({
                 "success": false,
-                "error": "invalid reconciliation start_time",
+                "error": "Rust bills reconciliation runtime error",
                 "message": "Failed to retrieve reconciliation statements"
             })
         );
+        assert!(!body.to_string().contains("invalid reconciliation start_time"));
 
         let invalid_account =
             parse_reconciliation_query(Some("abc"), Some(0), Some(0), None, None, None)
@@ -263,16 +274,20 @@ mod reconciliation_response_tests {
 
     #[tokio::test]
     async fn reconciliation_internal_error_preserves_compatibility_message() {
-        let (status, body) =
-            response_value(reconciliation_internal_error_response("reconciliation boom")).await;
+        let (status, body) = response_value(reconciliation_internal_error_response(
+            "reconciliation_test",
+            "reconciliation boom",
+        ))
+        .await;
         assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
         assert_eq!(
             body,
             json!({
                 "success": false,
-                "error": "reconciliation boom",
+                "error": "Rust bills reconciliation runtime error",
                 "message": "Failed to retrieve reconciliation statements"
             })
         );
+        assert!(!body.to_string().contains("reconciliation boom"));
     }
 }
