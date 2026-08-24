@@ -108,9 +108,9 @@ jobs:
             ~/.cargo/bin/rustc
             ~/.cargo/bin/rustdoc
             ~/.cargo/bin/rustfmt
-          key: ${{ runner.os }}-rust-toolchain-slim-v2-bootstrap
+          key: ${{ runner.os }}-rust-toolchain-slim-v3-1.98.0-bootstrap
           restore-keys: |
-            ${{ runner.os }}-rust-toolchain-slim-v2-
+            ${{ runner.os }}-rust-toolchain-slim-v3-1.98.0-
 
       - name: Activate cached Rust tools
         run: |
@@ -123,9 +123,9 @@ jobs:
             cargo --version
           fi
 
-      - name: Setup Rust stable
+      - name: Setup Rust 1.98.0
         id: rust-toolchain
-        uses: https://github.com/dtolnay/rust-toolchain@stable
+        uses: https://github.com/dtolnay/rust-toolchain@1.98.0
         with:
           components: rustfmt,clippy,llvm-tools-preview
 
@@ -139,9 +139,9 @@ jobs:
             ~/.cargo/bin/cargo-llvm-cov
             ~/.cargo/.crates.toml
             ~/.cargo/.crates2.json
-          key: ${{ runner.os }}-cargo-slim-v1-stable-${{ hashFiles('Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-slim-v2-rust-1.98.0-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-slim-v1-stable-
+            ${{ runner.os }}-cargo-slim-v2-rust-1.98.0-
 
       - name: Check Cargo metadata
         run: cargo metadata --locked --format-version 1 >/tmp/bill-analyser-cargo-metadata.json
@@ -224,7 +224,7 @@ jobs:
 
       - name: Resolve Rust toolchain cache key
         id: rust-toolchain-cache-key
-        run: echo "key=${{ runner.os }}-rust-toolchain-slim-v2-${{ steps.rust-toolchain.outputs.cachekey }}" >> "$GITHUB_OUTPUT"
+        run: echo "key=${{ runner.os }}-rust-toolchain-slim-v3-1.98.0-${{ steps.rust-toolchain.outputs.cachekey }}" >> "$GITHUB_OUTPUT"
 
       - name: Save Rust toolchain cache
         if: steps.backend-cache-trim.outputs.rust_toolchain_cache_save == 'true' && steps.rust-toolchain-cache.outputs.cache-matched-key != steps.rust-toolchain-cache-key.outputs.key
@@ -416,9 +416,9 @@ jobs:
             ~/.cargo/bin/rustc
             ~/.cargo/bin/rustdoc
             ~/.cargo/bin/rustfmt
-          key: ${{ runner.os }}-rust-toolchain-slim-v2-bootstrap
+          key: ${{ runner.os }}-rust-toolchain-slim-v3-1.98.0-bootstrap
           restore-keys: |
-            ${{ runner.os }}-rust-toolchain-slim-v2-
+            ${{ runner.os }}-rust-toolchain-slim-v3-1.98.0-
 
       - name: Activate cached E2E Rust tools
         run: |
@@ -431,8 +431,8 @@ jobs:
             cargo --version
           fi
 
-      - name: Setup E2E Rust stable
-        uses: https://github.com/dtolnay/rust-toolchain@stable
+      - name: Setup E2E Rust 1.98.0
+        uses: https://github.com/dtolnay/rust-toolchain@1.98.0
 
       - name: Restore E2E Cargo cache
         id: e2e-cargo-cache
@@ -442,9 +442,9 @@ jobs:
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             ~/.cargo/git/db
-          key: ${{ runner.os }}-cargo-slim-v1-stable-${{ hashFiles('Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-slim-v2-rust-1.98.0-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-slim-v1-stable-
+            ${{ runner.os }}-cargo-slim-v2-rust-1.98.0-
 
       - name: Restore E2E npm cache
         id: e2e-npm-cache

@@ -1,0 +1,97 @@
+{
+  "schema_version": "cyanflow-slice-evidence.v1",
+  "slice": "C7s",
+  "work_id": "bill-analyser-cyanflow-c7s-rust-toolchain-pin-20260824",
+  "base_commit": "a5e2d37832431b1cc42e9b414a4891f98f31ab6f",
+  "branch": "codex/c7s-rust-toolchain-pin",
+  "objective": "Make the Gitea backend and E2E Rust compiler contract reproducible after a floating stable upgrade broke an otherwise verified exact-head change.",
+  "decision": {
+    "cyanflow": "proceed / flow / tdd / affected_surface",
+    "selected": "pin both Rust CI jobs and their cache namespaces to Rust 1.98.0",
+    "deferred": [
+      "typed confirm receipt production read cutover, because target-database backfill and zero-drift audit evidence are not available",
+      "request-time DNS, proxy, and rebinding policy, because the existing reqwest clients do not yet prove one safe shared seam",
+      "a repository-wide rust-toolchain.toml, because the accepted debt and observed failure are limited to the active Gitea CI contract"
+    ]
+  },
+  "contract": {
+    "toolchain_action": "https://github.com/dtolnay/rust-toolchain@1.98.0",
+    "jobs": [
+      "backend-ci",
+      "e2e-ci"
+    ],
+    "rustup_cache_prefix": "${{ runner.os }}-rust-toolchain-slim-v3-1.98.0-",
+    "cargo_cache_prefix": "${{ runner.os }}-cargo-slim-v2-rust-1.98.0-",
+    "official_semantics": "The dtolnay/rust-toolchain README states that the requested @rev selects the Rust toolchain, including an explicit version such as @1.89.0; C7s applies the same supported form to 1.98.0.",
+    "official_reference": "https://github.com/dtolnay/rust-toolchain/blob/master/README.md"
+  },
+  "scope": {
+    "changed": [
+      ".gitea/workflows/ci.yml",
+      "scripts/check-gitea-workflow.mjs",
+      "docs/refactor/cyanflow-project-modular-architecture-consensus-2026-08-15.md",
+      "docs/refactor/evidence/cyanflow-c7s-rust-toolchain-pin-2026-08-24.json"
+    ],
+    "unchanged": [
+      "Rust and frontend business source",
+      "REST and API contracts",
+      "PostgreSQL schema, data, backfill, and runtime read-source configuration",
+      "import, signal, confirm, amount, user-scope, and provider-request behavior",
+      "cache path inventory and cleanup ordering"
+    ]
+  },
+  "tdd": {
+    "red": {
+      "command": "node scripts/check-gitea-workflow.mjs",
+      "result": "failed with: backend-ci must contain exactly one required step Setup Rust 1.98.0"
+    },
+    "green": [
+      "the workflow checker self-test passes with positive pinned fixtures",
+      "negative fixtures reject stable action drift in both Rust jobs",
+      "negative fixtures reject floating rustup or Cargo cache keys and a drifting final toolchain cachekey command",
+      "the active workflow passes the lockfile-pinned YAML parser and static contract"
+    ]
+  },
+  "verification": {
+    "rust_only_source_tree_self_test": "passed",
+    "rust_only_source_tree": "passed with 2100 tracked paths",
+    "gitea_workflow_checker_self_test": "passed",
+    "gitea_workflow_contract": "passed with js-yaml 4.1.1 resolved from the frontend lockfile",
+    "governance_normalizers": "passed",
+    "immutable_diff_resolver_self_test": "passed",
+    "backend_doc_map": "passed",
+    "local_ci_fail_closed_self_test": "passed",
+    "git_diff_check": "passed for the owned diff",
+    "full_rust_and_frontend_gates": "assigned to exact-head Gitea CI because this slice changes only workflow governance and documentation",
+    "dual_axis_review": {
+      "comparison_point": "a5e2d37832431b1cc42e9b414a4891f98f31ab6f",
+      "reviewed_diff": "C7s owned working-tree diff and the untracked evidence JSON, excluding the user-owned .claude/settings.local.json change",
+      "standards": {
+        "result": "passed",
+        "findings": [],
+        "evidence": "Cache semantic changes bump the relevant slim generations; path inventories and cleanup order are unchanged; action URLs remain absolute and Gitea-compatible; the locked YAML parser, workflow self-test, Rust-only source gate, governance normalizer, immutable diff resolver, backend doc map, and local wrapper fail-closed test pass. The explicit upstream 1.98.0 branch currently resolves to f8be11a05b1d4f3fcebe6410cc16743212b999b0."
+      },
+      "spec": {
+        "result": "passed",
+        "findings": [],
+        "evidence": "Both Rust jobs use the exact 1.98.0 action, every rustup and Cargo restore prefix encodes 1.98.0, the backend final cache key encodes the same version, old active stable patterns are absent, and negative fixtures reject action or cache drift. No business, database, API, production configuration, remote cache cleanup, or request-time network change was introduced."
+      },
+      "test_gaps": [
+        "The Gitea runner must still prove that the explicit action ref installs and executes Rust 1.98.0 in both exact-head jobs.",
+        "Network EOF behavior is deliberately not treated as solved by the compiler pin."
+      ]
+    },
+    "delivery_evidence": "pending exact-head PR CI, squash merge, main exact-head CI, and source-branch deletion"
+  },
+  "residual_risks": [
+    "Pinning Rust does not eliminate GitHub action checkout or rustup CDN TLS/network EOF failures.",
+    "Rust upgrades are now explicit maintenance slices and must update both action references and cache contracts.",
+    "Existing remote cache blobs are not deleted or claimed as reclaimed; the new namespaces only prevent future cross-version reuse.",
+    "Request-time DNS rebinding and proxy-resolution policy remain outside this CI-only slice."
+  ],
+  "environment_hygiene": {
+    "production_database": "not connected or modified",
+    "remote_cache_cleanup": "not attempted",
+    "user_owned_workspace_change": ".claude/settings.local.json remains unstaged and unmodified by C7s"
+  }
+}

@@ -51,7 +51,14 @@ const RUST_WORKSPACE_COVERAGE_COMMAND = 'cargo llvm-cov --workspace --lcov --out
 const RUST_ONLY_COMMAND = 'node scripts/check-rust-only-source-tree.mjs';
 const FRONTEND_COVERAGE_SCRIPT = 'cross-env CI=1 COVERAGE_GATE=1 TS_NODE_PROJECT="./tsconfig.jest.json" jest --maxWorkers=50% --coverage';
 const E2E_SUPERVISOR_COMMAND = 'npm --prefix src/web run e2e:ci:smoke';
-const E2E_RUST_TOOLCHAIN_CACHE_PATHS = [
+const RUST_TOOLCHAIN_VERSION = '1.98.0';
+const RUST_TOOLCHAIN_ACTION = `https://github.com/dtolnay/rust-toolchain@${RUST_TOOLCHAIN_VERSION}`;
+const BACKEND_RUST_SETUP_STEP = `Setup Rust ${RUST_TOOLCHAIN_VERSION}`;
+const E2E_RUST_SETUP_STEP = `Setup E2E Rust ${RUST_TOOLCHAIN_VERSION}`;
+const RUST_TOOLCHAIN_CACHE_PREFIX = '${{ runner.os }}-rust-toolchain-slim-v3-' + RUST_TOOLCHAIN_VERSION + '-';
+const CARGO_CACHE_PREFIX = '${{ runner.os }}-cargo-slim-v2-rust-' + RUST_TOOLCHAIN_VERSION + '-';
+const RUST_TOOLCHAIN_SAVE_KEY_COMMAND = 'echo "key=' + RUST_TOOLCHAIN_CACHE_PREFIX + '${{ steps.rust-toolchain.outputs.cachekey }}" >> "$GITHUB_OUTPUT"';
+const RUST_TOOLCHAIN_CACHE_PATHS = [
     '~/.rustup/toolchains',
     '~/.rustup/update-hashes',
     '~/.rustup/settings.toml',
@@ -63,6 +70,14 @@ const E2E_RUST_TOOLCHAIN_CACHE_PATHS = [
     '~/.cargo/bin/rustc',
     '~/.cargo/bin/rustdoc',
     '~/.cargo/bin/rustfmt',
+].join('\n');
+const BACKEND_CARGO_CACHE_PATHS = [
+    '~/.cargo/registry/index',
+    '~/.cargo/registry/cache',
+    '~/.cargo/git/db',
+    '~/.cargo/bin/cargo-llvm-cov',
+    '~/.cargo/.crates.toml',
+    '~/.cargo/.crates2.json',
 ].join('\n');
 const E2E_CARGO_CACHE_PATHS = [
     '~/.cargo/registry/index',
@@ -84,7 +99,7 @@ const E2E_SETUP_STEPS = [
     'Setup E2E Node.js 22',
     'Restore E2E Rust toolchain cache',
     'Activate cached E2E Rust tools',
-    'Setup E2E Rust stable',
+    E2E_RUST_SETUP_STEP,
     'Restore E2E Cargo cache',
     'Restore E2E npm cache',
     'Install locked E2E dependencies',
@@ -316,16 +331,17 @@ function validateCleanupOrder(job, jobId, gateName, cleanupName) {
     }
 }
 
-function validateRestoreCacheStep(step, jobId, {
+function validateCacheStep(step, jobId, {
+    action,
     id,
     paths,
     key,
     restoreKeys,
 }) {
-    if (step.uses !== 'https://github.com/actions/cache/restore@v4') {
-        throw new Error(`${jobId}/${step.name} must use actions/cache/restore@v4`);
+    if (step.uses !== action) {
+        throw new Error(`${jobId}/${step.name} must use ${action}`);
     }
-    if (step.id !== id) {
+    if (id !== null && step.id !== id) {
         throw new Error(`${jobId}/${step.name} id drift`);
     }
     if (normalizeCommand(step.with?.path) !== normalizeCommand(paths)) {
@@ -340,6 +356,13 @@ function validateRestoreCacheStep(step, jobId, {
     if (/(?:^|\n)(?:target|node_modules|dist|coverage|workspace\.lcov)(?:\n|$)/.test(normalizeCommand(step.with?.path))) {
         throw new Error(`${jobId}/${step.name} must not cache generated outputs`);
     }
+}
+
+function validateRestoreCacheStep(step, jobId, contract) {
+    validateCacheStep(step, jobId, {
+        action: 'https://github.com/actions/cache/restore@v4',
+        ...contract,
+    });
 }
 
 function validateRequiredE2e(workflow) {
@@ -407,22 +430,22 @@ function validateRequiredE2e(workflow) {
         || String(setupNode.with?.['node-version']) !== '22') {
         throw new Error('e2e-ci Node.js setup drift');
     }
-    const setupRust = requiredStep(job, 'e2e-ci', 'Setup E2E Rust stable');
-    if (setupRust.uses !== 'https://github.com/dtolnay/rust-toolchain@stable') {
+    const setupRust = requiredStep(job, 'e2e-ci', E2E_RUST_SETUP_STEP);
+    if (setupRust.uses !== RUST_TOOLCHAIN_ACTION) {
         throw new Error('e2e-ci Rust setup drift');
     }
     validateRestoreCacheStep(requiredStep(job, 'e2e-ci', 'Restore E2E Rust toolchain cache'), 'e2e-ci', {
         id: 'e2e-rust-toolchain-cache',
-        paths: E2E_RUST_TOOLCHAIN_CACHE_PATHS,
-        key: '${{ runner.os }}-rust-toolchain-slim-v2-bootstrap',
-        restoreKeys: '${{ runner.os }}-rust-toolchain-slim-v2-',
+        paths: RUST_TOOLCHAIN_CACHE_PATHS,
+        key: `${RUST_TOOLCHAIN_CACHE_PREFIX}bootstrap`,
+        restoreKeys: RUST_TOOLCHAIN_CACHE_PREFIX,
     });
     requiredStep(job, 'e2e-ci', 'Activate cached E2E Rust tools', E2E_ACTIVATE_RUST_TOOLS);
     validateRestoreCacheStep(requiredStep(job, 'e2e-ci', 'Restore E2E Cargo cache'), 'e2e-ci', {
         id: 'e2e-cargo-cache',
         paths: E2E_CARGO_CACHE_PATHS,
-        key: "${{ runner.os }}-cargo-slim-v1-stable-${{ hashFiles('Cargo.lock') }}",
-        restoreKeys: '${{ runner.os }}-cargo-slim-v1-stable-',
+        key: CARGO_CACHE_PREFIX + "${{ hashFiles('Cargo.lock') }}",
+        restoreKeys: CARGO_CACHE_PREFIX,
     });
     validateRestoreCacheStep(requiredStep(job, 'e2e-ci', 'Restore E2E npm cache'), 'e2e-ci', {
         id: 'e2e-npm-cache',
@@ -534,6 +557,26 @@ function validateWorkflow(workflow) {
     }
 
     requiredStep(backend, 'backend-ci', 'Resolve immutable CI diff refs', RESOLVER_COMMAND);
+    const setupRust = requiredStep(backend, 'backend-ci', BACKEND_RUST_SETUP_STEP);
+    if (setupRust.uses !== RUST_TOOLCHAIN_ACTION
+        || setupRust.id !== 'rust-toolchain'
+        || normalizeCommand(setupRust.with?.components) !== 'rustfmt,clippy,llvm-tools-preview') {
+        throw new Error('backend-ci Rust setup drift');
+    }
+    validateRestoreCacheStep(requiredStep(backend, 'backend-ci', 'Restore Rust toolchain cache'), 'backend-ci', {
+        id: 'rust-toolchain-cache',
+        paths: RUST_TOOLCHAIN_CACHE_PATHS,
+        key: `${RUST_TOOLCHAIN_CACHE_PREFIX}bootstrap`,
+        restoreKeys: RUST_TOOLCHAIN_CACHE_PREFIX,
+    });
+    validateCacheStep(requiredStep(backend, 'backend-ci', 'Restore Cargo cache'), 'backend-ci', {
+        action: 'https://github.com/actions/cache@v4',
+        id: null,
+        paths: BACKEND_CARGO_CACHE_PATHS,
+        key: CARGO_CACHE_PREFIX + "${{ hashFiles('Cargo.lock') }}",
+        restoreKeys: CARGO_CACHE_PREFIX,
+    });
+    requiredStep(backend, 'backend-ci', 'Resolve Rust toolchain cache key', RUST_TOOLCHAIN_SAVE_KEY_COMMAND);
     requiredStep(backend, 'backend-ci', 'Run Rust backend structure check', 'node scripts/check-rust-backend-structure.mjs');
     requiredStep(backend, 'backend-ci', 'Run assembled runtime route ownership contract', ROUTE_COMMAND);
     requiredStep(backend, 'backend-ci', 'Run Rust workspace tests with coverage', RUST_WORKSPACE_COVERAGE_COMMAND);
@@ -583,6 +626,31 @@ function workflowFixture() {
                 steps: [
                     checkout(),
                     { name: 'Resolve immutable CI diff refs', run: RESOLVER_COMMAND },
+                    {
+                        name: 'Restore Rust toolchain cache',
+                        id: 'rust-toolchain-cache',
+                        uses: 'https://github.com/actions/cache/restore@v4',
+                        with: {
+                            path: RUST_TOOLCHAIN_CACHE_PATHS,
+                            key: `${RUST_TOOLCHAIN_CACHE_PREFIX}bootstrap`,
+                            'restore-keys': RUST_TOOLCHAIN_CACHE_PREFIX,
+                        },
+                    },
+                    {
+                        name: BACKEND_RUST_SETUP_STEP,
+                        id: 'rust-toolchain',
+                        uses: RUST_TOOLCHAIN_ACTION,
+                        with: { components: 'rustfmt,clippy,llvm-tools-preview' },
+                    },
+                    {
+                        name: 'Restore Cargo cache',
+                        uses: 'https://github.com/actions/cache@v4',
+                        with: {
+                            path: BACKEND_CARGO_CACHE_PATHS,
+                            key: CARGO_CACHE_PREFIX + "${{ hashFiles('Cargo.lock') }}",
+                            'restore-keys': CARGO_CACHE_PREFIX,
+                        },
+                    },
                     { name: 'Run Rust backend structure check', run: 'node scripts/check-rust-backend-structure.mjs' },
                     { name: 'Run assembled runtime route ownership contract', run: ROUTE_COMMAND },
                     { name: 'Run Rust workspace tests with coverage', run: RUST_WORKSPACE_COVERAGE_COMMAND },
@@ -591,6 +659,7 @@ function workflowFixture() {
                         run: [READ_MERGE_BASE, READ_HEAD, RUST_COVERAGE_BLOCK].join('\n'),
                     },
                     { name: 'Trim backend caches before cache save', run: 'true' },
+                    { name: 'Resolve Rust toolchain cache key', run: RUST_TOOLCHAIN_SAVE_KEY_COMMAND },
                 ],
             },
             'frontend-ci': {
@@ -655,21 +724,21 @@ function workflowFixture() {
                         id: 'e2e-rust-toolchain-cache',
                         uses: 'https://github.com/actions/cache/restore@v4',
                         with: {
-                            path: E2E_RUST_TOOLCHAIN_CACHE_PATHS,
-                            key: '${{ runner.os }}-rust-toolchain-slim-v2-bootstrap',
-                            'restore-keys': '${{ runner.os }}-rust-toolchain-slim-v2-',
+                            path: RUST_TOOLCHAIN_CACHE_PATHS,
+                            key: `${RUST_TOOLCHAIN_CACHE_PREFIX}bootstrap`,
+                            'restore-keys': RUST_TOOLCHAIN_CACHE_PREFIX,
                         },
                     },
                     { name: 'Activate cached E2E Rust tools', run: E2E_ACTIVATE_RUST_TOOLS },
-                    { name: 'Setup E2E Rust stable', uses: 'https://github.com/dtolnay/rust-toolchain@stable' },
+                    { name: E2E_RUST_SETUP_STEP, uses: RUST_TOOLCHAIN_ACTION },
                     {
                         name: 'Restore E2E Cargo cache',
                         id: 'e2e-cargo-cache',
                         uses: 'https://github.com/actions/cache/restore@v4',
                         with: {
                             path: E2E_CARGO_CACHE_PATHS,
-                            key: "${{ runner.os }}-cargo-slim-v1-stable-${{ hashFiles('Cargo.lock') }}",
-                            'restore-keys': '${{ runner.os }}-cargo-slim-v1-stable-',
+                            key: CARGO_CACHE_PREFIX + "${{ hashFiles('Cargo.lock') }}",
+                            'restore-keys': CARGO_CACHE_PREFIX,
                         },
                     },
                     {
@@ -775,6 +844,18 @@ function selfTest(parser) {
         value.jobs['backend-ci'].steps.find(step => step.name === 'Run Rust backend structure check').run = 'node scripts/check-rust-backend-structure.mjs --print-baseline';
     }, /command drift/);
     expectWorkflowFailure(fixture, value => {
+        value.jobs['backend-ci'].steps.find(step => step.name === BACKEND_RUST_SETUP_STEP).uses = 'https://github.com/dtolnay/rust-toolchain@stable';
+    }, /Rust setup drift/);
+    expectWorkflowFailure(fixture, value => {
+        value.jobs['backend-ci'].steps.find(step => step.name === 'Restore Rust toolchain cache').with.key = '${{ runner.os }}-rust-toolchain-floating';
+    }, /cache key drift/);
+    expectWorkflowFailure(fixture, value => {
+        value.jobs['backend-ci'].steps.find(step => step.name === 'Restore Cargo cache').with['restore-keys'] = '${{ runner.os }}-cargo-floating-';
+    }, /restore key drift/);
+    expectWorkflowFailure(fixture, value => {
+        value.jobs['backend-ci'].steps.find(step => step.name === 'Resolve Rust toolchain cache key').run = 'echo floating';
+    }, /command drift/);
+    expectWorkflowFailure(fixture, value => {
         value.jobs['frontend-ci'].steps = value.jobs['frontend-ci'].steps.filter(step => step.name !== 'Run frontend structure check');
     }, /frontend structure check/);
     expectWorkflowFailure(fixture, value => {
@@ -852,6 +933,12 @@ function selfTest(parser) {
     }, /cache path drift|generated outputs/);
     expectWorkflowFailure(fixture, value => {
         value.jobs['e2e-ci'].steps.find(step => step.name === 'Restore E2E npm cache').with.key = '${{ runner.os }}-npm-floating';
+    }, /cache key drift/);
+    expectWorkflowFailure(fixture, value => {
+        value.jobs['e2e-ci'].steps.find(step => step.name === E2E_RUST_SETUP_STEP).uses = 'https://github.com/dtolnay/rust-toolchain@stable';
+    }, /Rust setup drift/);
+    expectWorkflowFailure(fixture, value => {
+        value.jobs['e2e-ci'].steps.find(step => step.name === 'Restore E2E Cargo cache').with.key = '${{ runner.os }}-cargo-floating';
     }, /cache key drift/);
     expectWorkflowFailure(fixture, value => {
         value.jobs['e2e-ci'].steps = value.jobs['e2e-ci'].steps.filter(step => step.name !== 'Restore E2E Rust toolchain cache');
