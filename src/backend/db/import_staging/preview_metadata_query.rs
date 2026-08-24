@@ -45,6 +45,7 @@ fn push_preview_materialized_signal_predicate(
     }
 }
 
+#[cfg(test)]
 fn build_preview_metadata_from_rows(
     total: usize,
     signal_count_rows: &[ImportPreviewRow],
@@ -82,6 +83,7 @@ async fn build_preview_metadata_for_query(
     session_db_id: i64,
     user_id: i64,
     filters: &ImportPreviewQueryFilters,
+    preview_ids: &[i64],
     signal_read_source: PreviewSignalReadSource,
 ) -> DbResult<ImportPreviewMetadata> {
     query_preview_metadata_aggregate(
@@ -89,6 +91,7 @@ async fn build_preview_metadata_for_query(
         session_db_id,
         user_id,
         filters,
+        preview_ids,
         signal_read_source,
     )
     .await
@@ -99,12 +102,14 @@ async fn query_preview_metadata_aggregate(
     session_db_id: i64,
     user_id: i64,
     filters: &ImportPreviewQueryFilters,
+    preview_ids: &[i64],
     signal_read_source: PreviewSignalReadSource,
 ) -> DbResult<ImportPreviewMetadata> {
     let mut query = build_preview_metadata_aggregate_query_with_signal_read_source(
         session_db_id,
         user_id,
         filters,
+        preview_ids,
         signal_read_source,
     );
     let row = query.build().fetch_one(&mut *connection).await?;
@@ -144,6 +149,7 @@ fn build_preview_metadata_aggregate_query(
         session_db_id,
         user_id,
         filters,
+        &[],
         PreviewSignalReadSource::LegacyPayload,
     )
 }
@@ -152,6 +158,7 @@ fn build_preview_metadata_aggregate_query_with_signal_read_source(
     session_db_id: i64,
     user_id: i64,
     filters: &ImportPreviewQueryFilters,
+    preview_ids: &[i64],
     signal_read_source: PreviewSignalReadSource,
 ) -> QueryBuilder<'static, Postgres> {
     let mut query = QueryBuilder::<Postgres>::new("WITH preview_scope AS MATERIALIZED (SELECT p.*, ");
@@ -168,6 +175,7 @@ fn build_preview_metadata_aggregate_query_with_signal_read_source(
     query.push_bind(session_db_id);
     query.push(" AND p.user_id = ");
     query.push_bind(user_id);
+    push_preview_id_scope(&mut query, preview_ids, "p");
     if signal_read_source == PreviewSignalReadSource::TypedV1 {
         query.push(" AND p.signal_projection_version = ");
         query.push_bind(1_i16);

@@ -1,3 +1,4 @@
+#[cfg(test)]
 fn apply_preview_filters(
     rows: Vec<ImportPreviewRow>,
     filters: &ImportPreviewQueryFilters,
@@ -122,6 +123,7 @@ fn preview_category_type_code(value: &str) -> Option<i64> {
     }
 }
 
+#[cfg(test)]
 fn datetime_filter_matches(
     min_datetime: Option<&str>,
     max_datetime: Option<&str>,
@@ -138,10 +140,12 @@ fn datetime_filter_matches(
             .is_none_or(|value| preview_date.as_str() <= value)
 }
 
+#[cfg(test)]
 fn selected_filter_matches(selected_only: bool, row: &ImportPreviewRow) -> bool {
     !selected_only || row.preview_selected
 }
 
+#[cfg(test)]
 fn category_filter_matches(filter: Option<&str>, row: &ImportPreviewRow) -> bool {
     let Some(filter) = filter.map(str::trim).filter(|value| !value.is_empty()) else {
         return true;
@@ -159,6 +163,7 @@ fn category_filter_matches(filter: Option<&str>, row: &ImportPreviewRow) -> bool
         .is_some_and(|category_id| category_id.to_string() == filter)
 }
 
+#[cfg(test)]
 fn account_filter_matches(filter: Option<&str>, row: &ImportPreviewRow) -> bool {
     let Some(filter) = filter.map(str::trim).filter(|value| !value.is_empty()) else {
         return true;
@@ -179,6 +184,7 @@ fn account_filter_matches(filter: Option<&str>, row: &ImportPreviewRow) -> bool 
         || destination.as_deref().is_some_and(|value| value == filter)
 }
 
+#[cfg(test)]
 fn text_filter_matches(filter: Option<&str>, value: &str) -> bool {
     let Some(filter) = filter.map(str::trim).filter(|value| !value.is_empty()) else {
         return true;
@@ -186,6 +192,7 @@ fn text_filter_matches(filter: Option<&str>, value: &str) -> bool {
     value.to_lowercase().contains(&filter.to_lowercase())
 }
 
+#[cfg(test)]
 fn tag_filter_matches(filter: Option<&str>, row: &ImportPreviewRow) -> bool {
     let Some(filter) = filter.map(str::trim).filter(|value| !value.is_empty()) else {
         return true;
@@ -198,6 +205,7 @@ fn tag_filter_matches(filter: Option<&str>, row: &ImportPreviewRow) -> bool {
         .any(|tag| tag.eq_ignore_ascii_case(filter) || text_filter_matches(Some(filter), tag))
 }
 
+#[cfg(test)]
 fn signal_filter_matches(filter: Option<&str>, row: &ImportPreviewRow) -> bool {
     let Some(filter) = filter.map(str::trim).filter(|value| !value.is_empty()) else {
         return true;
@@ -210,6 +218,7 @@ fn signal_filter_matches(filter: Option<&str>, row: &ImportPreviewRow) -> bool {
         && preview_feedback_family_contains_status(&row.preview_matching_feedback, family, status)
 }
 
+#[cfg(test)]
 fn annotation_filter_matches(filter: Option<&str>, row: &ImportPreviewRow) -> bool {
     let Some(filter) = filter.map(str::trim).filter(|value| !value.is_empty()) else {
         return true;
@@ -255,6 +264,7 @@ fn signal_filter_family_status(filter: &str) -> Option<(&str, &str)> {
     Some((family, status))
 }
 
+#[cfg(test)]
 fn preview_signal_family_matches(family: &str, row: &ImportPreviewRow) -> bool {
     match ImportPreviewSignalFamily::parse(family) {
         Some(ImportPreviewSignalFamily::Parser) => {
@@ -276,6 +286,7 @@ fn preview_signal_family_matches(family: &str, row: &ImportPreviewRow) -> bool {
     }
 }
 
+#[cfg(test)]
 fn preview_parser_signal_matches(row: &ImportPreviewRow) -> bool {
     !trim_import_preview_signal_text(&row.preview_parser_id).is_empty()
         || row
@@ -285,6 +296,7 @@ fn preview_parser_signal_matches(row: &ImportPreviewRow) -> bool {
         || preview_parser_feedback_has_identity(&row.preview_matching_feedback)
 }
 
+#[cfg(test)]
 fn preview_parser_feedback_has_identity(feedback: &Value) -> bool {
     let Some(parser) = feedback.get("parser").and_then(Value::as_object) else {
         return false;
@@ -308,6 +320,7 @@ fn preview_parser_feedback_has_identity(feedback: &Value) -> bool {
     })
 }
 
+#[cfg(test)]
 fn preview_has_specific_visible_signal(row: &ImportPreviewRow) -> bool {
     preview_platform_duplicate_signal_matches(row)
         || preview_transfer_signal_matches(row)
@@ -319,10 +332,12 @@ fn preview_has_specific_visible_signal(row: &ImportPreviewRow) -> bool {
         )
 }
 
+#[cfg(test)]
 fn preview_platform_duplicate_signal_matches(row: &ImportPreviewRow) -> bool {
     preview_dedup_type(row) == "platform_bank"
 }
 
+#[cfg(test)]
 fn preview_transfer_signal_matches(row: &ImportPreviewRow) -> bool {
     let Some(transfer) = row
         .preview_matching_feedback
@@ -369,6 +384,7 @@ fn preview_transfer_signal_matches(row: &ImportPreviewRow) -> bool {
         )
 }
 
+#[cfg(test)]
 fn preview_recommendation_signal_matches(row: &ImportPreviewRow) -> bool {
     import_preview_recommendation_feedback_family_is_meaningful(
         &row.preview_matching_feedback,
@@ -376,6 +392,7 @@ fn preview_recommendation_signal_matches(row: &ImportPreviewRow) -> bool {
     ) || preview_transfer_learning_signal_matches(row)
 }
 
+#[cfg(test)]
 fn preview_transfer_learning_signal_matches(row: &ImportPreviewRow) -> bool {
     let Some(transfer) = row
         .preview_matching_feedback
@@ -411,6 +428,7 @@ fn preview_transfer_learning_signal_matches(row: &ImportPreviewRow) -> bool {
         && !IMPORT_PREVIEW_SIGNAL_SUPPRESSED_STATUSES.contains(&status.as_str())
 }
 
+#[cfg(test)]
 fn preview_history_signal_matches(row: &ImportPreviewRow) -> bool {
     let reconciliation = row.preview_matching_feedback.get("reconciliation");
     if reconciliation
@@ -435,6 +453,7 @@ fn preview_history_signal_matches(row: &ImportPreviewRow) -> bool {
             .unwrap_or(false)
 }
 
+#[cfg(test)]
 fn preview_dedup_type(row: &ImportPreviewRow) -> String {
     let direct = trim_import_preview_signal_text(&row.dedup_type);
     if !direct.is_empty() {
@@ -448,6 +467,7 @@ fn preview_dedup_type(row: &ImportPreviewRow) -> String {
         .to_ascii_lowercase()
 }
 
+#[cfg(test)]
 fn preview_feedback_family_contains_status(feedback: &Value, family: &str, status: &str) -> bool {
     preview_feedback_key_for_signal_family(family).is_some_and(|key| {
         feedback.get(key).is_some_and(|value| {
@@ -475,6 +495,7 @@ fn is_visible_signal_family(family: &str) -> bool {
     is_import_preview_visible_signal_family(family)
 }
 
+#[cfg(test)]
 fn json_value_contains_text(value: &Value, needle: &str) -> bool {
     match value {
         Value::String(text) => text.to_ascii_lowercase().contains(needle),
@@ -487,60 +508,6 @@ fn json_value_contains_text(value: &Value, needle: &str) -> bool {
         Value::Number(number) => number.to_string().contains(needle),
         Value::Bool(value) => value.to_string().contains(needle),
         Value::Null => false,
-    }
-}
-
-fn sort_preview_rows(rows: &mut [ImportPreviewRow], sort_by: &str, sort_direction: &str) {
-    let descending = sort_direction.eq_ignore_ascii_case("desc");
-    rows.sort_by(|left, right| {
-        let order = match sort_by {
-            "amount_cents"
-            | "preview_amount_cents"
-            | "previewAmountCents"
-            | "sourceAmountCents" => left
-                .preview_amount_cents
-                .cmp(&right.preview_amount_cents)
-                .then(left.id.cmp(&right.id)),
-            "counterparty" => left
-                .preview_counterparty
-                .cmp(&right.preview_counterparty)
-                .then(left.id.cmp(&right.id)),
-            "type" => preview_type_sort_rank(&left.preview_type)
-                .cmp(&preview_type_sort_rank(&right.preview_type))
-                .then(left.preview_type.cmp(&right.preview_type))
-                .then(left.id.cmp(&right.id)),
-            "paymentMethod" => left
-                .preview_payment_method
-                .cmp(&right.preview_payment_method)
-                .then(left.id.cmp(&right.id)),
-            "comment" => left
-                .preview_description
-                .cmp(&right.preview_description)
-                .then(left.id.cmp(&right.id)),
-            "time" => left
-                .preview_date
-                .cmp(&right.preview_date)
-                .then(left.id.cmp(&right.id)),
-            _ => left
-                .preview_date
-                .cmp(&right.preview_date)
-                .then(left.id.cmp(&right.id)),
-        };
-        if descending {
-            order.reverse()
-        } else {
-            order
-        }
-    });
-}
-
-fn preview_type_sort_rank(value: &str) -> u8 {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "收入" | "income" | "2" => 0,
-        "支出" | "expense" | "3" => 1,
-        "转账" | "transfer" | "4" => 2,
-        "投资" | "investment" | "5" => 3,
-        _ => 4,
     }
 }
 
@@ -583,6 +550,7 @@ fn preview_has_identity_validation_issue(preview: &ImportPreviewRow) -> bool {
         .is_some_and(|issues| !issues.is_empty())
 }
 
+#[cfg(test)]
 fn preview_account_filter_invalid_matches(preview: &ImportPreviewRow) -> bool {
     preview_has_missing_source_account_issue(preview)
         || preview_has_missing_destination_account_issue(preview)
@@ -591,6 +559,7 @@ fn preview_account_filter_invalid_matches(preview: &ImportPreviewRow) -> bool {
         || preview_identity_issue_matches_field(preview, "destination_account_id")
 }
 
+#[cfg(test)]
 fn preview_identity_issue_matches_field(preview: &ImportPreviewRow, expected_field: &str) -> bool {
     preview
         .preview_matching_feedback

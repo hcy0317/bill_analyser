@@ -1,0 +1,129 @@
+{
+  "schema_version": 1,
+  "date": "2026-08-24",
+  "cyanflow_slice": "C5 signal and C6 confirm receipt target rollout",
+  "status": "target_rollout_and_local_reader_green",
+  "source": {
+    "prerequisite_merge_sha": "71aa956f8f64f53d9413bb8ce9d7fff6af944656",
+    "prerequisite_pr": 359,
+    "prerequisite_pr_ci_run": 16437,
+    "prerequisite_main_ci_run": 16438,
+    "reader_cutover_branch": "codex/c5-target-signal-read-cutover"
+  },
+  "recovery": {
+    "backup_format": "pg_dump custom",
+    "backup_bytes": 60223766,
+    "backup_sha256": "971a9eb2e21f563474afcd9ac652fdf779142810cabeb7cb328b7b127cd860d5",
+    "isolated_restore_verified": true,
+    "rollback": "stop the new binary, restore the custom dump if data rollback is required, and remove the typed_v1 receipt setting for config rollback"
+  },
+  "maintenance_window": {
+    "backend_listener_count": 0,
+    "frontend_listener_count": 0,
+    "database_connection_count": 0,
+    "sessions_updated_within_7_days": 0,
+    "active_request_drain_required": false
+  },
+  "target_database": {
+    "database": "bill_analyser",
+    "postgres_version": "16.14",
+    "migration_before": 25,
+    "migration_after": 29,
+    "preview_rows": 237910,
+    "confirmed_receipt_sessions": 9
+  },
+  "c5_signal": {
+    "backfill": {
+      "batches": 238,
+      "scanned_rows": 237910,
+      "updated_rows": 237910,
+      "mismatch_rows": 0,
+      "has_remaining_rows": false
+    },
+    "read_audit": {
+      "eligible_for_read_cutover": true,
+      "unmaterialized_rows": 0,
+      "row_mismatch_rows": 0,
+      "query_audit_sessions": 7,
+      "query_audit_cases": 49,
+      "query_mismatch_cases": 0,
+      "duration_ms": 55777
+    },
+    "performance_audit": {
+      "first_run": {
+        "performance_gate_passed": false,
+        "query_mismatch_cases": 0,
+        "query_regression_cases": 0,
+        "write_p95_regression_percent": 26.113814281059987,
+        "confounder": "target import_preview_rows autovacuum and autoanalyze overlapped the measurement window"
+      },
+      "post_vacuum_run": {
+        "performance_gate_passed": true,
+        "query_mismatch_cases": 0,
+        "query_regression_cases": 0,
+        "write_p95_regression_percent": -17.139433699309965,
+        "transaction_rolled_back": true,
+        "duration_ms": 308490
+      }
+    },
+    "public_reader": {
+      "source": "typed_v1",
+      "preview_ids": "same server-side SQL scope",
+      "unmaterialized_session": "fail_closed",
+      "legacy_fallback": false,
+      "legacy_function_role": "shadow_backfill_and_read_audit_oracle"
+    }
+  },
+  "c6_confirm_receipt": {
+    "backfill": {
+      "scanned_sessions": 9,
+      "inserted_receipts": 9,
+      "already_materialized_receipts": 0,
+      "mismatch_receipts": 0,
+      "has_remaining_sessions": false
+    },
+    "read_audit": {
+      "eligible_for_typed_read_cutover": true,
+      "target_sessions": 9,
+      "typed_receipts": 9,
+      "unmaterialized_target_receipts": 0,
+      "unexpected_typed_receipts": 0,
+      "mismatch_receipts": 0
+    },
+    "runtime_config": {
+      "key": "BILL_ANALYSER_IMPORT_CONFIRM_RECEIPT_READ_SOURCE",
+      "value": "typed_v1",
+      "file_tracked": false,
+      "backend_ready": true,
+      "frontend_ready": true,
+      "runtime_stopped_after_validation": true
+    }
+  },
+  "reader_cutover_verification": {
+    "cargo_fmt": "pass",
+    "cargo_clippy_workspace_all_targets": "pass",
+    "db_lib_tests": "179 passed",
+    "import_staging_postgres_tests": "36 passed",
+    "preview_metadata_postgres_tests": "6 passed",
+    "http_lib_tests": "273 passed",
+    "workspace_coverage": {
+      "lines_found": 81029,
+      "lines_hit": 56394,
+      "percent": 69.5973,
+      "baseline_percent": 35,
+      "status": "pass"
+    },
+    "changed_line_coverage": {
+      "executable_lines": 26,
+      "covered_lines": 26,
+      "percent": 100,
+      "threshold": 90,
+      "status": "pass"
+    }
+  },
+  "open_gates": [
+    "deliver the C5 public typed reader through PR and exact-head CI",
+    "complete C4 missing-version enforcement",
+    "reconcile the final consensus ledger to 28 of 28"
+  ]
+}

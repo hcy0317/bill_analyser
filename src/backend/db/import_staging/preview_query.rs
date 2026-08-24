@@ -13,6 +13,7 @@ enum PreviewSignalPredicateSource {
 
 struct PreviewPageQuerySpec<'a> {
     filters: &'a ImportPreviewQueryFilters,
+    preview_ids: &'a [i64],
     sort_by: &'a str,
     sort_direction: &'a str,
     page_size: usize,
@@ -117,7 +118,7 @@ pub fn query_preview_page_by_session(
         session_id,
         user_id,
         request,
-        PreviewSignalReadSource::LegacyPayload,
+        PreviewSignalReadSource::TypedV1,
     )
 }
 
@@ -128,17 +129,6 @@ fn query_preview_page_by_session_with_signal_read_source(
     request: &ImportPreviewPageRequest,
     signal_read_source: PreviewSignalReadSource,
 ) -> DbResult<ImportPreviewPageResult> {
-    if !request.preview_ids.is_empty() {
-        if signal_read_source == PreviewSignalReadSource::TypedV1 {
-            return Err(DbError::InvalidOperation(
-                "typed import signal read shadow does not accept preview_ids bypass queries"
-                    .to_string(),
-            ));
-        }
-        let rows = get_preview_by_ids(pool, session_id, &request.preview_ids, user_id)?;
-        return Ok(build_preview_page_result_from_rows(rows, request));
-    }
-
     block_on_db(async move {
         let session_db_id = session_db_id(pool, session_id, user_id).await?;
         let user_id_i64 = user_id_i64(user_id)?;
@@ -173,6 +163,7 @@ async fn query_preview_page_from_connection(
         user_id,
         PreviewPageQuerySpec {
             filters: &request.filters,
+            preview_ids: &request.preview_ids,
             sort_by: &request.sort_by,
             sort_direction: &request.sort_direction,
             page_size,
@@ -190,6 +181,7 @@ async fn query_preview_page_from_connection(
         session_db_id,
         user_id,
         &request.filters,
+        &request.preview_ids,
         signal_read_source,
     )
     .await?;
@@ -292,6 +284,7 @@ pub fn preview_id_snapshot_hash(ids: &[i64]) -> String {
     format!("fnv1a32:{hash:08x}")
 }
 
+#[cfg(test)]
 fn build_preview_page_result_from_rows(
     rows: Vec<ImportPreviewRow>,
     request: &ImportPreviewPageRequest,
@@ -369,6 +362,7 @@ fn build_preview_page_query(
         user_id,
         PreviewPageQuerySpec {
             filters,
+            preview_ids: &[],
             sort_by,
             sort_direction,
             page_size,
@@ -389,6 +383,7 @@ fn build_preview_page_query_with_signal_read_source(
     query.push_bind(session_db_id);
     query.push(" AND p.user_id = ");
     query.push_bind(user_id);
+    push_preview_id_scope(&mut query, spec.preview_ids, "p");
     push_preview_query_predicates_with_signal_source(
         &mut query,
         spec.filters,
@@ -406,6 +401,21 @@ fn build_preview_page_query_with_signal_read_source(
     query.push(" OFFSET ");
     query.push_bind(i64::try_from(spec.offset).unwrap_or(i64::MAX));
     query
+}
+
+fn push_preview_id_scope(
+    query: &mut QueryBuilder<'static, Postgres>,
+    preview_ids: &[i64],
+    alias: &str,
+) {
+    if preview_ids.is_empty() {
+        return;
+    }
+    query.push(" AND ");
+    query.push(alias);
+    query.push(".id = ANY(");
+    query.push_bind(preview_ids.to_vec());
+    query.push("::BIGINT[])");
 }
 
 fn push_preview_query_predicates(

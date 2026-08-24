@@ -527,6 +527,7 @@ fn typed_signal_read_queries_use_versioned_columns_without_legacy_projection() {
         2,
         PreviewPageQuerySpec {
             filters: &filters,
+            preview_ids: &[11, 12],
             sort_by: "time",
             sort_direction: "asc",
             page_size: 50,
@@ -537,6 +538,7 @@ fn typed_signal_read_queries_use_versioned_columns_without_legacy_projection() {
     let page_sql = page_query.build().sql().to_string();
     assert!(page_sql.contains("p.signal_projection_version ="));
     assert!(page_sql.contains("p.signal_learning = true"));
+    assert!(page_sql.contains("p.id = ANY("));
     assert!(page_sql.contains("preview_matching_feedback,learning,review_status"));
     assert!(!page_sql.contains("import_preview_signal_flags"));
 
@@ -544,9 +546,11 @@ fn typed_signal_read_queries_use_versioned_columns_without_legacy_projection() {
         1,
         2,
         &filters,
+        &[11, 12],
         PreviewSignalReadSource::TypedV1,
     );
     let metadata_sql = metadata_query.build().sql().to_string();
+    assert!(metadata_sql.contains("p.id = ANY("));
     for family in [
         "parser",
         "platform_duplicate",

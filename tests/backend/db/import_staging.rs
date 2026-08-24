@@ -789,7 +789,11 @@ async fn real_postgres_signal_filters_fail_closed_for_unknown_review_statuses(
                    ARRAY['preview_matching_feedback', $3, $4],
                    to_jsonb('__invalid_status__'::text),
                    true
-               )
+               ),
+               signal_learning = CASE WHEN $3 = 'learning' THEN false ELSE signal_learning END,
+               signal_llm = CASE WHEN $3 = 'llm' THEN false ELSE signal_llm END,
+               signal_transfer = CASE WHEN $3 = 'transfer' THEN false ELSE signal_transfer END,
+               signal_history = CASE WHEN $3 = 'reconciliation' THEN false ELSE signal_history END
                WHERE id = $1 AND user_id = $2"#,
         )
         .bind(id_for(description))

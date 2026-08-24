@@ -191,6 +191,14 @@ async fn signal_read_shadow_fails_closed_for_unmaterialized_rows_and_reports_dri
             ..ImportPreviewPageRequest::default()
         };
 
+        let public_error =
+            query_preview_page_by_session(&isolated.pool, &session_key, scoped_user, &request)
+                .expect_err("the public reader must fail closed before target materialization");
+        assert!(matches!(public_error, DbError::InvalidOperation(_)));
+        assert!(public_error
+            .to_string()
+            .contains("signal_projection_version=1"));
+
         let error = audit_import_preview_signal_read_parity(
             &isolated.pool,
             &session_key,
@@ -218,6 +226,28 @@ async fn signal_read_shadow_fails_closed_for_unmaterialized_rows_and_reports_dri
         assert!(!report.is_match());
         assert!(report.signal_counts_mismatch);
         assert!(report.mismatch_count() > 0);
+
+        let explicit_typed = query_preview_page_by_session(
+            &isolated.pool,
+            &session_key,
+            scoped_user,
+            &ImportPreviewPageRequest {
+                page: 1,
+                page_size: 100,
+                preview_ids: vec![preview_id],
+                filters: ImportPreviewQueryFilters {
+                    signal: Some("parser".to_string()),
+                    ..ImportPreviewQueryFilters::default()
+                },
+                ..ImportPreviewPageRequest::default()
+            },
+        )?;
+        assert_eq!(explicit_typed.total, 0);
+        assert!(explicit_typed.rows.is_empty());
+        assert_eq!(
+            explicit_typed.metadata.counts.signals.get("parser"),
+            Some(&0)
+        );
 
         let bypass_error = audit_import_preview_signal_read_parity(
             &isolated.pool,

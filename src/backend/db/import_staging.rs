@@ -7,10 +7,8 @@ use std::future::Future;
 
 use bill_analyser_core::{
     build_transfer_source_snapshot, import_preview_matching_feedback_has_unknown_signal_status,
-    import_preview_recommendation_feedback_family_is_meaningful,
-    import_preview_signal_value_is_truthy, is_import_preview_visible_signal_family,
-    learning_lifecycle_is_auto_eligible, learning_lifecycle_signal_state, normalize_bill_date_text,
-    normalize_history_operation, resolve_first_nonempty_status, strict_decimal_is_positive,
+    is_import_preview_visible_signal_family, learning_lifecycle_is_auto_eligible,
+    learning_lifecycle_signal_state, normalize_bill_date_text, normalize_history_operation,
     transition_import_learning_lifecycle, trim_import_preview_signal_text, DedupBill,
     DeduplicationType, ImportLearningLifecycleState, ImportPreviewSignalFamily, Money,
     TransferSourceSnapshot, UserId, IMPORT_PREVIEW_DECIMAL_HAS_NON_ZERO,
@@ -22,6 +20,12 @@ use bill_analyser_core::{
     IMPORT_PREVIEW_SIGNAL_SUPPRESSED_STATUSES, IMPORT_PREVIEW_SIGNAL_TERMINAL_STATUSES,
     IMPORT_PREVIEW_SIGNAL_TRIM_CHARS, IMPORT_PREVIEW_SIGNAL_TRUTHY_TEXT_VALUES,
     IMPORT_PREVIEW_VISIBLE_SIGNAL_FAMILIES,
+};
+#[cfg(test)]
+use bill_analyser_core::{
+    import_preview_recommendation_feedback_family_is_meaningful,
+    import_preview_signal_value_is_truthy, resolve_first_nonempty_status,
+    strict_decimal_is_positive,
 };
 use bill_analyser_parsers::{parser_source_label, serialize_parser_tags, StandardBill};
 use chrono::{DateTime, Utc};
@@ -73,6 +77,8 @@ include!("import_staging/row_mapping.rs");
 include!("import_staging/preview_patch_projection.rs");
 include!("import_staging/patch_payload_helpers.rs");
 include!("import_staging/filter_matching.rs");
+#[cfg(test)]
+include!("import_staging/filter_matching_test_oracle.rs");
 #[cfg(test)]
 include!("import_staging/test_support.rs");
 #[cfg(test)]
