@@ -403,6 +403,8 @@ server snapshot.issues + provisional delta -> visible issues / valid / actions
 - 固定工件：ownership matrix、architecture debt baseline、64-file evidence manifest、recognition-quality fixture、C1 transition ledger。
 - Exit：所有 C1-C6 路径有当前/目标 owner、唯一 writer、old/new read、rollback/forward-fix 和 delete gate；性能基线可复跑；必需环境缺失或 browser marker 不完整时 fail-closed。
 
+C0 已于 2026-08-16 以 `C0_EXIT_PASS / C1_ENTRY_OPEN` 关闭：固定 64 文件 corpus 的三次 exact-main 首屏分别为 12,560ms、22,860ms、21,416ms，均低于 60,000ms；识别与信号 fixture 的 8 个场景均为 covered，阻断项为 0。2026-08-24 在 `main@eb91c69b514a11faa122731360dc97923aba7f86` 完成 current-main 漂移复核：同一 corpus 仍为 15,041 条解析、13,082 条 preview、0 unmatched，parse 7,563ms、dedup 累计 20,208ms、首屏 20,314ms；missing-category focused E2E 证明合法分类在同一帧、ack、翻页、reload 与重新进入后持续消失。该单次复核只用于确认当前主线没有回归，不替代历史三连验收；隔离运行时明确关闭 LLM 且不复制用户 provider 配置，因此不宣称覆盖付费 OCR/LLM 质量。跟踪证据见 `docs/refactor/evidence/cyanflow-c0-current-main-runtime-audit-2026-08-24.json`。
+
 ### C1：两项小 canary
 
 - Entry：C0 工件齐全；Ledger list 和 missing-category 当前行为已有 characterization tests；两项各自有独立 rollback。
@@ -622,7 +624,7 @@ C7r transition ledger：LLM/OCR base URL、OAuth token endpoint 与 cloud backup
 
 ### Follow-ups before implementation
 
-1. 由 Cyanflow 以本文件为输入重新裁决 C0 的最小下一动作。
+1. C0 最小动作与 2026-08-24 current-main 漂移复核均已完成；后续每个切片仍由 Cyanflow 基于实际 debt 重新裁决，不得因 conveyor 持续而凭空创建新 seam。
 2. 在 Governed Store 能力可用时，将本 proposal 迁入 `.cyaness/specs/` 并保留本文件为仓库可读镜像。
-3. 未完成 C0 evidence manifest 前，不得用 2026-08-13 性能数字做 release 放行。
+3. 2026-08-13 性能数字只保留为历史症状证据，任何 release 放行必须同时引用已关闭的 C0 三连验收与候选 head 的 exact-main 漂移复核；若候选变更触及导入主链、固定 corpus 漂移或单次复核失败，则必须重新执行连续三次验收，不得回退使用旧日志数字或用一次复核替代三连门禁。
 4. 本文件最初不单独授权源码实现；后续用户已明确授权 Cyanflow/Cyaness 自治推进。每个切片仍须独立满足 transition ledger、TDD、双轴审查、完整覆盖率、精确 HEAD CI 与回滚/删除门禁。

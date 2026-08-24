@@ -1,0 +1,185 @@
+{
+  "schema_version": "cyanflow-c0-current-main-runtime-audit.v1",
+  "generated_at": "2026-08-24T15:08:38.7666200+08:00",
+  "slice": "C0-current-main-drift-audit",
+  "objective": "Re-verify current-main import usability and missing-category behavior after C7r before selecting another business-code seam.",
+  "source": {
+    "branch": "main",
+    "head_sha": "eb91c69b514a11faa122731360dc97923aba7f86",
+    "head_subject": "fix(security): 统一出网 URL 安全事实 (#354)",
+    "delivery": {
+      "pull_request": 354,
+      "pull_request_run": 16418,
+      "pull_request_attempt": 2,
+      "main_push_run": 16419,
+      "required_jobs": [
+        "backend-ci: success",
+        "frontend-ci: success",
+        "repo-governance: success",
+        "e2e-ci: success"
+      ]
+    }
+  },
+  "cyanflow": {
+    "decision": "proceed",
+    "lane": "flow",
+    "activity": "verify",
+    "verification": "targeted",
+    "action": "Verify and record the current-main C0 runtime audit before selecting any new business-code seam.",
+    "codebase_memory": {
+      "project_key": "bill_analyser-d7309f0e9eab-r7218c7b94da7",
+      "readonly_queries_completed": [
+        "get_graph_schema",
+        "get_architecture",
+        "search_graph",
+        "search_code",
+        "query_graph",
+        "get_code_snippet",
+        "trace_path"
+      ],
+      "stage2_owner": "ImportStage2::evaluate",
+      "production_callers": [
+        "initial dedup",
+        "preview reclassification",
+        "dematerialized preview reclassification"
+      ],
+      "limitation": "Artifact discovery used repository-local read-only inventory because graph search does not index the ignored runtime evidence tree; overloaded short symbols can also produce false cross-domain paths."
+    }
+  },
+  "historical_acceptance": {
+    "closeout": "C0_EXIT_PASS / C1_ENTRY_OPEN on 2026-08-16",
+    "evidence": "docs/refactor/cyanflow-c0-closeout-2026-08-16.md",
+    "corpus_manifest_sha256": "0a3b595c268413d7f404d823c6a0d0456d0e81b655e47c3c3f92e412b2c4c838",
+    "three_consecutive_operable_ms": [
+      12560,
+      22860,
+      21416
+    ],
+    "performance_target_ms": 60000,
+    "recognition_fixture_scenarios": 8,
+    "recognition_fixture_blockers": 0
+  },
+  "current_corpus": {
+    "root": "bills/",
+    "git_status": "ignored by .gitignore:486 and not tracked",
+    "privacy": "No private file name or content is persisted in this artifact.",
+    "file_count": 64,
+    "total_bytes": 3678128,
+    "extensions": {
+      ".csv": 14,
+      ".xls": 11,
+      ".xlsx": 39
+    },
+    "corpus_manifest_sha256": "0a3b595c268413d7f404d823c6a0d0456d0e81b655e47c3c3f92e412b2c4c838",
+    "matches_historical_acceptance_corpus": true
+  },
+  "real64_current_main": {
+    "run_id": "c0-main-eb91c69b5-20260824-audit1",
+    "artifact_root": ".cyaness/evidence/c0-real64/c0-main-eb91c69b5-20260824-audit1",
+    "artifact_root_git_status": "ignored by .git/info/exclude",
+    "indexed_artifact_count": 14,
+    "artifact_total_bytes": 50435,
+    "artifact_index_sha256": "ff4535094d0a20b30e5878f332f67bcb836dc01657950261c728a08df55a5b68",
+    "started_at": "2026-08-24T06:54:33.174Z",
+    "finished_at": "2026-08-24T06:56:50.809Z",
+    "binary": {
+      "relative_path": "target/debug/bill_http_server.exe",
+      "bytes": 51709440,
+      "sha256": "c7fe01dcbc28648bc38dc365488b5058e8b134191eaa0b38eb41439db99e1531",
+      "source_head_attribution": true
+    },
+    "result": {
+      "parsed_row_count": 15041,
+      "preview_row_count": 13082,
+      "unmatched_file_count": 0,
+      "parse_elapsed_ms": 7563,
+      "dedup_elapsed_from_submit_ms": 20208,
+      "operable_first_screen_elapsed_ms": 20314,
+      "performance_target_ms": 60000,
+      "performance_target_met": true,
+      "parser_filter_canonical_request_count": 1,
+      "legacy_filter_index_request_count": 0
+    },
+    "profile": {
+      "stage1_multipart_ms": 54,
+      "stage1_parser_ms": 2236,
+      "stage1_staging_ms": 4290,
+      "stage1_total_ms": 7109,
+      "stage2_dedup_ms": 3815,
+      "stage2_intelligence_ms": 865,
+      "stage2_preview_insert_ms": 6696,
+      "stage2_total_ms": 12553,
+      "preview_request_ms": 859
+    }
+  },
+  "missing_category_current_main": {
+    "run_id": "c0-signal-eb91c69b5-20260824-audit2",
+    "artifact_root": ".cyaness/evidence/c0-real64/c0-signal-eb91c69b5-20260824-audit2",
+    "artifact_root_git_status": "ignored by .git/info/exclude",
+    "indexed_artifact_count": 8,
+    "artifact_total_bytes": 39938,
+    "artifact_index_sha256": "5e95b8875d49275386e40fcb2cc7f0a371880bc4ce1a5f89a38a27f0d8699197",
+    "started_at": "2026-08-24T07:03:28.502Z",
+    "finished_at": "2026-08-24T07:04:56.267Z",
+    "test": "keeps a resolved missing category cleared across acknowledgement, paging, reload, and re-entry",
+    "test_source": "src/web/e2e/tests/import-signal-system.desktop.spec.ts:409",
+    "target_elapsed_ms": 16600,
+    "playwright_result": "2 passed including authenticated setup and the focused target",
+    "contracts": {
+      "same_frame_provisional_issue_cleared": true,
+      "authoritative_ack_has_category": true,
+      "authoritative_ack_has_no_missing_category_feedback": true,
+      "paging_preserves_resolution": true,
+      "reload_preserves_resolution": true,
+      "re_entry_preserves_resolution": true
+    }
+  },
+  "rejected_observation": {
+    "run_id": "c0-signal-eb91c69b5-20260824-audit1",
+    "accepted_as_missing_category_evidence": false,
+    "reason": "The first custom wrapper changed the phase label but reused the default desktop adapter, so it executed desktop route smoke rather than the requested signal spec. The log was inspected before acceptance and the run was replaced by audit2."
+  },
+  "runtime_and_cleanup": {
+    "postgres": "fresh local isolated database per run; absent after each run",
+    "weaviate": "run-scoped prefix; strict cleanup success; no remaining collections",
+    "user_settings_source": "dedicated-e2e-defaults",
+    "llm_configured": false,
+    "paid_provider_request_executed": false,
+    "strict_cleanup_status": "success",
+    "remaining_owned_listener_count": 0,
+    "auth_storage_exists_after_run": false,
+    "workspace_diff_after_run": "user-owned .claude/settings.local.json only"
+  },
+  "gate": {
+    "c0_historical_exit": "reaffirmed",
+    "current_main_performance": "passed",
+    "current_main_missing_category": "passed",
+    "current_isolated_runtime_usable": true,
+    "release_gate": "not evaluated; this one fresh drift run supplements but does not replace the three-consecutive-run acceptance requirement",
+    "new_business_code_seam_selected": false,
+    "next_action": "Use this tracked drift audit to select the next actual-debt slice; do not add abstraction merely because the conveyor continues."
+  },
+  "review": {
+    "comparison_point": "eb91c69b514a11faa122731360dc97923aba7f86",
+    "standards": {
+      "result": "passed",
+      "findings": [],
+      "evidence": "The tracked artifact contains no private corpus name, raw URL, absolute Windows path, secret, provider configuration, or ignored raw payload. Every current metric, artifact index, cleanup claim, and Gitea run was re-read from its source."
+    },
+    "spec": {
+      "result": "passed",
+      "findings": [],
+      "evidence": "The diff performs only the Cyanflow-selected targeted verification and consensus reconciliation. It does not change business code, reopen C0, select a speculative seam, or weaken the historical three-run performance gate."
+    },
+    "test_gaps": [
+      "Paid LLM and OCR quality remains intentionally untested because the isolated runner forbids saved provider configuration.",
+      "The fresh drift audit is one run; any release candidate still needs the repository's separate performance acceptance policy."
+    ]
+  },
+  "limitations": [
+    "This single fresh drift run supplements but does not replace the historical three-consecutive-run C0 acceptance set.",
+    "The isolated runtime intentionally excludes saved user provider configuration and therefore does not measure paid LLM or OCR quality.",
+    "The fixed 64-file corpus cannot prove identical latency for every private bill distribution or host load state.",
+    "No production deployment or user database was exercised."
+  ]
+}
