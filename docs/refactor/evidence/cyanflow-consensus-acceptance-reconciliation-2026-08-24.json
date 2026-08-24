@@ -1,0 +1,233 @@
+{
+  "schema_version": "cyanflow-consensus-acceptance-reconciliation.v1",
+  "work_id": "bill-analyser-cyanflow-consensus-acceptance-reconciliation-20260824",
+  "audited_main": "8bd57d639f8d0e7401e4a4439a72f79958832cba",
+  "branch": "codex/consensus-acceptance-reconciliation",
+  "objective": "Reconcile the stale consensus acceptance checklist against current-main code, migrations, transition ledgers, runtime evidence, and exact-head CI without inventing another code abstraction.",
+  "cyanflow": {
+    "decision": "proceed",
+    "lane": "flow",
+    "activity": "verify",
+    "verification": "targeted",
+    "action": "Build a current-main acceptance reconciliation, mark every stale blank as evidence-closed or explicitly open/blocked, and only then select another implementation seam."
+  },
+  "codebase_memory": {
+    "project_key": "bill_analyser-d7309f0e9eab-r97f92787a640",
+    "readonly_tools_used": [
+      "get_graph_schema",
+      "get_architecture",
+      "search_graph",
+      "search_code",
+      "query_graph",
+      "get_code_snippet",
+      "trace_path"
+    ],
+    "query_failure": "The first query_graph attempt failed with 'expected token type 67, got 31 at pos 60' because the query used an unsupported toLower expression.",
+    "query_recovery": "The raw failure was retained and query_graph was retried successfully with a bounded function query that used no unsupported expression; local rg evidence is not presented as a substitute for the failed graph call.",
+    "observed_boundaries": [
+      "ImportStage2::evaluate has the three expected HTTP production callers.",
+      "Confirm receipt read-source selection is configuration-owned and defaults to Metadata.",
+      "Typed and legacy signal query composers both exist, while public page and metadata entry points still select LegacyPayload.",
+      "Several reqwest clients have different timeout, persistence, provider, and error owners, so no new universal request-time network seam is accepted by this reconciliation."
+    ]
+  },
+  "summary": {
+    "total_acceptance_items": 28,
+    "evidence_closed": 24,
+    "open_or_blocked": 4,
+    "evidence_closed_percent": 85.71,
+    "by_group": {
+      "architecture": {
+        "closed": 6,
+        "open": 0
+      },
+      "data_and_concurrency": {
+        "closed": 5,
+        "open": 2
+      },
+      "import_business": {
+        "closed": 5,
+        "open": 1
+      },
+      "repository_gates": {
+        "closed": 8,
+        "open": 1
+      }
+    }
+  },
+  "evidence_closed_groups": [
+    {
+      "group": "architecture",
+      "items": [
+        "Ledger list handler boundary",
+        "PreviewStateKernel writer and typed snapshot authority",
+        "three ImportStage2::evaluate callers with zero HTTP Stage 2 SQL",
+        "Import response ownership removed from core and DB",
+        "desktop and mobile signal membership/status mapped from the versioned snapshot",
+        "module/trait/crate admission protected by transition ledgers and the Rust structure gate"
+      ],
+      "evidence": [
+        "docs/refactor/cyanflow-c1-ledger-list-boundary-2026-08-16.md",
+        "docs/refactor/cyanflow-c2-preview-state-kernel-foundation-2026-08-16.md",
+        "docs/refactor/cyanflow-c3-stage2-profile-2026-08-16.md",
+        "docs/refactor/evidence/cyanflow-c7l-import-response-ownership-2026-08-20.json",
+        "src/web/src/views/desktop/transactions/import/check-data-matching/previewStateAdapter.ts"
+      ]
+    },
+    {
+      "group": "data_and_concurrency",
+      "items": [
+        "database lifecycle constraints and restored historical validation",
+        "database-enforced session and user ownership",
+        "nullable decision-member uniqueness",
+        "typed terminal receipt uniqueness, scope, immutability, and replay",
+        "confirm failure atomicity and retryability"
+      ],
+      "evidence": [
+        "docs/refactor/cyanflow-c5-import-schema-invariants-2026-08-17.md",
+        "src/backend/db/postgres/migrations/0025_import_schema_invariants.sql",
+        "src/backend/db/postgres/migrations/0027_import_confirm_receipts.sql",
+        "docs/refactor/cyanflow-c6-confirm-receipt-dual-write-2026-08-18.md",
+        "docs/refactor/cyanflow-c6-confirm-plan-boundary-2026-08-19.md"
+      ]
+    },
+    {
+      "group": "import_business",
+      "items": [
+        "exactly-one parser, generic mapping, cents, and Stage 1/2 order characterization",
+        "missing-category same-frame and durable acknowledgement behavior",
+        "transfer authority and dual membership behavior",
+        "no-op, reclassify, learning, LLM, history, and confirm replay regression coverage",
+        "three consecutive real 64-file runs under 60 seconds plus a fresh current-main drift run"
+      ],
+      "evidence": [
+        "docs/refactor/cyanflow-c0-closeout-2026-08-16.md",
+        "docs/refactor/evidence/cyanflow-c0-current-main-runtime-audit-2026-08-24.json",
+        "docs/refactor/cyanflow-c1-missing-category-authority-2026-08-16.md",
+        "docs/refactor/cyanflow-c4-import-contract-characterization-2026-08-16.md"
+      ]
+    },
+    {
+      "group": "repository_gates",
+      "items": [
+        "Rust fmt",
+        "Rust Clippy on pinned 1.98.0",
+        "full Rust workspace test executor with required PostgreSQL fail-closed cases",
+        "full Rust workspace coverage above 35 percent",
+        "business-slice changed coverage above 90 percent",
+        "frontend lint, coverage, and build",
+        "deterministic browser E2E and frontend coverage thresholds",
+        "manual cents review for API or amount changes"
+      ],
+      "evidence": [
+        "Gitea main run 16427 at 8bd57d639f8d0e7401e4a4439a72f79958832cba: backend-ci, frontend-ci, repo-governance, and e2e-ci all success",
+        "docs/refactor/evidence/cyanflow-c7s-rust-toolchain-pin-2026-08-24.json",
+        "per-slice C1-C7 evidence artifacts under docs/refactor/evidence"
+      ]
+    }
+  ],
+  "open_gates": [
+    {
+      "id": "C4_VERSION_ENFORCE",
+      "status": "open",
+      "owner": "breaking-contract approval plus production telemetry",
+      "current_state": "Current web callers send row/session versions and 409 returns a safe latest snapshot, but missing-version legacy requests remain accepted and are only observed as legacy_missing_version telemetry.",
+      "required_before_close": [
+        "legacy_missing_version is continuously zero for an accepted observation window",
+        "compatibility deadline and external-client impact are recorded",
+        "breaking-contract enforcement is explicitly approved"
+      ],
+      "evidence": "docs/refactor/cyanflow-c4-version-contract-telemetry-2026-08-17.md"
+    },
+    {
+      "id": "C5_SIGNAL_READ_CUTOVER",
+      "status": "blocked_target_database",
+      "owner": "target database rollout",
+      "current_state": "PreviewStateKernel drives the online typed writer and API/UI snapshot, but public page, filter, count, and facet entry points still select LegacyPayload.",
+      "required_before_close": [
+        "run C5e backfill on the explicitly identified target database",
+        "save a C5f-b report with eligible_for_read_cutover=true",
+        "save a same-state C5f-c report with performance_gate_passed=true",
+        "approve and verify the typed reader switch before deleting the JSON oracle"
+      ],
+      "evidence": [
+        "src/backend/db/import_staging/preview_query.rs",
+        "src/backend/db/import_staging/preview_metadata_query.rs",
+        "docs/refactor/cyanflow-c5-import-signal-target-audit-2026-08-18.md",
+        "docs/refactor/cyanflow-c5-import-signal-performance-audit-2026-08-18.md"
+      ]
+    },
+    {
+      "id": "C6_TYPED_RECEIPT_READ_CUTOVER",
+      "status": "blocked_target_database",
+      "owner": "target database rollout",
+      "current_state": "The unique immutable typed receipt and strict typed reader seam exist, but Metadata remains the default replay source.",
+      "required_before_close": [
+        "run C6c backfill on the explicitly identified target database",
+        "save a C6d all-target report with zero missing, unexpected, and mismatched receipts",
+        "record active legacy session plus TTL/cancel-drain state",
+        "approve typed_v1 activation before deleting compatibility reads"
+      ],
+      "evidence": [
+        "src/backend/http/config.rs",
+        "src/backend/db/import_staging/types/confirm_command.rs",
+        "docs/refactor/cyanflow-c6-confirm-receipt-backfill-2026-08-19.md",
+        "docs/refactor/cyanflow-c6-confirm-receipt-read-audit-2026-08-19.md"
+      ]
+    },
+    {
+      "id": "RELEASE_RUNTIME_ATTRIBUTION",
+      "status": "open_release_gate",
+      "owner": "release candidate runtime window",
+      "current_state": "The 2026-08-24 C0 audit proved a source-attributed binary and real browser flow for a business-source-equivalent main, while later changes are documentation and CI only; it is not presented as proof for every future release head.",
+      "required_before_close": [
+        "run scripts/dev.ps1 check or the canonical startup verification on the release candidate head",
+        "record the candidate head, binary SHA, source-head attribution, health result, and cleanup state"
+      ],
+      "evidence": "docs/refactor/evidence/cyanflow-c0-current-main-runtime-audit-2026-08-24.json"
+    }
+  ],
+  "rejected_next_code_slices": [
+    {
+      "candidate": "universal request-time outbound HTTP client or policy framework",
+      "reason": "The observed Weaviate, exchange-rate, LLM, OCR, auth-refresh, and backup clients have different timeout, persistence, provider, redirect, and error owners; a common DNS/proxy/rebinding seam has not been proven."
+    },
+    {
+      "candidate": "automatic C5 or C6 production cutover",
+      "reason": "The repository contains fail-closed operational commands, but no explicit target database, backup/window, or zero-drift target reports are available in this authorization boundary."
+    }
+  ],
+  "verification": {
+    "acceptance_count_check": "passed: 24 checked plus 4 explicitly open or blocked equals 28 total and matches the machine summary",
+    "evidence_json_parse": "passed for this reconciliation and the updated C7s evidence",
+    "rust_only_source_tree": "passed with 2101 tracked paths",
+    "backend_doc_map": "passed",
+    "current_main_ci": "run 16427 success for all four required jobs",
+    "docs_diff_check": "passed for the owned diff",
+    "dual_axis_review": {
+      "comparison_point": "8bd57d639f8d0e7401e4a4439a72f79958832cba",
+      "reviewed_diff": "consensus acceptance checklist, the new reconciliation evidence, and the C7s delivery closeout; user-owned .claude/settings.local.json and local .git/ai state excluded",
+      "standards": {
+        "result": "passed",
+        "findings": [],
+        "evidence": "Every checked item has a local code, migration, transition-ledger, runtime, or exact-head CI source. All facts not currently provable remain unchecked and explicitly owned. The graph query failure and successful graph retry are both recorded; target data, paid providers, remote caches, and user configuration were not touched."
+      },
+      "spec": {
+        "result": "passed",
+        "findings": [],
+        "evidence": "The matrix reports 24 evidence-closed and four open or blocked gates without treating C4 telemetry as enforcement, C5 legacy reads as typed cutover, C6 metadata default as typed activation, or an older source-equivalent runtime audit as every future release candidate. No speculative code seam is selected."
+      },
+      "test_gaps": [
+        "No target-database state was read, so C5 and C6 remain blocked.",
+        "No production legacy_missing_version telemetry was read, so C4 enforcement remains open.",
+        "The latest release-candidate startup and binary attribution remain open by design."
+      ]
+    },
+    "delivery": "pending exact-head PR CI, squash merge, main exact-head CI, and source-branch deletion"
+  },
+  "workspace_hygiene": {
+    "user_owned_change": ".claude/settings.local.json remains unstaged and outside the owned diff",
+    "production_database": "not connected or modified",
+    "paid_provider_request": "not executed"
+  }
+}

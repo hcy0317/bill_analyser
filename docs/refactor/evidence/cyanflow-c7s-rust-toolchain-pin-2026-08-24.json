@@ -62,7 +62,7 @@
     "backend_doc_map": "passed",
     "local_ci_fail_closed_self_test": "passed",
     "git_diff_check": "passed for the owned diff",
-    "full_rust_and_frontend_gates": "assigned to exact-head Gitea CI because this slice changes only workflow governance and documentation",
+    "full_rust_and_frontend_gates": "PR run 16426 and post-merge main run 16427 both completed backend, frontend, repository-governance, and E2E with success",
     "dual_axis_review": {
       "comparison_point": "a5e2d37832431b1cc42e9b414a4891f98f31ab6f",
       "reviewed_diff": "C7s owned working-tree diff and the untracked evidence JSON, excluding the user-owned .claude/settings.local.json change",
@@ -77,11 +77,22 @@
         "evidence": "Both Rust jobs use the exact 1.98.0 action, every rustup and Cargo restore prefix encodes 1.98.0, the backend final cache key encodes the same version, old active stable patterns are absent, and negative fixtures reject action or cache drift. No business, database, API, production configuration, remote cache cleanup, or request-time network change was introduced."
       },
       "test_gaps": [
-        "The Gitea runner must still prove that the explicit action ref installs and executes Rust 1.98.0 in both exact-head jobs.",
         "Network EOF behavior is deliberately not treated as solved by the compiler pin."
       ]
     },
-    "delivery_evidence": "pending exact-head PR CI, squash merge, main exact-head CI, and source-branch deletion"
+    "delivery_evidence": {
+      "pull_request": 356,
+      "pr_head": "9bb08e422ea8988247037aa8eded1657bc5585e3",
+      "pr_run": 16426,
+      "pr_jobs": "backend-ci, frontend-ci, repo-governance, and e2e-ci all success",
+      "merge": "8bd57d639f8d0e7401e4a4439a72f79958832cba",
+      "main_run": 16427,
+      "main_jobs": "backend-ci, frontend-ci, repo-governance, and e2e-ci all success",
+      "runtime_toolchain": "backend and E2E logs both reported rustc 1.98.0 (88d9e12ae 2026-08-18)",
+      "cache_observation": "The PR cold run saved Linux-rust-toolchain-slim-v3-1.98.0-2026081888d9 and the exact Cargo key. The main run restored the 262 MB Rust key in both jobs and the 57 MB Cargo key in backend; E2E queried the same Cargo key about 14 seconds earlier and observed a miss, which is retained as concurrent cache-visibility evidence rather than reported as a hit.",
+      "tree_parity": "all four owned paths have identical blobs in the PR head and squash merge",
+      "source_branch": "remote auto-deleted, no open PR reference remained, and the local branch was deleted"
+    }
   },
   "residual_risks": [
     "Pinning Rust does not eliminate GitHub action checkout or rustup CDN TLS/network EOF failures.",

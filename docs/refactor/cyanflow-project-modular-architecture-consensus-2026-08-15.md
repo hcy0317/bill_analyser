@@ -509,45 +509,52 @@ C7f-a transition ledger：此前 `categories.path`/`name` 到主/子分类的同
 
 ## 10. 验收标准
 
+> 2026-08-24 current-main reconciliation：以 `main@8bd57d639f8d0e7401e4a4439a72f79958832cba`、C0 current-main runtime audit、C1-C7s transition ledgers、PR/main exact-head Actions 为证据重新核对。`[x]` 表示该合同已有可定位证据；未勾选项必须带 `OPEN` 或 `BLOCKED` 原因，不能再把清单空白误读为“尚未开始”，也不能据此自动授权生产库或 breaking-contract 操作。机器可读矩阵见 `docs/refactor/evidence/cyanflow-consensus-acceptance-reconciliation-2026-08-24.json`。
+
+| 状态 | 数量 | 含义 |
+| --- | ---: | --- |
+| evidence-closed | 24 / 28 | 已有代码、迁移、真实 PostgreSQL、浏览器或 exact-head CI 证据 |
+| open / blocked | 4 / 28 | 1 个 breaking-contract 批准、2 个目标库 rollout、1 个 release runtime 归因门禁 |
+
 ### 10.1 架构
 
 - [x] Ledger list canary 证明 handler 不打开数据库、不解析 DB row，外部 REST 行为不变。
-- [ ] `PreviewStateKernel` 是 signal/issue/effective row 的唯一 Rust 权威。
-- [ ] 三个 Stage 2 调用方只通过 `ImportStage2::evaluate`，HTTP 中相关 SQL 为 0。
-- [ ] DB 不再构造 Import HTTP response，core 不再拥有 Import route response。
-- [ ] desktop/mobile 只映射同一 typed server snapshot 的 signal/issue；仅 draft 字段允许共享 provisional issue selector，且该结果不进入 filter/count/selection/confirm。
-- [ ] 每个新增 module/trait/crate 都通过抽象准入记录和 delete test。
+- [x] `PreviewStateKernel` 是 signal/issue/effective row 的唯一 Rust 权威；C2 fixture、C5d 唯一 signal writer 与 C6h `PreviewPatchProjection` 共同锁定写侧 owner，legacy SQL 只保留只读 oracle。
+- [x] 三个 Stage 2 调用方只通过 `ImportStage2::evaluate`，HTTP 中相关 SQL 为 0；C3 profile 和 `import_runtime_contract` 对三个 caller 建立结构门禁。
+- [x] DB 不再构造 Import HTTP response，core 不再拥有 Import route response；C7l 已把 `ImportV2RouteResponse` 收回 HTTP，core/DB 当前命中为 0。
+- [x] desktop/mobile 只映射同一 typed server snapshot 的 signal/issue；`previewStateAdapter` 明确只把 legacy matching JSON 用作标签/详情，membership 与 decision status 只来自 versioned snapshot，missing-category provisional 只作用于当前帧。
+- [x] 新增 module/trait/crate 受 transition ledger 的 rejected-expansion/delete gate 与 Rust backend structure gate 约束；截至 current main 没有为本共识新增 application crate、通用 UnitOfWork、动态 registry 或第二 writer。
 
 ### 10.2 数据与并发
 
-- [ ] import lifecycle 合法值有数据库约束，历史数据 backfill/parity 无未解释差异。
-- [ ] session/user 归属在数据库层不可伪造。
-- [ ] nullable member uniqueness 在真实 PostgreSQL 中能拒绝重复。
-- [ ] preview 竞争 mutation 完成 `row_version additive -> current client cutover -> legacy telemetry -> approved enforce`，409 返回最新 snapshot；集合 selection 只保留一套并发 token。
-- [ ] terminal receipt 唯一、可重放、普通 cleanup 不可删除或改写。
-- [ ] confirm 任一步 failure injection 无部分正式交易、无重复 effect、无 receipt 丢失，失败后 staging 保持可重试。
-- [ ] 同一 session 固定一个 contract/writer；旧 session 完成 TTL/cancel-drain 且 active 数为 0 后才删除兼容读取。
+- [x] import lifecycle 合法值有数据库约束，恢复 corpus 的历史 validation/parity 无未解释差异；C5b 在 237,870 条 preview row 的独立恢复库验证全部目标约束并失败关闭脏状态。
+- [x] session/user 归属在数据库层不可伪造；C5b 的 `(id,user_id)` 复合目标与六条子表复合外键已由真实 PostgreSQL 跨用户写入拒绝验证。
+- [x] nullable member uniqueness 在真实 PostgreSQL 中能拒绝重复；三类 partial unique index 与合法 multi-ref 已由 C5b 验证。
+- [ ] **OPEN(breaking-contract)** preview 竞争 mutation 已完成 additive row version、current client cutover、409 snapshot 与 legacy telemetry，但缺 version 仍兼容接受；只有 `legacy_missing_version` 连续为 0、兼容期限/外部影响记录且另获 breaking-contract 批准后才能 enforce。
+- [x] terminal typed receipt 以 session 主键唯一、复合 user scope、数据库 immutable trigger 与同事务双投影保证可重放；普通 staging cleanup 不删除或改写 typed row。
+- [x] confirm failure-injection matrix 证明任一步失败无部分正式交易、无重复 effect、无 receipt 丢失，staging 可重试；C6b/C6g 仍只有一个 transaction writer。
+- [ ] **BLOCKED(target-db/C6 rollout)** 同一 session 的 writer/contract 已固定，但 metadata reader 仍是安全默认；目标库必须完成 C6c 回填、C6d 全量零缺失/零意外/零 mismatch、active legacy/TTL/cancel-drain ledger 后，才允许切 `typed_v1` 并删除兼容读取。
 
 ### 10.3 导入业务
 
-- [ ] exactly-one parser、generic mapping、金额和阶段顺序全部有 characterization test。
-- [ ] 六类 signal 满足 `Rust canonical fixture = persisted projection = SQL query result = API snapshot = desktop/mobile display`；SQL/前端不存在独立 JSON 状态机。
-- [ ] 合法分类保存后 missing-category issue 在同一 tick、server ack、翻页、刷新、重新进入后均为 false。
-- [ ] transfer authority、likely-transfer 双 membership、accept 保留人工字段、reject 两行重算均通过。
-- [ ] no-op edit、reclassify、learning/LLM/history lifecycle 和 confirm replay 不退化。
-- [ ] 64 文件真实 browser flow 连续三次每次 `<=60s`，且第一屏必需识别质量不下降。
+- [x] exactly-one parser、generic mapping、整数分金额和 Stage 1/2 顺序均有 characterization；C0/C3 固定 64 文件保持 15,041 parsed、13,082 preview、0 unmatched。
+- [ ] **BLOCKED(target-db/C5 rollout)** Rust fixture、在线 typed writer、API snapshot 与 desktop/mobile mapping 已统一，但公开 page/filter/count/facet 仍显式读取 `LegacyPayload`；目标库必须先完成 C5e backfill、C5f-b `eligible_for_read_cutover=true` 与 C5f-c `performance_gate_passed=true`，才能切 typed SQL reader并删除 JSON oracle。
+- [x] 合法分类保存后 missing-category issue 在同一 tick、server ack、翻页、刷新、重新进入后均为 false；C1 canary 与 2026-08-24 focused current-main E2E 均通过。
+- [x] transfer authority、likely-transfer 双 membership、accept 保留人工字段、reject 两行重算均由 C2 fixture、C3/C4 decision 与真实 PostgreSQL 合同覆盖。
+- [x] no-op edit、reclassify、learning/LLM/history lifecycle 和 confirm replay 已由 C4-C6 focused/真实 PostgreSQL/端到端矩阵覆盖，current-main exact-head CI 无退化。
+- [x] 64 文件真实 browser flow 历史连续三次为 12,560ms、22,860ms、21,416ms，全部 `<=60s`；2026-08-24 同 corpus 漂移复核为 20,314ms、15,041 parsed、13,082 preview、0 unmatched，识别 fixture blocker 为 0。
 
 ### 10.4 仓库门禁
 
-- [ ] `cargo fmt --all -- --check`
-- [ ] `cargo clippy --workspace --all-targets -- -D warnings`
-- [ ] `cargo test --workspace`，focused discovery 必须 `>0`，真实 PostgreSQL 必需场景 0 skip/fail-closed。
-- [ ] `cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 35`
-- [ ] Rust 被改业务代码 coverage `>90%`。
-- [ ] `src/web`: `npm run lint && npm run test:coverage && npm run build && npm run e2e:check`。
-- [ ] 前端总覆盖率和被改业务代码 coverage `>90%`，必需 Playwright 场景 0 skip/fail-closed。
-- [ ] `scripts/dev.ps1 check` 和真实启动入口显示的 binary SHA 与待验收 HEAD 一致。
-- [ ] API/金额改动人工复核一次元/分转换。
+- [x] `cargo fmt --all -- --check`；current-main run 16427 `backend-ci=success`。
+- [x] `cargo clippy --workspace --all-targets -- -D warnings`；current-main run 16427 `backend-ci=success`，固定 Rust 1.98.0。
+- [x] `cargo test --workspace` 等价地由唯一完整 workspace coverage executor 执行；focused discovery `>0`，真实 PostgreSQL required 场景 fail-closed，run 16427 `backend-ci=success`。
+- [x] `cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 35`；run 16427 `backend-ci=success`。
+- [x] 每个 C1-C7 业务切片独立核算改动行/文件 coverage `>90%`；C7s 与本 reconciliation 无业务源码改动。
+- [x] `src/web` lint、coverage、build 与 deterministic E2E supervisor；run 16427 `frontend-ci=success`、`e2e-ci=success`。
+- [x] 前端总覆盖率、改动业务 coverage 与必需 Playwright 由各前端业务切片证据和 current-main CI 锁定；C1 全量 lines 94.23%，missing-category focused E2E 0 skip。
+- [ ] **OPEN(release-runtime)** 最新候选 head 仍需在发布窗口执行 `scripts/dev.ps1 check`/真实启动入口并记录 source-head attribution 与 binary SHA；2026-08-24 C0 audit 已验证业务源码等价 head，但不冒充未来候选 release 运行态。
+- [x] 每个涉及 API/金额的已交付切片均保留整数分合同并人工复核；C7r、C7s 与本 reconciliation 没有 API 或金额字段改动。
 
 ## 11. 风险和反方观点
 
