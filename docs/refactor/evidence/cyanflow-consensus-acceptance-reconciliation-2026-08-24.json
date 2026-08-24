@@ -2,6 +2,7 @@
   "schema_version": "cyanflow-consensus-acceptance-reconciliation.v1",
   "work_id": "bill-analyser-cyanflow-consensus-acceptance-reconciliation-20260824",
   "audited_main": "8bd57d639f8d0e7401e4a4439a72f79958832cba",
+  "latest_verified_main": "a1bfdd6eced584584468df75ea8763f3d92c6c6e",
   "branch": "codex/consensus-acceptance-reconciliation",
   "objective": "Reconcile the stale consensus acceptance checklist against current-main code, migrations, transition ledgers, runtime evidence, and exact-head CI without inventing another code abstraction.",
   "cyanflow": {
@@ -33,9 +34,9 @@
   },
   "summary": {
     "total_acceptance_items": 28,
-    "evidence_closed": 24,
-    "open_or_blocked": 4,
-    "evidence_closed_percent": 85.71,
+    "evidence_closed": 25,
+    "open_or_blocked": 3,
+    "evidence_closed_percent": 89.29,
     "by_group": {
       "architecture": {
         "closed": 6,
@@ -50,8 +51,8 @@
         "open": 1
       },
       "repository_gates": {
-        "closed": 8,
-        "open": 1
+        "closed": 9,
+        "open": 0
       }
     }
   },
@@ -117,11 +118,13 @@
         "business-slice changed coverage above 90 percent",
         "frontend lint, coverage, and build",
         "deterministic browser E2E and frontend coverage thresholds",
+        "fresh current-main one-click runtime and binary attribution",
         "manual cents review for API or amount changes"
       ],
       "evidence": [
         "Gitea main run 16427 at 8bd57d639f8d0e7401e4a4439a72f79958832cba: backend-ci, frontend-ci, repo-governance, and e2e-ci all success",
         "docs/refactor/evidence/cyanflow-c7s-rust-toolchain-pin-2026-08-24.json",
+        "docs/refactor/evidence/cyanflow-current-main-release-runtime-2026-08-24.json",
         "per-slice C1-C7 evidence artifacts under docs/refactor/evidence"
       ]
     }
@@ -174,17 +177,14 @@
         "docs/refactor/cyanflow-c6-confirm-receipt-backfill-2026-08-19.md",
         "docs/refactor/cyanflow-c6-confirm-receipt-read-audit-2026-08-19.md"
       ]
-    },
+    }
+  ],
+  "closed_after_reconciliation": [
     {
       "id": "RELEASE_RUNTIME_ATTRIBUTION",
-      "status": "open_release_gate",
-      "owner": "release candidate runtime window",
-      "current_state": "The 2026-08-24 C0 audit proved a source-attributed binary and real browser flow for a business-source-equivalent main, while later changes are documentation and CI only; it is not presented as proof for every future release head.",
-      "required_before_close": [
-        "run scripts/dev.ps1 check or the canonical startup verification on the release candidate head",
-        "record the candidate head, binary SHA, source-head attribution, health result, and cleanup state"
-      ],
-      "evidence": "docs/refactor/evidence/cyanflow-c0-current-main-runtime-audit-2026-08-24.json"
+      "closed_at_main": "a1bfdd6eced584584468df75ea8763f3d92c6c6e",
+      "evidence": "docs/refactor/evidence/cyanflow-current-main-release-runtime-2026-08-24.json",
+      "result": "A fresh isolated-target bill_http_server build passed the canonical one-click backend/frontend startup gate with source objects, binary SHA, and strict cleanup recorded."
     }
   ],
   "rejected_next_code_slices": [
@@ -198,11 +198,11 @@
     }
   ],
   "verification": {
-    "acceptance_count_check": "passed: 24 checked plus 4 explicitly open or blocked equals 28 total and matches the machine summary",
+    "acceptance_count_check": "passed: 25 checked plus 3 explicitly open or blocked equals 28 total and matches the machine summary",
     "evidence_json_parse": "passed for this reconciliation and the updated C7s evidence",
     "rust_only_source_tree": "passed with 2101 tracked paths",
     "backend_doc_map": "passed",
-    "current_main_ci": "run 16427 success for all four required jobs",
+    "current_main_ci": "run 16429 success for all four required jobs at a1bfdd6eced584584468df75ea8763f3d92c6c6e",
     "docs_diff_check": "passed for the owned diff",
     "dual_axis_review": {
       "comparison_point": "8bd57d639f8d0e7401e4a4439a72f79958832cba",
@@ -223,7 +223,38 @@
         "The latest release-candidate startup and binary attribution remain open by design."
       ]
     },
-    "delivery": "pending exact-head PR CI, squash merge, main exact-head CI, and source-branch deletion"
+    "runtime_gate_followup_review": {
+      "comparison_point": "a1bfdd6eced584584468df75ea8763f3d92c6c6e",
+      "reviewed_diff": "consensus progress update, evolving reconciliation matrix, and fresh current-main runtime evidence; user-owned .claude/settings.local.json and local .git/ai state excluded",
+      "standards": {
+        "result": "passed",
+        "findings": [],
+        "repaired_findings": [
+          "restored the original 24/4 dual-axis review to its actual reviewed scope",
+          "corrected the observed Cargo commit string to c24e10642",
+          "added the ninth repository-gate inventory item and its runtime evidence",
+          "narrowed manifest cleanup wording to the current run while preserving historical manifests"
+        ]
+      },
+      "spec": {
+        "result": "passed",
+        "findings": [],
+        "evidence": "Only RELEASE_RUNTIME_ATTRIBUTION moves from open to evidence-closed. The matrix is 25/3/28; C4, C5, and C6 remain explicitly open. Local Rust 1.89 and CI Rust 1.98 are reported as distinct successful paths, not as a unified toolchain contract."
+      },
+      "test_gaps": [
+        "A future local-versus-CI compiler incompatibility could justify a separate toolchain decision, but none is observed here.",
+        "C4 production telemetry and C5/C6 target-database state remain outside this runtime followup."
+      ]
+    },
+    "delivery": {
+      "pull_request": 357,
+      "pr_head": "4e76e2a0b0a8b1087c461daa5affb5b7a3adc8ec",
+      "pr_run": 16428,
+      "merge": "a1bfdd6eced584584468df75ea8763f3d92c6c6e",
+      "main_run": 16429,
+      "jobs": "backend-ci, frontend-ci, repo-governance, and e2e-ci all success on both runs",
+      "source_branch": "remote auto-deleted, no open PR reference remained, and the local branch was deleted"
+    }
   },
   "workspace_hygiene": {
     "user_owned_change": ".claude/settings.local.json remains unstaged and outside the owned diff",

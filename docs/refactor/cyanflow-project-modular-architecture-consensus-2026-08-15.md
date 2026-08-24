@@ -513,8 +513,8 @@ C7f-a transition ledger：此前 `categories.path`/`name` 到主/子分类的同
 
 | 状态 | 数量 | 含义 |
 | --- | ---: | --- |
-| evidence-closed | 24 / 28 | 已有代码、迁移、真实 PostgreSQL、浏览器或 exact-head CI 证据 |
-| open / blocked | 4 / 28 | 1 个 breaking-contract 批准、2 个目标库 rollout、1 个 release runtime 归因门禁 |
+| evidence-closed | 25 / 28 | 已有代码、迁移、真实 PostgreSQL、浏览器、fresh-build runtime 或 exact-head CI 证据 |
+| open / blocked | 3 / 28 | 1 个 breaking-contract 批准、2 个目标库 rollout 门禁 |
 
 ### 10.1 架构
 
@@ -553,7 +553,7 @@ C7f-a transition ledger：此前 `categories.path`/`name` 到主/子分类的同
 - [x] 每个 C1-C7 业务切片独立核算改动行/文件 coverage `>90%`；C7s 与本 reconciliation 无业务源码改动。
 - [x] `src/web` lint、coverage、build 与 deterministic E2E supervisor；run 16427 `frontend-ci=success`、`e2e-ci=success`。
 - [x] 前端总覆盖率、改动业务 coverage 与必需 Playwright 由各前端业务切片证据和 current-main CI 锁定；C1 全量 lines 94.23%，missing-category focused E2E 0 skip。
-- [ ] **OPEN(release-runtime)** 最新候选 head 仍需在发布窗口执行 `scripts/dev.ps1 check`/真实启动入口并记录 source-head attribution 与 binary SHA；2026-08-24 C0 audit 已验证业务源码等价 head，但不冒充未来候选 release 运行态。
+- [x] `main@a1bfdd6eced584584468df75ea8763f3d92c6c6e` 已在全新隔离 Cargo target 中重新构建 `bill_http_server`，并通过 `scripts/dev.ps1 check` 的真实一键启动、backend health 与 frontend readiness；fresh binary 为 51,709,440 bytes、SHA-256 `24005bfa33d524d330bdee78708a5b55544e0ba47b59d5a37f927f48ba3ec8d3`，隔离数据库、Weaviate prefix、5000/8081 listener、本次 manifest、临时 build target 均清理为 0。证据见 `docs/refactor/evidence/cyanflow-current-main-release-runtime-2026-08-24.json`。
 - [x] 每个涉及 API/金额的已交付切片均保留整数分合同并人工复核；C7r、C7s 与本 reconciliation 没有 API 或金额字段改动。
 
 ## 11. 风险和反方观点

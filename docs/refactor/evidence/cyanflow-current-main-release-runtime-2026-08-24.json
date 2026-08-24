@@ -1,0 +1,136 @@
+{
+  "schema_version": "cyanflow-current-main-release-runtime.v1",
+  "work_id": "bill-analyser-cyanflow-current-main-release-runtime-20260824",
+  "audited_main": "a1bfdd6eced584584468df75ea8763f3d92c6c6e",
+  "branch": "codex/current-main-release-runtime",
+  "objective": "Prove that the current main source can produce and run a fresh bill_http_server through the canonical one-click startup path, then clean every artifact owned by the verification.",
+  "cyanflow": {
+    "decision": "proceed",
+    "lane": "flow",
+    "activity": "verify",
+    "verification": "affected_surface",
+    "action": "Inspect the canonical startup script for side effects, then use isolated runtime dependencies to verify current-main build attribution, backend and frontend readiness, binary SHA, and strict cleanup."
+  },
+  "preflight": {
+    "backend_port": 5000,
+    "frontend_port": 8081,
+    "ports_free": true,
+    "postgres_container": "healthy",
+    "weaviate_endpoint_reachable": true,
+    "business_source_diff_since_c0_current_main_audit": 0,
+    "local_compiler": "rustc 1.89.0 (29483883e 2025-08-04)",
+    "local_cargo": "cargo 1.89.0 (c24e10642 2025-06-23)",
+    "ci_compiler_contract": "Rust 1.98.0, proven by main run 16429"
+  },
+  "script_side_effect_audit": {
+    "entrypoint": "scripts/dev.ps1 check -> scripts/verify_one_click_start.ps1 -> one-click launcher",
+    "observed_writes": [
+      "Rust build output",
+      "PostgreSQL migrations and runtime tables in the selected database",
+      "run-scoped process manifest and logs under .git/ai/startup-gate",
+      "potential Weaviate collections under the selected prefix"
+    ],
+    "safety_decision": "Do not point the gate at the long-lived development database. Inject a run-owned PostgreSQL database, a run-owned Weaviate prefix, synthetic auth settings, and a fresh isolated Cargo target.",
+    "process_boundary": "The canonical gate refuses occupied ports and only stops processes whose PID, path, start time, and listener identity match its own manifest."
+  },
+  "rejected_or_superseded_observations": [
+    {
+      "observation": "The first isolated dependency run passed backend health and frontend readiness but reused the existing debug binary.",
+      "binary_sha256": "c7fe01dcbc28648bc38dc365488b5058e8b134191eaa0b38eb41439db99e1531",
+      "accepted_as_fresh_build_evidence": false,
+      "reason": "The business source tree was unchanged and therefore source-equivalent, but the binary timestamp predated the candidate-head gate. It was retained as a canonical startup smoke and replaced by a true fresh build."
+    },
+    {
+      "observation": "A backup-and-replace approach for the existing debug binary was proposed.",
+      "accepted_as_execution": false,
+      "reason": "The local safety policy rejected it before execution. No file or runtime state changed. The accepted method used a new isolated Cargo target and left the existing target/debug binary untouched."
+    }
+  ],
+  "source_attribution": {
+    "head": "a1bfdd6eced584584468df75ea8763f3d92c6c6e",
+    "head_subject": "docs(refactor): 对齐当前主线验收门禁 (#357)",
+    "source_worktree_diff_count": 0,
+    "backend_tree": "967e0a3ed255816fd7fa36486024102f98974a35",
+    "web_tree": "0aff25a6dd02a60af76b72f60dfa3b2be7f43588",
+    "cargo_toml_blob": "30e2934b678be33cd41b1460553a579595355dd8",
+    "cargo_lock_blob": "de22a4e4806065b6ef9e27013f2dd9f9a752f977",
+    "build_command": "cargo build --locked -p bill-analyser-http --bin bill_http_server with a new isolated CARGO_TARGET_DIR",
+    "build_duration": "1 minute 24 seconds",
+    "compiler": "rustc 1.89.0 (29483883e 2025-08-04)",
+    "cargo": "cargo 1.89.0 (c24e10642 2025-06-23)"
+  },
+  "fresh_binary": {
+    "path_shape": ".git/ai/release-runtime-build/<run>/debug/bill_http_server.exe",
+    "bytes": 51709440,
+    "sha256": "24005bfa33d524d330bdee78708a5b55544e0ba47b59d5a37f927f48ba3ec8d3",
+    "last_write_utc": "2026-08-24T09:08:38.2404536Z",
+    "rebuilt_after_gate_start": true,
+    "launcher_selection": "BILL_ANALYSER_RUST_HTTP_SERVER explicitly pointed the canonical launcher at this fresh binary."
+  },
+  "runtime_result": {
+    "canonical_command": "scripts/dev.ps1 check",
+    "backend_health": "http://127.0.0.1:5000/api/health ready",
+    "frontend_readiness": "http://127.0.0.1:8081 ready",
+    "one_click_gate": "passed",
+    "startup_log_names": [
+      "one-click-20260824-170840.out.log",
+      "one-click-20260824-170840.err.log"
+    ],
+    "paid_provider_request_executed": false,
+    "user_provider_configuration_copied": false
+  },
+  "cleanup": {
+    "isolated_database_remaining": 0,
+    "owned_weaviate_collections_before_cleanup": 0,
+    "owned_weaviate_collections_after_cleanup": 0,
+    "remaining_backend_or_frontend_listeners": 0,
+    "current_run_manifest_remaining": 0,
+    "isolated_cargo_target_remaining": 0,
+    "temporary_gate_script_remaining": 0,
+    "historical_manifests_preserved": "Seven manifests dated 2026-06-19 were outside this run and were not modified.",
+    "workspace_status": "user-owned .claude/settings.local.json only"
+  },
+  "compiler_observation": {
+    "local_runtime": "Rust 1.89.0",
+    "gitea_ci": "Rust 1.98.0",
+    "result": "Both current-main paths pass. The difference is explicit residual risk, not evidence for changing the user toolchain or adding a repository-wide toolchain file in this slice.",
+    "future_trigger": "A real local-versus-CI compiler incompatibility, unsupported minimum compiler requirement, or explicit user decision would justify a separate Cyanflow toolchain contract."
+  },
+  "acceptance": {
+    "release_runtime_attribution": "passed",
+    "consensus_progress_after_close": {
+      "evidence_closed": 25,
+      "open_or_blocked": 3,
+      "total": 28
+    },
+    "remaining_gates": [
+      "C4 missing-version breaking-contract enforcement",
+      "C5 target-database signal read cutover",
+      "C6 target-database typed receipt read cutover"
+    ]
+  },
+  "verification": {
+    "evidence_json_parse": "passed for the runtime and updated reconciliation evidence",
+    "acceptance_count_check": "passed: 25 checked plus 3 explicitly open or blocked equals 28 total; reconciliation summary and open-gate inventory match",
+    "rust_only_source_tree": "passed with 2102 tracked paths",
+    "backend_doc_map": "passed",
+    "docs_diff_check": "passed for the owned diff",
+    "dual_axis_review": {
+      "comparison_point": "a1bfdd6eced584584468df75ea8763f3d92c6c6e",
+      "standards": {
+        "result": "passed",
+        "findings": [],
+        "evidence": "The accepted evidence comes from a fresh isolated build, the canonical process-manifest startup gate, exact source objects, a content hash, and independently checked cleanup counts. It contains no credential, private payload, production database identifier, or user provider configuration."
+      },
+      "spec": {
+        "result": "passed",
+        "findings": [],
+        "evidence": "The fresh binary ran backend health and frontend readiness from the audited head, every run-owned database, collection, listener, manifest, build target, and temporary script was absent after cleanup, and only the release runtime acceptance item is closed."
+      },
+      "test_gaps": [
+        "The local compiler remains Rust 1.89 while CI is pinned to Rust 1.98; both pass, so alignment remains observation rather than an accepted implementation slice."
+      ]
+    },
+    "delivery": "pending exact-head PR CI, squash merge, main exact-head CI, and source-branch deletion"
+  }
+}
