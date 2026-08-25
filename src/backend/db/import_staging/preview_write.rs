@@ -227,7 +227,7 @@ async fn insert_preview_rows_batch_async(
         rows.len()
             .min(IMPORT_PREVIEW_SIGNAL_SHADOW_SAMPLE_SIZE),
     );
-    for chunk in rows.chunks(IMPORT_STAGING_BULK_INSERT_CHUNK_SIZE) {
+    for chunk in rows.chunks(IMPORT_PREVIEW_BULK_INSERT_CHUNK_SIZE) {
         let mut query = build_preview_rows_insert_query(session_db_id, user_id, chunk);
         let inserted = query.build().fetch_all(&mut **tx).await?;
         for row in inserted.iter().take(

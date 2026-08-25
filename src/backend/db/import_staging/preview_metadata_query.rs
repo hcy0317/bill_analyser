@@ -167,8 +167,12 @@ fn build_preview_metadata_aggregate_query_with_signal_read_source(
         PreviewSignalReadSource::TypedV1 => query.push("p.signal_parser AS read_signal_parser, p.signal_platform_duplicate AS read_signal_platform_duplicate, p.signal_transfer AS read_signal_transfer, p.signal_history AS read_signal_history, p.signal_learning AS read_signal_learning, p.signal_llm AS read_signal_llm, "),
     };
     query.push("c.id AS facet_category_id, c.path AS facet_category_path, c.name AS facet_category_name, source_account.id AS facet_source_account_id, source_account.name AS facet_source_account_name, target_account.id AS facet_target_account_id, target_account.name AS facet_target_account_name, ");
-    push_preview_current_review_condition_with_joins(&mut query, "p");
-    query.push(" AS needs_review FROM import_preview_rows p");
+    push_preview_current_review_condition_with_joins(
+        &mut query,
+        "p",
+        "matching_feedback.read_matching_feedback",
+    );
+    query.push(" AS needs_review FROM import_preview_rows p CROSS JOIN LATERAL (SELECT p.preview_payload->'preview_matching_feedback' AS read_matching_feedback OFFSET 0) matching_feedback");
     if signal_read_source == PreviewSignalReadSource::LegacyPayload {
         query.push(" CROSS JOIN LATERAL jsonb_to_record(import_preview_signal_flags(p.preview_payload)) AS signal_flags(parser BOOLEAN, platform_duplicate BOOLEAN, transfer BOOLEAN, history BOOLEAN, learning BOOLEAN, llm BOOLEAN)");
     }

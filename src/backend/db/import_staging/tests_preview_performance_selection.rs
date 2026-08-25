@@ -261,3 +261,28 @@ fn preview_metadata_reuses_materialized_identity_labels_for_all_facets() {
         "source and destination identity joins must also supply account facet labels"
     );
 }
+
+#[test]
+fn preview_metadata_extracts_matching_feedback_once_per_scope_row() {
+    let mut query = build_preview_metadata_aggregate_query(
+        1,
+        2,
+        &ImportPreviewQueryFilters::default(),
+    );
+    let sql = query.build().sql().to_string();
+
+    assert!(sql.contains(
+        "CROSS JOIN LATERAL (SELECT p.preview_payload->'preview_matching_feedback' AS read_matching_feedback OFFSET 0) matching_feedback"
+    ));
+    assert_eq!(
+        sql.matches("p.preview_payload->'preview_matching_feedback'").count(),
+        1,
+        "metadata scope must detoast and extract the matching feedback object once per row"
+    );
+    assert!(sql.contains(
+        "matching_feedback.read_matching_feedback#>>'{transfer,review_status}'"
+    ));
+    assert!(!sql.contains(
+        "p.preview_payload#>>'{preview_matching_feedback,transfer,review_status}'"
+    ));
+}

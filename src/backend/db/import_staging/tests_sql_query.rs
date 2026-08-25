@@ -411,6 +411,23 @@ fn bulk_insert_query_builders_preserve_insert_shapes() {
 }
 
 #[test]
+fn preview_bulk_insert_chunk_policy_respects_postgres_bind_budget() {
+    const POSTGRES_BIND_PARAMETER_LIMIT: usize = 65_535;
+    const PREVIEW_BINDS_PER_ROW: usize = 24;
+
+    assert_eq!(IMPORT_STAGING_BULK_INSERT_CHUNK_SIZE, 500);
+    assert_eq!(IMPORT_PREVIEW_BULK_INSERT_CHUNK_SIZE, 2_000);
+    let preview_bind_count = IMPORT_PREVIEW_BULK_INSERT_CHUNK_SIZE
+        .checked_mul(PREVIEW_BINDS_PER_ROW)
+        .expect("preview bind count must fit usize");
+    assert!(preview_bind_count <= POSTGRES_BIND_PARAMETER_LIMIT);
+    assert_eq!(
+        13_082usize.div_ceil(IMPORT_PREVIEW_BULK_INSERT_CHUNK_SIZE),
+        7
+    );
+}
+
+#[test]
 fn signal_projection_shadow_sql_is_read_only_and_covers_every_family() {
     let normalized = IMPORT_PREVIEW_SIGNAL_PROJECTION_PARITY_SQL.to_ascii_lowercase();
 

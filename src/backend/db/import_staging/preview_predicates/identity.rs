@@ -54,6 +54,7 @@ fn push_preview_current_review_condition(query: &mut QueryBuilder<'_, Postgres>,
 fn push_preview_current_review_condition_with_joins(
     query: &mut QueryBuilder<'_, Postgres>,
     alias: &str,
+    matching_feedback_expr: &str,
 ) {
     query.push("((");
     push_preview_category_required_type_condition(query, alias);
@@ -62,7 +63,10 @@ fn push_preview_current_review_condition_with_joins(
     query.push(".category_id IS NULL OR c.id IS NULL OR (");
     push_preview_category_type_mismatch_condition(query, alias, "c");
     query.push(" AND NOT ");
-    push_preview_manual_category_ownership_condition(query, alias);
+    push_preview_manual_category_ownership_from_matching_feedback_condition(
+        query,
+        matching_feedback_expr,
+    );
     query.push(")");
     query.push(")) OR (");
     query.push(alias);
@@ -73,10 +77,27 @@ fn push_preview_current_review_condition_with_joins(
     query.push(".transfer_target_account_id IS NULL OR target_account.id IS NULL)) OR ");
     push_preview_same_transfer_accounts_condition(query, alias);
     query.push(" OR ");
-    push_preview_identity_feedback_condition(query, alias);
+    push_preview_identity_feedback_from_matching_feedback_condition(
+        query,
+        matching_feedback_expr,
+    );
     query.push(" OR ");
-    push_preview_unknown_signal_status_condition(query, alias);
+    push_preview_unknown_signal_status_from_matching_feedback_condition(
+        query,
+        matching_feedback_expr,
+    );
     query.push(")");
+}
+
+fn push_preview_identity_feedback_from_matching_feedback_condition(
+    query: &mut QueryBuilder<'_, Postgres>,
+    matching_feedback_expr: &str,
+) {
+    query.push("COALESCE((jsonb_typeof(");
+    query.push(matching_feedback_expr);
+    query.push("#>'{identity_validation,issues}') = 'array' AND jsonb_array_length(");
+    query.push(matching_feedback_expr);
+    query.push("#>'{identity_validation,issues}') > 0), false)");
 }
 
 fn push_preview_identity_feedback_condition(query: &mut QueryBuilder<'_, Postgres>, alias: &str) {
@@ -115,6 +136,15 @@ fn push_preview_manual_category_ownership_condition(
     query.push("COALESCE((");
     query.push(alias);
     query.push(".preview_payload#>'{preview_matching_feedback,annotation,manual_fields,category_id}') = 'true'::jsonb, false)");
+}
+
+fn push_preview_manual_category_ownership_from_matching_feedback_condition(
+    query: &mut QueryBuilder<'_, Postgres>,
+    matching_feedback_expr: &str,
+) {
+    query.push("COALESCE((");
+    query.push(matching_feedback_expr);
+    query.push("#>'{annotation,manual_fields,category_id}') = 'true'::jsonb, false)");
 }
 
 fn push_preview_missing_source_account_condition(
