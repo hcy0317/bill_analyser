@@ -222,10 +222,19 @@ fn apply_patch_changes_to_preview(
     if !is_manual {
         return Ok(());
     }
-    let edited_fields = changes.iter().filter_map(|(field, _)| match field {
-        ImportPreviewPatchField::CategoryId => Some("category_id"),
-        ImportPreviewPatchField::SourceAccountId => Some("source_account_id"),
-        ImportPreviewPatchField::DestinationAccountId => Some("destination_account_id"),
+    let edited_fields = changes.iter().filter_map(|(field, value)| match field {
+        ImportPreviewPatchField::CategoryId => Some((
+            "category_id",
+            matches!(value, ImportPreviewPatchValue::Integer(id) if *id > 0),
+        )),
+        ImportPreviewPatchField::SourceAccountId => Some((
+            "source_account_id",
+            matches!(value, ImportPreviewPatchValue::Integer(id) if *id > 0),
+        )),
+        ImportPreviewPatchField::DestinationAccountId => Some((
+            "destination_account_id",
+            matches!(value, ImportPreviewPatchValue::Integer(id) if *id > 0),
+        )),
         _ => None,
     });
     mark_manual_identity_ownership(preview, payload, edited_fields);
@@ -235,7 +244,7 @@ fn apply_patch_changes_to_preview(
 fn mark_manual_identity_ownership<'a>(
     preview: &mut ImportPreviewRow,
     payload: &mut Value,
-    edited_fields: impl Iterator<Item = &'a str>,
+    edited_fields: impl Iterator<Item = (&'a str, bool)>,
 ) {
     let edited_fields = edited_fields.collect::<Vec<_>>();
     let feedback = preview
@@ -260,11 +269,11 @@ fn mark_manual_identity_ownership<'a>(
             .entry(field.to_string())
             .or_insert_with(|| json!(false));
     }
-    for field in &edited_fields {
+    for (field, owned) in &edited_fields {
         manual_fields
             .as_object_mut()
             .expect("manual fields object")
-            .insert((*field).to_string(), json!(true));
+            .insert((*field).to_string(), json!(owned));
     }
     if let Some(transfer) = feedback.get_mut("transfer").and_then(Value::as_object_mut) {
         let owned_fields = transfer
@@ -281,7 +290,7 @@ fn mark_manual_identity_ownership<'a>(
                 .collect();
             *owned_fields = Value::Object(prior);
         }
-        for field in edited_fields {
+        for (field, _) in edited_fields {
             owned_fields
                 .as_object_mut()
                 .expect("owned fields object")

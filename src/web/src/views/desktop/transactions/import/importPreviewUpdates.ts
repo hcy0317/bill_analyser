@@ -15,6 +15,7 @@ import { requireStrictIntegerCents } from './strictCents.ts';
 
 export interface BuildImportPreviewUpdateFromTransactionOptions {
     categoryPath: ImportPreviewResolvedCategoryPath | null;
+    baseline?: ImportPreviewUpdateBaseline;
     validAccountIds?: ReadonlySet<string>;
     clearTransferDecision?: boolean;
     clearLearningDecision?: boolean;
@@ -22,23 +23,31 @@ export interface BuildImportPreviewUpdateFromTransactionOptions {
     includeSuggestionDecisionClears?: boolean;
 }
 
-export type ImportPreviewUpdatePayload = ImportPreviewPatchPayload & {
-    preview_type: string;
-    preview_amount_cents: number;
-    preview_destination_amount_cents: number;
-    preview_source_account_id: number | null;
-    preview_destination_account_id: number | null;
-    preview_recurring_id: number | null;
-    preview_recurring_name: string;
-    preview_recurring_candidate_count: number;
-    preview_recurring_match_score: number;
-    preview_recurring_match_reasons: string;
-    preview_recurring_matched_date: string;
-    category_id: number | null;
-    preview_main_category: string;
-    preview_sub_category: string;
-    clear_transfer_decision: boolean;
+export interface ImportPreviewUpdateBaseline {
     selected: boolean;
+    type: number;
+    categoryId: string;
+    sourceAmountCents: number;
+    destinationAmountCents: number;
+    sourceAccountId: string;
+    destinationAccountId: string;
+    tagIds: string[];
+    counterparty: string;
+    paymentMethod: string;
+    comment: string;
+    isManuallyAnnotated: boolean;
+    recurringTemplateId: string;
+    recurringTemplateName: string;
+    recurringCandidateCount: number;
+    recurringMatchScore: number;
+    recurringMatchReasons: string;
+    recurringMatchedDate: string;
+}
+
+export type ImportPreviewUpdatePayload = ImportPreviewPatchPayload & {
+    clear_learning_decision?: boolean;
+    clear_llm_decision?: boolean;
+    clear_actionable_suggestions?: string[];
 };
 
 function parseOptionalInteger(
@@ -126,6 +135,97 @@ export function buildImportPreviewUpdateFromTransaction(
         clearLlmDecision ? 'llm' : ''
     ].filter(Boolean);
     const categoryPath = options.categoryPath;
+    const baseline = options.baseline;
+    if (baseline) {
+        const update: ImportPreviewUpdatePayload = {
+            id: previewId,
+            expected_row_version: expectedRowVersion
+        };
+        let hasManualEdit = false;
+        if (baseline.type !== transaction.type) {
+            update.preview_type = getImportPreviewTransactionTypeLabel(transaction.type);
+            hasManualEdit = true;
+        }
+        if (baseline.sourceAmountCents !== transaction.sourceAmountCents) {
+            update.preview_amount_cents = requireStrictIntegerCents(
+                transaction.sourceAmountCents,
+                'sourceAmountCents'
+            );
+            hasManualEdit = true;
+        }
+        if (baseline.destinationAmountCents !== transaction.destinationAmountCents) {
+            update.preview_destination_amount_cents = requireStrictIntegerCents(
+                transaction.destinationAmountCents,
+                'destinationAmountCents'
+            );
+            hasManualEdit = true;
+        }
+        if (baseline.categoryId !== String(transaction.categoryId || '')) {
+            update.category_id = categoryPath ? parseInt(categoryPath.id, 10) : null;
+            update.preview_main_category = categoryPath?.mainCategory || '';
+            update.preview_sub_category = categoryPath?.subCategory || '';
+            hasManualEdit = true;
+        }
+        if (baseline.sourceAccountId !== String(transaction.sourceAccountId || '')) {
+            update.preview_source_account_id = parseOptionalInteger(
+                transaction.sourceAccountId,
+                options.validAccountIds
+            );
+            hasManualEdit = true;
+        }
+        if (baseline.destinationAccountId !== String(transaction.destinationAccountId || '')) {
+            update.preview_destination_account_id = parseOptionalInteger(
+                transaction.destinationAccountId,
+                options.validAccountIds
+            );
+            hasManualEdit = true;
+        }
+        if (baseline.counterparty !== String(transaction.counterparty || '')) {
+            update['preview_counterparty'] = transaction.counterparty || '';
+            hasManualEdit = true;
+        }
+        if (baseline.paymentMethod !== String(transaction.paymentMethod || '')) {
+            update['preview_payment_method'] = transaction.paymentMethod || '';
+            hasManualEdit = true;
+        }
+        if (baseline.comment !== String(transaction.comment || '')) {
+            update['preview_description'] = transaction.comment || '';
+            hasManualEdit = true;
+        }
+        if (baseline.recurringTemplateId !== String(transaction.recurringTemplateId || '')) {
+            update.preview_recurring_id = parseOptionalInteger(transaction.recurringTemplateId);
+        }
+        if (baseline.recurringTemplateName !== String(transaction.recurringTemplateName || '')) {
+            update.preview_recurring_name = transaction.recurringTemplateName || '';
+        }
+        if (baseline.recurringCandidateCount !== Number(transaction.recurringCandidateCount || 0)) {
+            update.preview_recurring_candidate_count = transaction.recurringCandidateCount || 0;
+        }
+        if (baseline.recurringMatchScore !== Number(transaction.recurringMatchScore || 0)) {
+            update.preview_recurring_match_score = transaction.recurringMatchScore || 0;
+        }
+        if (baseline.recurringMatchReasons !== String(transaction.recurringMatchReasons || '')) {
+            update.preview_recurring_match_reasons = transaction.recurringMatchReasons || '';
+        }
+        if (baseline.recurringMatchedDate !== String(transaction.recurringMatchedDate || '')) {
+            update.preview_recurring_matched_date = transaction.recurringMatchedDate || '';
+        }
+        if (baseline.selected !== transaction.selected) {
+            update.selected = transaction.selected;
+        }
+        if (hasManualEdit && transaction.isManuallyAnnotated) {
+            update.is_manually_annotated = true;
+        }
+        appendSuggestionDecisionClears(update, {
+            clearTransferDecision,
+            clearLearningDecision,
+            clearLlmDecision,
+            clearActionableSuggestions,
+            includeSuggestionDecisionClears: !!options.includeSuggestionDecisionClears
+        });
+        return update;
+    }
+
     const update: ImportPreviewUpdatePayload = {
         id: previewId,
         expected_row_version: expectedRowVersion,
@@ -152,17 +252,40 @@ export function buildImportPreviewUpdateFromTransaction(
     if (transaction.isManuallyAnnotated) {
         update['is_manually_annotated'] = true;
     }
-    if (options.includeSuggestionDecisionClears) {
-        if (clearLearningDecision) {
-            update['clear_learning_decision'] = true;
-        }
-        if (clearLlmDecision) {
-            update['clear_llm_decision'] = true;
-        }
-        if (clearActionableSuggestions.length > 0) {
-            update['clear_actionable_suggestions'] = clearActionableSuggestions;
-        }
-    }
+    appendSuggestionDecisionClears(update, {
+        clearTransferDecision,
+        clearLearningDecision,
+        clearLlmDecision,
+        clearActionableSuggestions,
+        includeSuggestionDecisionClears: !!options.includeSuggestionDecisionClears
+    });
 
     return update;
+}
+
+function appendSuggestionDecisionClears(
+    update: ImportPreviewUpdatePayload,
+    options: {
+        clearTransferDecision: boolean;
+        clearLearningDecision: boolean;
+        clearLlmDecision: boolean;
+        clearActionableSuggestions: string[];
+        includeSuggestionDecisionClears: boolean;
+    }
+): void {
+    if (options.clearTransferDecision) {
+        update.clear_transfer_decision = true;
+    }
+    if (!options.includeSuggestionDecisionClears) {
+        return;
+    }
+    if (options.clearLearningDecision) {
+        update.clear_learning_decision = true;
+    }
+    if (options.clearLlmDecision) {
+        update.clear_llm_decision = true;
+    }
+    if (options.clearActionableSuggestions.length > 0) {
+        update.clear_actionable_suggestions = options.clearActionableSuggestions;
+    }
 }

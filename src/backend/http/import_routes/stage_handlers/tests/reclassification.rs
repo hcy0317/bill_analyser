@@ -102,6 +102,22 @@
     }
 
     #[test]
+    fn missing_category_cannot_become_a_manual_category_identity() {
+        let draft = ImportPreviewDraft {
+            category_id: None,
+            preview_matching_feedback: json!({
+                "annotation": {
+                    "is_manually_annotated": true,
+                    "manual_fields": {"category_id": true}
+                }
+            }),
+            ..ImportPreviewDraft::default()
+        };
+
+        assert!(manual_category_identity(&draft).is_none());
+    }
+
+    #[test]
     fn reclassify_preserves_non_history_reconciliation_evidence() {
         let mut draft = ImportPreviewDraft {
             preview_matching_feedback: json!({

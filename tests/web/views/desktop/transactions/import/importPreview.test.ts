@@ -480,11 +480,11 @@ describe('import preview server-paged reset guards', () => {
         expect(tabSource).toContain('includeSuggestionDecisionClears: true');
         expect(updateSource).toContain("clearLearningDecision ? 'learning' : ''");
         expect(updateSource).toContain("clearLlmDecision ? 'llm' : ''");
-        expect(updateSource).toContain('if (clearLearningDecision) {');
-        expect(updateSource).toContain("update['clear_learning_decision'] = true;");
-        expect(updateSource).toContain('if (clearLlmDecision) {');
-        expect(updateSource).toContain("update['clear_llm_decision'] = true;");
-        expect(updateSource).toContain('if (clearActionableSuggestions.length > 0) {');
+        expect(updateSource).toContain('if (options.clearLearningDecision) {');
+        expect(updateSource).toContain('update.clear_learning_decision = true;');
+        expect(updateSource).toContain('if (options.clearLlmDecision) {');
+        expect(updateSource).toContain('update.clear_llm_decision = true;');
+        expect(updateSource).toContain('if (options.clearActionableSuggestions.length > 0) {');
         expect(tabSource.match(/syncTransferDecisionDraftState\(/g)).toHaveLength(2);
 
         const rehydrateStart = tabSource.indexOf('function rehydrateCurrentPageDrafts');

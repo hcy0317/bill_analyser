@@ -86,6 +86,63 @@ fn preview_patch_projection_applies_manual_identity_and_clears_decision_signals(
 }
 
 #[test]
+fn manual_null_identity_patch_releases_ownership_instead_of_claiming_missing_values() {
+    let mut row = preview_row(1);
+    row.preview_matching_feedback = json!({
+        "annotation": {
+            "manual_fields": {
+                "category_id": true,
+                "source_account_id": false,
+                "destination_account_id": false
+            }
+        }
+    });
+    let payload = json!({
+        "preview_matching_feedback": row.preview_matching_feedback.clone()
+    });
+    let patch = ImportPreviewPatch::new(row.id).with_changes([
+        (
+            ImportPreviewPatchField::ManualAnnotation,
+            ImportPreviewPatchValue::Bool(true),
+        ),
+        (
+            ImportPreviewPatchField::CategoryId,
+            ImportPreviewPatchValue::Null,
+        ),
+        (
+            ImportPreviewPatchField::SourceAccountId,
+            ImportPreviewPatchValue::Integer(12),
+        ),
+    ]);
+    let identity_maps = ImportIdentityMaps {
+        active_accounts: BTreeSet::from([11, 12]),
+        active_categories: BTreeMap::new(),
+    };
+
+    let projection = project_preview_patch(row, payload, &patch, &identity_maps)
+        .expect("manual null identity projection");
+
+    assert_eq!(
+        projection
+            .payload
+            .pointer("/preview_matching_feedback/annotation/manual_fields/category_id"),
+        Some(&json!(false))
+    );
+    assert_eq!(
+        projection
+            .payload
+            .pointer("/preview_matching_feedback/annotation/manual_fields/source_account_id"),
+        Some(&json!(true))
+    );
+    assert_eq!(
+        projection
+            .payload
+            .pointer("/preview_matching_feedback/identity_validation/issues/0/field"),
+        Some(&json!("category_id"))
+    );
+}
+
+#[test]
 fn preview_patch_projection_rejects_invalid_field_value_pairs() {
     let row = preview_row(1);
     let patch = ImportPreviewPatch::new(row.id).with_change(

@@ -923,6 +923,52 @@ describe('desktop import selection, paging, and edit contracts', () => {
         }
     });
 
+    test('server select-none clears matching hidden drafts so later actions cannot resubmit them', async () => {
+        const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+        const currentPage = createTransaction({ id: 49, selected: true });
+        const previousPage = createTransaction({ id: 50, selected: true });
+        try {
+            const bindings = createBindings({
+                transactions: [currentPage],
+                serverPaged: true,
+                sessionId: 'cross-page/select-none',
+                total: 2,
+                metadata: {
+                    counts: { total: 2, selected: 2 },
+                    selection_hash: 'fnv1a32:51000000'
+                }
+            });
+            bindings.serverPagedDraftBaselines.value = new Map([[
+                50,
+                bindings.captureImportPreviewEditableDraftState(previousPage)
+            ]]);
+            bindings.serverPagedDrafts.value = new Map([[50, previousPage]]);
+            mockApplyImportPreviewSelectionAction.mockResolvedValueOnce({
+                data: {
+                    result: {
+                        updated: 2,
+                        applied_preview_updates: 0,
+                        selectionAction: 'select_none',
+                        metadata: {
+                            counts: { total: 2, selected: 0 },
+                            selection_hash: 'fnv1a32:52000000'
+                        },
+                        previewItems: []
+                    }
+                }
+            });
+
+            await bindings.selectNone();
+
+            expect(currentPage.selected).toBe(false);
+            expect(bindings.serverPagedDrafts.value.get(50)?.selected).toBe(false);
+            expect(bindings.getSelectedPreviewIds()).toEqual([]);
+            expect(bindings.buildSelectedPreviewUpdates()).toEqual([]);
+        } finally {
+            warnSpy.mockRestore();
+        }
+    });
+
     test('a second conditional selection includes edits made after the first selection succeeds', async () => {
         const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
         const edited = createTransaction({ id: 48, categoryId: '', sourceAccountId: 'wallet' });

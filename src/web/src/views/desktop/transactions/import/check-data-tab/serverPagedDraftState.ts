@@ -1,7 +1,10 @@
 import type { ImportTransaction } from '@/models/imported_transaction.ts';
 
 import { cloneImportPreviewDraftTransaction } from '../importPreviewDrafts.ts';
-import { getPreviewUpdateId } from '../importPreviewUpdates.ts';
+import {
+    getPreviewUpdateId,
+    type ImportPreviewUpdateBaseline
+} from '../importPreviewUpdates.ts';
 
 export const importPreviewEditableDraftKeys = [
     'selected',
@@ -32,12 +35,9 @@ const importPreviewValidityDraftKeys = [
     'destinationAccountId'
 ] as const satisfies readonly ImportPreviewEditableDraftKey[];
 
-export type ImportPreviewEditableDraftKey = typeof importPreviewEditableDraftKeys[number];
+export type ImportPreviewEditableDraftKey = keyof ImportPreviewUpdateBaseline;
 export type ImportPreviewEditableDraftValue = string | number | boolean | string[];
-export type ImportPreviewEditableDraftState = Record<
-    ImportPreviewEditableDraftKey,
-    ImportPreviewEditableDraftValue
->;
+export type ImportPreviewEditableDraftState = ImportPreviewUpdateBaseline;
 export type ServerPagedSelectionAction = 'select_all'
     | 'select_valid'
     | 'select_invalid'
@@ -131,7 +131,7 @@ export function mergeImportPreviewEditableDraftBaseline(
             key,
             cloneImportPreviewEditableDraftValue(serverState[key])
         ])
-    ) as ImportPreviewEditableDraftState;
+    ) as unknown as ImportPreviewEditableDraftState;
     for (const key of importPreviewEditableDraftKeys) {
         const draftChanged = !isImportPreviewEditableDraftValueEqual(
             draftState[key], baselineState[key]
@@ -201,6 +201,26 @@ export function resolveServerPagedEditingTransaction(
     }
     const transaction = transactions.find(item => getPreviewId(item) === editingPreviewId) || null;
     return { transaction, tags: transaction ? [...transaction.tagIds] : [] };
+}
+
+export function dropAcknowledgedServerPagedDraftState<TSelectionBaseline>(
+    enabled: boolean,
+    previewIds: readonly number[],
+    drafts: ReadonlyMap<number, ImportTransaction>,
+    baselines: ReadonlyMap<number, ImportPreviewEditableDraftState>,
+    selectionBaselines: ReadonlyMap<number, TSelectionBaseline>
+): [Map<number, ImportTransaction>, Map<number, ImportPreviewEditableDraftState>, Map<number, TSelectionBaseline>] {
+    const nextDrafts = new Map(drafts);
+    const nextBaselines = new Map(baselines);
+    const nextSelectionBaselines = new Map(selectionBaselines);
+    if (enabled) {
+        for (const previewId of previewIds) {
+            nextDrafts.delete(previewId);
+            nextBaselines.delete(previewId);
+            nextSelectionBaselines.delete(previewId);
+        }
+    }
+    return [nextDrafts, nextBaselines, nextSelectionBaselines];
 }
 
 export function reconcileServerPagedDraftStateAfterSelection(options: {

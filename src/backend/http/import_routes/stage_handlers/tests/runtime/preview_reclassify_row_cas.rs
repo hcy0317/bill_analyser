@@ -186,3 +186,92 @@
             "successful reclassify must return a newer row token: {body}"
         );
     }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn reclassify_repairs_a_missing_category_even_when_stale_feedback_claims_manual_ownership() {
+        let Some((state, user_id, session_id)) = import_postgres_test_state().await else {
+            return;
+        };
+        let runtime = state
+            .open_postgres_repository_runtime("reclassify-stale-null-manual-category")
+            .expect("postgres runtime");
+        let pool = runtime.pool();
+        let canonical_user = UserId::new(user_id as u64).expect("positive user id");
+        let account_id: i64 = sqlx::query_scalar(
+            "INSERT INTO accounts (user_id,name,account_type,is_active) VALUES($1,'重分类修复账户','asset',true) RETURNING id",
+        )
+        .bind(user_id)
+        .fetch_one(pool)
+        .await
+        .expect("insert reclassify account");
+        let category_id: i64 = sqlx::query_scalar(
+            "INSERT INTO categories (user_id,name,category_type,path,is_active) VALUES($1,'重分类修复分类','3','测试/重分类修复分类',true) RETURNING id",
+        )
+        .bind(user_id)
+        .fetch_one(pool)
+        .await
+        .expect("insert reclassify category");
+        sqlx::query(
+            "INSERT INTO category_rules (user_id,category_id,name,rule_expression,priority,enabled) VALUES ($1,$2,'重分类修复规则',$3,1,true)",
+        )
+        .bind(user_id)
+        .bind(category_id)
+        .bind(json!({"expression":"OR={stale-null-rematch}","regex_enabled":false}))
+        .execute(pool)
+        .await
+        .expect("insert reclassify category rule");
+        let preview_id = bill_analyser_db::insert_preview_bill(
+            pool,
+            &session_id,
+            canonical_user,
+            &ImportPreviewDraft {
+                preview_date: "2026-08-13 11:00:00".into(),
+                preview_type: "支出".into(),
+                preview_amount_cents: 4_200,
+                preview_source_account_id: Some(account_id),
+                preview_description: "stale-null-rematch".into(),
+                preview_selected: false,
+                preview_matching_feedback: json!({
+                    "annotation": {
+                        "is_manually_annotated": true,
+                        "manual_fields": {
+                            "category_id": true,
+                            "source_account_id": false,
+                            "destination_account_id": false
+                        }
+                    },
+                    "identity_validation": {
+                        "review_status": "requires_identity_review",
+                        "issues": [{"field":"category_id","reason":"missing","value":null}]
+                    }
+                }),
+                ..ImportPreviewDraft::default()
+            },
+        )
+        .expect("insert stale null manual preview");
+        let before = bill_analyser_db::get_preview_bill_by_id(pool, preview_id, canonical_user)
+            .expect("load stale null preview")
+            .expect("stale null preview exists");
+
+        let (status, body) = import_test_response(
+            import_reclassify_runtime_handler(
+                State(state),
+                Path(session_id.clone()),
+                import_test_headers(user_id),
+                Json(json!({
+                    "preview_updates": [{
+                        "id": preview_id,
+                        "expected_row_version": before.version
+                    }]
+                })),
+            )
+            .await,
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK, "body: {body}");
+        assert_eq!(body["data"]["preview"][0]["category_id"], category_id);
+        assert!(body["data"]["preview"][0]
+            .pointer("/preview_matching_feedback/identity_validation")
+            .is_none());
+    }

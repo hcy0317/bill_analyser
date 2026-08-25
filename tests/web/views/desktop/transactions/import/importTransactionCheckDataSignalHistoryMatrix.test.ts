@@ -670,6 +670,25 @@ describe('desktop import async action branch matrix', () => {
         expect(mockShowMessage).toHaveBeenCalledWith('stale preview');
     });
 
+    test('server-paged reclassify drops acknowledged drafts before the canonical page reload', async () => {
+        const selected = createTransaction(62);
+        (selected as ImportTransaction & { _rowVersion?: number })._rowVersion = 5;
+        const { bindings } = createBindings([selected], 'signal-session', true);
+        const baseline = bindings.captureImportPreviewEditableDraftState(selected);
+        bindings.serverPagedDrafts.value = new Map([[62, selected]]);
+        bindings.serverPagedDraftBaselines.value = new Map([[62, baseline]]);
+        bindings.serverPagedSelectionBaselines.value = new Map([[62, true]]);
+        mockReclassifyImportPreview.mockResolvedValueOnce({
+            data: { result: { preview: [{ id: 62, row_version: 6 }] } }
+        });
+
+        await bindings.reclassifySelected();
+
+        expect(bindings.serverPagedDrafts.value.has(62)).toBe(false);
+        expect(bindings.serverPagedDraftBaselines.value.has(62)).toBe(false);
+        expect(bindings.serverPagedSelectionBaselines.value.has(62)).toBe(false);
+    });
+
     test('LLM bulk recommendation guards empty state and uses all-matching when no rows are selected', async () => {
         const selected = createTransaction(71);
         (selected as ImportTransaction & { _rowVersion?: number })._rowVersion = 11;

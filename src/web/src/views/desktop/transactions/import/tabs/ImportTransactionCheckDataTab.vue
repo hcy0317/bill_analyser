@@ -934,6 +934,7 @@ import {
     cacheServerPagedDraftState,
     captureImportPreviewEditableDraftState as captureImportPreviewEditableDraftStateValue,
     cloneImportTransaction as cloneImportTransactionValue,
+    dropAcknowledgedServerPagedDraftState,
     hasServerPagedValidityDraftChanges as hasServerPagedValidityDraftStateChanges,
     mergeImportPreviewEditableDraftBaseline,
     reconcileServerPagedDraftStateAfterSelection,
@@ -2873,6 +2874,17 @@ async function reclassifySelected(): Promise<void> {
                     .map(getPreviewUpdateId)
                     .filter((previewId): previewId is number => previewId !== null)
             ));
+            [
+                serverPagedDrafts.value,
+                serverPagedDraftBaselines.value,
+                serverPagedSelectionBaselines.value
+            ] = dropAcknowledgedServerPagedDraftState(
+                serverPagedMode.value,
+                reclassifiedPreviewIds,
+                serverPagedDrafts.value,
+                serverPagedDraftBaselines.value,
+                serverPagedSelectionBaselines.value
+            );
             emit('reclassified', result.preview, reclassifiedPreviewIds);
             snackbar.value?.showMessage('format.misc.youHaveUpdatedTransactions', {
                 count: getDisplayCount(result.preview.length)
@@ -2904,6 +2916,7 @@ function buildPreviewUpdatesForTransactions(
     const validAccountIds = new Set(allVisibleAccounts.value.map(account => String(account.id)));
 
     return transactions.map(transaction => {
+        const previewId = getPreviewId(transaction);
         const categoryPath = getAcceptedCategoryPathForTransaction(transaction);
         const clearTransferDecision = shouldClearTransferDecisionOnSync(transaction);
         const clearLearningDecision = shouldClearLearningDecisionOnSync(transaction);
@@ -2911,6 +2924,9 @@ function buildPreviewUpdatesForTransactions(
 
         return buildImportPreviewUpdateFromTransaction(transaction, {
             categoryPath,
+            baseline: serverPagedMode.value && previewId !== null
+                ? serverPagedDraftBaselines.value.get(previewId)
+                : undefined,
             validAccountIds,
             clearTransferDecision,
             clearLearningDecision,
@@ -4634,13 +4650,15 @@ async function applyServerPagedSelection(action: ServerPagedSelectionAction): Pr
         return true;
     }
 
-    const selectionSnapshot = importTransactions.value.map(transaction => ({
+    const trackedSelectionTransactions = getTrackedTransactionsForSelection()
+        .filter(isTransactionDisplayed);
+    const selectionSnapshot = trackedSelectionTransactions.map(transaction => ({
         transaction,
         selected: transaction.selected
     }));
     emit('invalidatePageRequest');
     const previewUpdates = buildConditionalSelectionPreviewUpdates(action);
-    applySelectionActionToLocalTransactions(action, importTransactions.value);
+    applySelectionActionToLocalTransactions(action, trackedSelectionTransactions);
     serverPagedSelectionBusy.value = true;
     try {
         const response = await services.applyImportPreviewSelectionAction({

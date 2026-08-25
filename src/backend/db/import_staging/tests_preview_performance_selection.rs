@@ -234,3 +234,30 @@ fn preview_metadata_scans_projected_scope_once_for_core_aggregates() {
         "core preview metadata must use conditional aggregation instead of scalar subquery rescans"
     );
 }
+
+#[test]
+fn preview_metadata_reuses_materialized_identity_labels_for_all_facets() {
+    let mut query = build_preview_metadata_aggregate_query(
+        1,
+        2,
+        &ImportPreviewQueryFilters::default(),
+    );
+    let sql = query.build().sql().to_string();
+
+    assert!(sql.contains("facet_category_id"));
+    assert!(sql.contains("facet_category_path"));
+    assert!(sql.contains("facet_source_account_id"));
+    assert!(sql.contains("facet_source_account_name"));
+    assert!(sql.contains("facet_target_account_id"));
+    assert!(sql.contains("facet_target_account_name"));
+    assert_eq!(
+        sql.matches("JOIN categories").count(),
+        1,
+        "category identity and facet labels must share the session-scope join"
+    );
+    assert_eq!(
+        sql.matches("JOIN accounts").count(),
+        2,
+        "source and destination identity joins must also supply account facet labels"
+    );
+}

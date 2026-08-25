@@ -166,6 +166,7 @@ fn build_preview_metadata_aggregate_query_with_signal_read_source(
         PreviewSignalReadSource::LegacyPayload => query.push("signal_flags.parser AS read_signal_parser, signal_flags.platform_duplicate AS read_signal_platform_duplicate, signal_flags.transfer AS read_signal_transfer, signal_flags.history AS read_signal_history, signal_flags.learning AS read_signal_learning, signal_flags.llm AS read_signal_llm, "),
         PreviewSignalReadSource::TypedV1 => query.push("p.signal_parser AS read_signal_parser, p.signal_platform_duplicate AS read_signal_platform_duplicate, p.signal_transfer AS read_signal_transfer, p.signal_history AS read_signal_history, p.signal_learning AS read_signal_learning, p.signal_llm AS read_signal_llm, "),
     };
+    query.push("c.id AS facet_category_id, c.path AS facet_category_path, c.name AS facet_category_name, source_account.id AS facet_source_account_id, source_account.name AS facet_source_account_name, target_account.id AS facet_target_account_id, target_account.name AS facet_target_account_name, ");
     push_preview_current_review_condition_with_joins(&mut query, "p");
     query.push(" AS needs_review FROM import_preview_rows p");
     if signal_read_source == PreviewSignalReadSource::LegacyPayload {
@@ -236,9 +237,9 @@ fn push_preview_category_facets_aggregate(
 ) {
     let mut facet_filters = filters.clone();
     facet_filters.category = None;
-    query.push("COALESCE((SELECT jsonb_agg(jsonb_build_object('value', facet_rows.value, 'label', facet_rows.label, 'count', facet_rows.count) ORDER BY facet_rows.count DESC, facet_rows.label ASC) FROM (SELECT p.category_id::text AS value, COALESCE(NULLIF(c.path, ''), c.name, p.category_id::text) AS label, COUNT(*)::BIGINT AS count FROM preview_scope p JOIN categories c ON c.user_id = p.user_id AND c.id = p.category_id AND c.is_active = true WHERE p.category_id IS NOT NULL");
+    query.push("COALESCE((SELECT jsonb_agg(jsonb_build_object('value', facet_rows.value, 'label', facet_rows.label, 'count', facet_rows.count) ORDER BY facet_rows.count DESC, facet_rows.label ASC) FROM (SELECT p.facet_category_id::text AS value, COALESCE(NULLIF(p.facet_category_path, ''), p.facet_category_name, p.facet_category_id::text) AS label, COUNT(*)::BIGINT AS count FROM preview_scope p WHERE p.facet_category_id IS NOT NULL");
     push_preview_metadata_query_predicates(query, &facet_filters, "p");
-    query.push(" GROUP BY p.category_id, c.path, c.name ORDER BY count DESC, label ASC LIMIT ");
+    query.push(" GROUP BY p.facet_category_id, p.facet_category_path, p.facet_category_name ORDER BY count DESC, label ASC LIMIT ");
     query.push_bind(IMPORT_PREVIEW_FACET_LIMIT);
     query.push(") facet_rows), '[]'::jsonb)");
 }
@@ -251,9 +252,9 @@ fn push_preview_account_facets_aggregate(
 ) {
     let mut facet_filters = filters.clone();
     facet_filters.account = None;
-    query.push("COALESCE((SELECT jsonb_agg(jsonb_build_object('value', facet_rows.value, 'label', facet_rows.label, 'count', facet_rows.count) ORDER BY facet_rows.count DESC, facet_rows.label ASC) FROM (SELECT account_values.account_id::text AS value, COALESCE(a.name, account_values.account_id::text) AS label, COUNT(*)::BIGINT AS count FROM preview_scope p CROSS JOIN LATERAL (VALUES (p.account_id), (p.transfer_target_account_id)) AS account_values(account_id) JOIN accounts a ON a.user_id = p.user_id AND a.id = account_values.account_id AND a.is_active = true WHERE account_values.account_id IS NOT NULL");
+    query.push("COALESCE((SELECT jsonb_agg(jsonb_build_object('value', facet_rows.value, 'label', facet_rows.label, 'count', facet_rows.count) ORDER BY facet_rows.count DESC, facet_rows.label ASC) FROM (SELECT account_values.account_id::text AS value, COALESCE(account_values.account_name, account_values.account_id::text) AS label, COUNT(*)::BIGINT AS count FROM preview_scope p CROSS JOIN LATERAL (VALUES (p.facet_source_account_id, p.facet_source_account_name), (p.facet_target_account_id, p.facet_target_account_name)) AS account_values(account_id, account_name) WHERE account_values.account_id IS NOT NULL");
     push_preview_metadata_query_predicates(query, &facet_filters, "p");
-    query.push(" GROUP BY account_values.account_id, a.name ORDER BY count DESC, label ASC LIMIT ");
+    query.push(" GROUP BY account_values.account_id, account_values.account_name ORDER BY count DESC, label ASC LIMIT ");
     query.push_bind(IMPORT_PREVIEW_FACET_LIMIT);
     query.push(") facet_rows), '[]'::jsonb)");
 }

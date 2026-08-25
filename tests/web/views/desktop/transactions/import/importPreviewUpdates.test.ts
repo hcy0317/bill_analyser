@@ -21,6 +21,27 @@ const categoryPath: ImportPreviewResolvedCategoryPath = {
     type: TransactionType.Expense
 };
 
+const baseline = {
+    selected: true,
+    type: TransactionType.Transfer,
+    categoryId: '',
+    sourceAmountCents: 1234,
+    destinationAmountCents: 5678,
+    sourceAccountId: '101',
+    destinationAccountId: '202',
+    tagIds: [],
+    counterparty: '',
+    paymentMethod: '',
+    comment: '',
+    isManuallyAnnotated: false,
+    recurringTemplateId: '44',
+    recurringTemplateName: '房租',
+    recurringCandidateCount: 2,
+    recurringMatchScore: 0.8,
+    recurringMatchReasons: '周期相似',
+    recurringMatchedDate: '2026-06-01'
+};
+
 function makeTransaction(overrides: Partial<ImportTransaction> = {}): ImportPreviewTransactionDraft {
     const transaction = ImportTransaction.of({
         type: TransactionType.Transfer,
@@ -53,6 +74,111 @@ function makeTransaction(overrides: Partial<ImportTransaction> = {}): ImportPrev
 }
 
 describe('import preview update helper', () => {
+    test('builds a category-only patch from a server-paged draft delta', () => {
+        const update = buildImportPreviewUpdateFromTransaction(makeTransaction({
+            categoryId: '11',
+            isManuallyAnnotated: true
+        }), {
+            categoryPath,
+            baseline
+        });
+
+        expect(update).toEqual({
+            id: 42,
+            expected_row_version: 7,
+            category_id: 11,
+            preview_main_category: '餐饮',
+            preview_sub_category: '咖啡',
+            is_manually_annotated: true
+        });
+    });
+
+    test('keeps an untouched server-paged action target free of nullable identity fields', () => {
+        const transaction = makeTransaction({ categoryId: '' });
+        const update = buildImportPreviewUpdateFromTransaction(transaction, {
+            categoryPath: null,
+            baseline
+        });
+
+        expect(update).toEqual({
+            id: 42,
+            expected_row_version: 7
+        });
+        expect(update).not.toHaveProperty('category_id');
+        expect(update).not.toHaveProperty('preview_source_account_id');
+        expect(update).not.toHaveProperty('preview_destination_account_id');
+    });
+
+    test('emits every changed server-paged field without replaying unchanged nullable identities', () => {
+        const transaction = makeTransaction({
+            type: TransactionType.Investment,
+            categoryId: '11',
+            sourceAmountCents: 4321,
+            destinationAmountCents: 8765,
+            sourceAccountId: '303',
+            destinationAccountId: '404',
+            counterparty: 'changed merchant',
+            paymentMethod: 'changed payment',
+            comment: 'changed comment',
+            recurringTemplateId: '55',
+            recurringTemplateName: 'changed recurring',
+            recurringCandidateCount: 3,
+            recurringMatchScore: 0.9,
+            recurringMatchReasons: 'changed reason',
+            recurringMatchedDate: '2026-07-01',
+            selected: false,
+            isManuallyAnnotated: true
+        });
+
+        const update = buildImportPreviewUpdateFromTransaction(transaction, {
+            categoryPath,
+            baseline,
+            validAccountIds: new Set(['303', '404']),
+            clearTransferDecision: true,
+            clearLearningDecision: true,
+            clearLlmDecision: true,
+            includeSuggestionDecisionClears: true
+        });
+
+        expect(update).toEqual({
+            id: 42,
+            expected_row_version: 7,
+            preview_type: '投资',
+            preview_amount_cents: 4321,
+            preview_destination_amount_cents: 8765,
+            category_id: 11,
+            preview_main_category: '餐饮',
+            preview_sub_category: '咖啡',
+            preview_source_account_id: 303,
+            preview_destination_account_id: 404,
+            preview_counterparty: 'changed merchant',
+            preview_payment_method: 'changed payment',
+            preview_description: 'changed comment',
+            preview_recurring_id: 55,
+            preview_recurring_name: 'changed recurring',
+            preview_recurring_candidate_count: 3,
+            preview_recurring_match_score: 0.9,
+            preview_recurring_match_reasons: 'changed reason',
+            preview_recurring_matched_date: '2026-07-01',
+            selected: false,
+            is_manually_annotated: true,
+            clear_transfer_decision: true,
+            clear_learning_decision: true,
+            clear_llm_decision: true,
+            clear_actionable_suggestions: ['transfer', 'learning', 'llm']
+        });
+    });
+
+    test('rejects a server-paged patch target without a preview id', () => {
+        const transaction = makeTransaction();
+        transaction._previewId = 0;
+
+        expect(() => buildImportPreviewUpdateFromTransaction(transaction, {
+            categoryPath,
+            baseline
+        })).toThrow('Import preview row id is required.');
+    });
+
     test('builds stage3 preview update payload with selected transaction edits and suggestion clears', () => {
         const update = buildImportPreviewUpdateFromTransaction(makeTransaction(), {
             categoryPath,

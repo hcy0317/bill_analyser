@@ -2,7 +2,40 @@
 // 维护重点：handler 只编排请求到 core/db 的调用，复杂 SQL、事务和跨表规则应下沉到 repository 或业务合同层。
 // 不变式：所有 /api/... 路由保持 Rust-only 主链、user-scope 校验和既有 success/data 或 success/result envelope。
 
+fn canonical_category_parent_ids(
+    categories: &[CategoryRecord],
+) -> BTreeMap<(i64, String), String> {
+    let mut parent_ids = BTreeMap::new();
+    for category in categories {
+        if !category_text(category, "sub_category").is_empty() {
+            continue;
+        }
+        let category_id = value_string(category.get("id"), "");
+        if category_id.is_empty() {
+            continue;
+        }
+        let category_type = category.get("type").and_then(value_as_i64).unwrap_or(0);
+        let main_name = category_text(category, "main_category");
+        parent_ids
+            .entry((category_type, main_name))
+            .or_insert(category_id);
+    }
+    parent_ids
+}
+
+fn canonical_category_parent_id(
+    parent_ids: &BTreeMap<(i64, String), String>,
+    category_type: i64,
+    main_name: &str,
+) -> String {
+    parent_ids
+        .get(&(category_type, main_name.to_string()))
+        .cloned()
+        .unwrap_or_else(|| format!("virtual_{main_name}"))
+}
+
 fn format_category_tree_response(categories: Vec<CategoryRecord>) -> Value {
+    let parent_ids = canonical_category_parent_ids(&categories);
     let mut grouped: BTreeMap<i64, Vec<Value>> = BTreeMap::new();
     let mut main_indices: BTreeMap<(i64, String), (i64, usize)> = BTreeMap::new();
 
@@ -13,11 +46,8 @@ fn format_category_tree_response(categories: Vec<CategoryRecord>) -> Value {
         let key = (category_type, main_name.clone());
 
         if !main_indices.contains_key(&key) {
-            let parent_id = if sub_name.is_empty() {
-                value_string(category.get("id"), &format!("virtual_{main_name}"))
-            } else {
-                format!("virtual_{main_name}")
-            };
+            let parent_id =
+                canonical_category_parent_id(&parent_ids, category_type, &main_name);
             let mut node = backend_category_to_frontend(&category, "0");
             node.insert("id".to_string(), Value::String(parent_id));
             node.insert("name".to_string(), Value::String(main_name.clone()));
@@ -49,11 +79,8 @@ fn format_category_tree_response(categories: Vec<CategoryRecord>) -> Value {
             *node = backend_category_to_frontend(&category, "0");
             node.insert("subCategories".to_string(), sub_categories);
         } else {
-            let parent_id = node
-                .get("id")
-                .and_then(Value::as_str)
-                .map(ToString::to_string)
-                .unwrap_or_else(|| format!("virtual_{main_name}"));
+            let parent_id =
+                canonical_category_parent_id(&parent_ids, category_type, &main_name);
             let sub_node = backend_category_to_frontend(&category, &parent_id);
             node.entry("subCategories".to_string())
                 .or_insert_with(|| Value::Array(Vec::new()))
@@ -71,6 +98,7 @@ fn format_category_tree_response(categories: Vec<CategoryRecord>) -> Value {
 }
 
 fn format_category_flat_response(categories: Vec<CategoryRecord>) -> Value {
+    let parent_ids = canonical_category_parent_ids(&categories);
     Value::Array(
         categories
             .iter()
@@ -78,7 +106,13 @@ fn format_category_flat_response(categories: Vec<CategoryRecord>) -> Value {
                 let parent_id = if category_text(category, "sub_category").is_empty() {
                     "0".to_string()
                 } else {
-                    format!("virtual_{}", category_text(category, "main_category"))
+                    let category_type =
+                        category.get("type").and_then(value_as_i64).unwrap_or(0);
+                    canonical_category_parent_id(
+                        &parent_ids,
+                        category_type,
+                        &category_text(category, "main_category"),
+                    )
                 };
                 Value::Object(backend_category_to_frontend(category, &parent_id))
             })
@@ -88,6 +122,51 @@ fn format_category_flat_response(categories: Vec<CategoryRecord>) -> Value {
 
 fn categories_to_value(categories: Vec<CategoryRecord>) -> Value {
     Value::Array(categories.into_iter().map(Value::Object).collect())
+}
+
+#[cfg(test)]
+mod category_formatter_tests {
+    use super::*;
+
+    fn category(id: i64, main_category: &str, sub_category: &str) -> CategoryRecord {
+        json!({
+            "id": id,
+            "type": 2,
+            "main_category": main_category,
+            "sub_category": sub_category,
+            "hidden": false
+        })
+        .as_object()
+        .expect("category record")
+        .clone()
+    }
+
+    #[test]
+    fn category_parent_identity_is_order_independent_in_tree_and_flat_responses() {
+        let categories = vec![
+            category(43, "其他收入", "原路退款"),
+            category(42, "其他收入", ""),
+            category(44, "其他收入", "意外收入"),
+        ];
+
+        let tree = format_category_tree_response(categories.clone());
+        let parent = tree["2"]
+            .as_array()
+            .and_then(|items| items.first())
+            .and_then(Value::as_object)
+            .expect("income category parent");
+        assert_eq!(parent.get("id"), Some(&Value::String("42".to_string())));
+        let children = parent["subCategories"]
+            .as_array()
+            .expect("income category children");
+        assert_eq!(children.len(), 2);
+        assert!(children.iter().all(|child| child["parentId"] == "42"));
+
+        let flat = format_category_flat_response(categories);
+        let flat_children = flat.as_array().expect("flat categories");
+        assert_eq!(flat_children[0]["parentId"], "42");
+        assert_eq!(flat_children[2]["parentId"], "42");
+    }
 }
 
 fn format_category_statistics_response(statistics: Vec<CategoryStatistic>) -> Value {

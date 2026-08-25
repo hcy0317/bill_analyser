@@ -180,7 +180,11 @@ fn canonicalize_manual_category_identity(
 }
 
 fn manual_category_identity(draft: &ImportPreviewDraft) -> Option<ManualCategoryIdentity> {
-    preview_manual_identity_field_owned(draft, "category_id").then(|| ManualCategoryIdentity {
+    if !preview_manual_identity_field_owned(draft, "category_id") || draft.category_id.is_none() {
+        return None;
+    }
+
+    Some(ManualCategoryIdentity {
         preview_type: draft.preview_type.clone(),
         category_id: draft.category_id,
         main_category: draft.preview_main_category.clone(),
