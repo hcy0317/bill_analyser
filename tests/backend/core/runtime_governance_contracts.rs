@@ -27,20 +27,21 @@ struct FrontendRouteOwnership {
 }
 
 #[test]
-fn gitea_ci_path_filters_cover_backend_contract_tests() {
+fn gitea_ci_triggers_all_main_pushes_and_pull_requests() {
     let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
     let workflow = fs::read_to_string(repo_root.join(".gitea/workflows/ci.yml"))
         .expect("Gitea CI workflow is readable");
+    let trigger_block = workflow
+        .split_once("permissions:")
+        .map(|(triggers, _)| triggers)
+        .expect("Gitea CI keeps permissions after event triggers");
 
-    assert_eq!(
-        workflow.matches("- 'tests/backend/**'").count(),
-        2,
-        "backend contract tests must trigger CI for both push and pull_request"
-    );
-    assert_eq!(
-        workflow.matches("- 'tests/web/**'").count(),
-        2,
-        "frontend contract tests must trigger CI for both push and pull_request"
+    assert!(trigger_block.contains("  push:"));
+    assert!(trigger_block.contains("      - main"));
+    assert!(trigger_block.contains("  pull_request:"));
+    assert!(
+        !trigger_block.contains("paths:") && !trigger_block.contains("paths-ignore:"),
+        "backend and frontend contract tests must trigger CI through unfiltered main push and pull_request events"
     );
 }
 

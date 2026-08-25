@@ -51,6 +51,15 @@ const RUST_WORKSPACE_COVERAGE_COMMAND = 'cargo llvm-cov --workspace --lcov --out
 const RUST_ONLY_COMMAND = 'node scripts/check-rust-only-source-tree.mjs';
 const FRONTEND_COVERAGE_SCRIPT = 'cross-env CI=1 COVERAGE_GATE=1 TS_NODE_PROJECT="./tsconfig.jest.json" jest --maxWorkers=50% --coverage';
 const E2E_SUPERVISOR_COMMAND = 'npm --prefix src/web run e2e:ci:smoke';
+const E2E_SCOPE_COMMAND = 'node scripts/classify-e2e-scope.mjs --event-name "$GITHUB_EVENT_NAME" --input .omx/ultragoal/evidence/ci-diff-refs.json --out "$GITHUB_OUTPUT"';
+const E2E_HEAVY_CONDITION = "needs.e2e-scope.outputs.required == 'true'";
+const E2E_AGGREGATOR_CONDITION = '${{ always() }}';
+const E2E_AGGREGATOR_COMMAND = 'node scripts/verify-e2e-outcome.mjs --scope-result "${{ needs.e2e-scope.result }}" --scope-required "${{ needs.e2e-scope.outputs.required }}" --scope-reason "${{ needs.e2e-scope.outputs.reason }}" --heavy-result "${{ needs.e2e-heavy.result }}"';
+const E2E_SCOPE_TEST_COMMAND = 'node scripts/check-e2e-scope.mjs';
+const E2E_OUTCOME_TEST_COMMAND = 'node scripts/check-e2e-outcome.mjs';
+const NPM_CACHE_PATH = '~/.npm';
+const NPM_CACHE_KEY = "${{ runner.os }}-npm-slim-v1-${{ hashFiles('src/web/package-lock.json') }}";
+const NPM_CACHE_RESTORE_KEY = '${{ runner.os }}-npm-slim-v1-';
 const RUST_TOOLCHAIN_VERSION = '1.98.0';
 const RUST_TOOLCHAIN_ACTION = `https://github.com/dtolnay/rust-toolchain@${RUST_TOOLCHAIN_VERSION}`;
 const BACKEND_RUST_SETUP_STEP = `Setup Rust ${RUST_TOOLCHAIN_VERSION}`;
@@ -94,7 +103,13 @@ const E2E_ACTIVATE_RUST_TOOLS = [
     'cargo --version',
     'fi',
 ].join('\n');
-const E2E_SETUP_STEPS = [
+const E2E_SCOPE_STEPS = [
+    'Checkout E2E scope source',
+    'Setup E2E scope Node.js 22',
+    'Resolve E2E immutable CI diff refs',
+    'Classify E2E scope',
+];
+const E2E_HEAVY_SETUP_STEPS = [
     'Checkout E2E source',
     'Setup E2E Node.js 22',
     'Restore E2E Rust toolchain cache',
@@ -261,14 +276,17 @@ function requiredJob(workflow, jobId) {
     return job;
 }
 
-function requiredStep(job, jobId, name, exactCommand = null) {
+function requiredStep(job, jobId, name, exactCommand = null, expectedIf = null) {
     const matches = job.steps.filter(step => step?.name === name);
     if (matches.length !== 1) {
         throw new Error(`${jobId} must contain exactly one required step ${name}`);
     }
     const step = matches[0];
-    if (step.if !== undefined) {
+    if (expectedIf === null && step.if !== undefined) {
         throw new Error(`${jobId}/${name} must not be condition-skipped`);
+    }
+    if (expectedIf !== null && String(step.if ?? '') !== expectedIf) {
+        throw new Error(`${jobId}/${name} E2E scope condition drift`);
     }
     if (exactCommand !== null && normalizeCommand(step.run) !== normalizeCommand(exactCommand)) {
         throw new Error(`${jobId}/${name} command drift`);
@@ -366,30 +384,70 @@ function validateRestoreCacheStep(step, jobId, contract) {
 }
 
 function validateRequiredE2e(workflow) {
-    const job = requiredJob(workflow, 'e2e-ci');
+    const scopeJob = workflow?.jobs?.['e2e-scope'];
+    if (!scopeJob) {
+        throw new Error('Missing E2E scope job');
+    }
+    if (scopeJob['runs-on'] !== 'ubuntu-latest' || scopeJob.if !== undefined || scopeJob.needs !== undefined) {
+        throw new Error('E2E scope job must run independently on ubuntu-latest');
+    }
+    if (scopeJob.services !== undefined) {
+        throw new Error('E2E scope job must not provision services');
+    }
+    if (scopeJob.outputs?.required !== '${{ steps.e2e-scope.outputs.required }}'
+        || scopeJob.outputs?.reason !== '${{ steps.e2e-scope.outputs.reason }}') {
+        throw new Error('E2E scope output drift');
+    }
+    assert.deepEqual(
+        scopeJob.steps?.map(step => step?.name),
+        E2E_SCOPE_STEPS,
+        'e2e-scope setup step inventory drift',
+    );
+    validateCheckout(scopeJob, 'e2e-scope');
+    const scopeNode = requiredStep(scopeJob, 'e2e-scope', 'Setup E2E scope Node.js 22');
+    if (scopeNode.uses !== 'https://github.com/actions/setup-node@v4'
+        || String(scopeNode.with?.['node-version']) !== '22') {
+        throw new Error('e2e-scope Node.js setup drift');
+    }
+    requiredStep(scopeJob, 'e2e-scope', 'Resolve E2E immutable CI diff refs', RESOLVER_COMMAND);
+    const scope = requiredStep(scopeJob, 'e2e-scope', 'Classify E2E scope', E2E_SCOPE_COMMAND);
+    if (scope.id !== 'e2e-scope') {
+        throw new Error('e2e-scope/Classify E2E scope id drift');
+    }
+
+    const job = workflow?.jobs?.['e2e-heavy'];
+    if (!job) {
+        throw new Error('Missing E2E heavy job');
+    }
     if (job['runs-on'] !== 'ubuntu-latest') {
-        throw new Error('e2e-ci must run on ubuntu-latest');
+        throw new Error('e2e-heavy must run on ubuntu-latest');
+    }
+    if (job.needs !== 'e2e-scope') {
+        throw new Error('E2E heavy needs drift');
+    }
+    if (String(job.if ?? '') !== E2E_HEAVY_CONDITION) {
+        throw new Error('E2E heavy condition drift');
     }
     const postgres = job.services?.postgres;
     const weaviate = job.services?.weaviate;
     if (postgres?.image !== 'postgres:16-alpine') {
-        throw new Error('e2e-ci postgres service image/tag drift');
+        throw new Error('e2e-heavy postgres service image/tag drift');
     }
     if (postgres?.ports !== undefined) {
-        throw new Error('e2e-ci must not publish a fixed PostgreSQL host port');
+        throw new Error('e2e-heavy must not publish a fixed PostgreSQL host port');
     }
     if (postgres?.env?.POSTGRES_DB !== 'bill_analyser_e2e') {
-        throw new Error('e2e-ci postgres database drift');
+        throw new Error('e2e-heavy postgres database drift');
     }
     if (postgres?.env?.POSTGRES_USER !== 'bill_analyser_e2e'
         || postgres?.env?.POSTGRES_PASSWORD !== 'bill_analyser_e2e') {
-        throw new Error('e2e-ci postgres test credentials drift');
+        throw new Error('e2e-heavy postgres test credentials drift');
     }
     if (weaviate?.image !== 'cr.weaviate.io/semitechnologies/weaviate:1.37.4') {
-        throw new Error('e2e-ci Weaviate service image/tag drift');
+        throw new Error('e2e-heavy Weaviate service image/tag drift');
     }
     if (weaviate?.ports !== undefined) {
-        throw new Error('e2e-ci must not publish a fixed Weaviate host port');
+        throw new Error('e2e-heavy must not publish a fixed Weaviate host port');
     }
     const expectedEnv = {
         BILL_ANALYSER_DATABASE_BACKEND: 'postgres',
@@ -404,63 +462,94 @@ function validateRequiredE2e(workflow) {
     };
     for (const [name, expected] of Object.entries(expectedEnv)) {
         if (String(job.env?.[name] ?? '') !== expected) {
-            throw new Error(`e2e-ci environment ${name} drift`);
+            throw new Error(`e2e-heavy environment ${name} drift`);
         }
     }
     for (const name of ['BILL_ANALYSER_AUTH_JWT_SECRET', 'E2E_RUN_ID', 'E2E_EXPECTED_WEAVIATE_PREFIX', 'BILL_ANALYSER_WEAVIATE_COLLECTION_PREFIX']) {
         if (!String(job.env?.[name] ?? '').trim()) {
-            throw new Error(`e2e-ci environment ${name} must be non-empty`);
+            throw new Error(`e2e-heavy environment ${name} must be non-empty`);
         }
     }
     if (job.env.E2E_EXPECTED_WEAVIATE_PREFIX !== job.env.BILL_ANALYSER_WEAVIATE_COLLECTION_PREFIX
         || !String(job.env.E2E_EXPECTED_WEAVIATE_PREFIX).startsWith('BillAnalyserE2E')) {
-        throw new Error('e2e-ci Weaviate collection prefix drift');
+        throw new Error('e2e-heavy Weaviate collection prefix drift');
     }
 
     const setupNames = job.steps
         .filter(step => step?.name !== 'Run deterministic E2E supervisor')
         .map(step => step?.name);
-    assert.deepEqual(setupNames, E2E_SETUP_STEPS, 'e2e-ci setup step inventory drift');
-    for (const setupName of E2E_SETUP_STEPS) {
-        requiredStep(job, 'e2e-ci', setupName);
-    }
-    validateCheckout(job, 'e2e-ci');
-    const setupNode = requiredStep(job, 'e2e-ci', 'Setup E2E Node.js 22');
+    assert.deepEqual(setupNames, E2E_HEAVY_SETUP_STEPS, 'e2e-heavy setup step inventory drift');
+    validateCheckout(job, 'e2e-heavy');
+    const setupNode = requiredStep(job, 'e2e-heavy', 'Setup E2E Node.js 22');
     if (setupNode.uses !== 'https://github.com/actions/setup-node@v4'
         || String(setupNode.with?.['node-version']) !== '22') {
-        throw new Error('e2e-ci Node.js setup drift');
+        throw new Error('e2e-heavy Node.js setup drift');
     }
-    const setupRust = requiredStep(job, 'e2e-ci', E2E_RUST_SETUP_STEP);
+    const setupRust = requiredStep(job, 'e2e-heavy', E2E_RUST_SETUP_STEP);
     if (setupRust.uses !== RUST_TOOLCHAIN_ACTION) {
-        throw new Error('e2e-ci Rust setup drift');
+        throw new Error('e2e-heavy Rust setup drift');
     }
-    validateRestoreCacheStep(requiredStep(job, 'e2e-ci', 'Restore E2E Rust toolchain cache'), 'e2e-ci', {
+    validateRestoreCacheStep(requiredStep(job, 'e2e-heavy', 'Restore E2E Rust toolchain cache'), 'e2e-heavy', {
         id: 'e2e-rust-toolchain-cache',
         paths: RUST_TOOLCHAIN_CACHE_PATHS,
         key: `${RUST_TOOLCHAIN_CACHE_PREFIX}bootstrap`,
         restoreKeys: RUST_TOOLCHAIN_CACHE_PREFIX,
     });
-    requiredStep(job, 'e2e-ci', 'Activate cached E2E Rust tools', E2E_ACTIVATE_RUST_TOOLS);
-    validateRestoreCacheStep(requiredStep(job, 'e2e-ci', 'Restore E2E Cargo cache'), 'e2e-ci', {
+    requiredStep(job, 'e2e-heavy', 'Activate cached E2E Rust tools', E2E_ACTIVATE_RUST_TOOLS);
+    validateRestoreCacheStep(requiredStep(job, 'e2e-heavy', 'Restore E2E Cargo cache'), 'e2e-heavy', {
         id: 'e2e-cargo-cache',
         paths: E2E_CARGO_CACHE_PATHS,
         key: CARGO_CACHE_PREFIX + "${{ hashFiles('Cargo.lock') }}",
         restoreKeys: CARGO_CACHE_PREFIX,
     });
-    validateRestoreCacheStep(requiredStep(job, 'e2e-ci', 'Restore E2E npm cache'), 'e2e-ci', {
+    validateRestoreCacheStep(requiredStep(job, 'e2e-heavy', 'Restore E2E npm cache'), 'e2e-heavy', {
         id: 'e2e-npm-cache',
         paths: '~/.npm',
         key: "${{ runner.os }}-npm-slim-v1-${{ hashFiles('src/web/package-lock.json') }}",
         restoreKeys: '${{ runner.os }}-npm-slim-v1-',
     });
-    requiredStep(job, 'e2e-ci', 'Install locked E2E dependencies', 'npm ci --prefix src/web');
-    requiredStep(job, 'e2e-ci', 'Install Playwright Chromium', 'npm --prefix src/web run e2e:install -- --with-deps');
-    requiredStep(job, 'e2e-ci', 'Run deterministic E2E supervisor', E2E_SUPERVISOR_COMMAND);
+    requiredStep(job, 'e2e-heavy', 'Install locked E2E dependencies', 'npm ci --prefix src/web');
+    requiredStep(job, 'e2e-heavy', 'Install Playwright Chromium', 'npm --prefix src/web run e2e:install -- --with-deps');
+    requiredStep(job, 'e2e-heavy', 'Run deterministic E2E supervisor', E2E_SUPERVISOR_COMMAND);
+
+    const required = workflow?.jobs?.['e2e-ci'];
+    if (!required) {
+        throw new Error('Missing required job e2e-ci');
+    }
+    if (required['runs-on'] !== 'ubuntu-latest') {
+        throw new Error('e2e-ci must run on ubuntu-latest');
+    }
+    if (JSON.stringify(required.needs) !== JSON.stringify(['e2e-scope', 'e2e-heavy'])) {
+        throw new Error('e2e-ci aggregator needs drift');
+    }
+    if (String(required.if ?? '') !== E2E_AGGREGATOR_CONDITION) {
+        throw new Error('e2e-ci aggregator condition drift');
+    }
+    if (required.services !== undefined || required.env !== undefined) {
+        throw new Error('e2e-ci aggregator must not provision services or runtime credentials');
+    }
+    if (required.steps?.length !== 3) {
+        throw new Error('e2e-ci aggregator step inventory drift');
+    }
+    assert.deepEqual(
+        required.steps.map(step => step?.name),
+        ['Checkout E2E outcome source', 'Setup E2E outcome Node.js 22', 'Verify E2E outcome'],
+        'e2e-ci aggregator step inventory drift',
+    );
+    validateCheckout(required, 'e2e-ci');
+    const outcomeNode = requiredStep(required, 'e2e-ci', 'Setup E2E outcome Node.js 22');
+    if (outcomeNode.uses !== 'https://github.com/actions/setup-node@v4'
+        || String(outcomeNode.with?.['node-version']) !== '22') {
+        throw new Error('e2e-ci outcome Node.js setup drift');
+    }
+    requiredStep(required, 'e2e-ci', 'Verify E2E outcome', E2E_AGGREGATOR_COMMAND);
 }
 
 function validateLocalCiScript(text) {
     const required = [
         'node scripts/resolve-ci-diff-refs.mjs --self-test',
+        E2E_SCOPE_TEST_COMMAND,
+        E2E_OUTCOME_TEST_COMMAND,
         'node scripts/check-governance-normalizers.mjs',
         'node scripts/check-gitea-workflow.mjs --self-test',
         'node scripts/check-gitea-workflow.mjs',
@@ -526,6 +615,20 @@ function validateWorkflow(workflow) {
     const dispatch = workflow.on?.workflow_dispatch;
     if (!dispatch || typeof dispatch !== 'object' || !dispatch.inputs?.base_sha) {
         throw new Error('workflow_dispatch must declare optional base_sha input');
+    }
+    const push = workflow.on?.push;
+    if (!push || JSON.stringify(push.branches) !== JSON.stringify(['main'])) {
+        throw new Error('push must target main');
+    }
+    if (push.paths !== undefined || push['paths-ignore'] !== undefined) {
+        throw new Error('push must not use paths filters');
+    }
+    if (!Object.hasOwn(workflow.on ?? {}, 'pull_request')) {
+        throw new Error('pull_request trigger must be present');
+    }
+    const pullRequest = workflow.on.pull_request;
+    if (pullRequest?.paths !== undefined || pullRequest?.['paths-ignore'] !== undefined) {
+        throw new Error('pull_request must not use paths filters');
     }
 
     for (const [jobId, job] of Object.entries(workflow.jobs ?? {})) {
@@ -593,14 +696,24 @@ function validateWorkflow(workflow) {
     validateCleanupOrder(frontend, 'frontend-ci', 'Enforce frontend changed-line coverage', 'Trim frontend caches before cache save');
 
     requiredStep(governance, 'repo-governance', 'Install locked workflow checker dependencies', 'npm ci --prefix src/web');
+    validateRestoreCacheStep(requiredStep(governance, 'repo-governance', 'Restore governance npm cache'), 'repo-governance', {
+        id: 'governance-npm-cache',
+        paths: NPM_CACHE_PATH,
+        key: NPM_CACHE_KEY,
+        restoreKeys: NPM_CACHE_RESTORE_KEY,
+    });
     requiredStep(governance, 'repo-governance', 'Self-test immutable CI diff resolver', 'node scripts/resolve-ci-diff-refs.mjs --self-test');
+    requiredStep(governance, 'repo-governance', 'Check E2E scope classifier', E2E_SCOPE_TEST_COMMAND);
+    requiredStep(governance, 'repo-governance', 'Check E2E outcome verifier', E2E_OUTCOME_TEST_COMMAND);
     requiredStep(governance, 'repo-governance', 'Self-test Gitea workflow checker', 'node scripts/check-gitea-workflow.mjs --self-test');
     requiredStep(governance, 'repo-governance', 'Check Gitea workflow', 'node scripts/check-gitea-workflow.mjs');
     requiredStep(governance, 'repo-governance', 'Ensure tracked source tree is Rust-only', RUST_ONLY_COMMAND);
+    const restoreIndex = stepIndex(governance, 'Restore governance npm cache');
     const installIndex = stepIndex(governance, 'Install locked workflow checker dependencies');
     const checkerIndex = stepIndex(governance, 'Check Gitea workflow');
-    if (installIndex === -1 || checkerIndex === -1 || installIndex >= checkerIndex) {
-        throw new Error('repo-governance must install locked dependencies before workflow checker');
+    if (restoreIndex === -1 || installIndex === -1 || checkerIndex === -1
+        || restoreIndex >= installIndex || installIndex >= checkerIndex) {
+        throw new Error('repo-governance must restore npm cache, install locked dependencies, then run workflow checker');
     }
     validateRequiredE2e(workflow);
     return {
@@ -619,7 +732,11 @@ function workflowFixture() {
     });
     return {
         name: 'CI fixture',
-        on: { workflow_dispatch: { inputs: { base_sha: { required: false } } } },
+        on: {
+            push: { branches: ['main'] },
+            pull_request: {},
+            workflow_dispatch: { inputs: { base_sha: { required: false } } },
+        },
         jobs: {
             'backend-ci': {
                 'runs-on': 'ubuntu-latest',
@@ -679,15 +796,42 @@ function workflowFixture() {
                 'runs-on': 'ubuntu-latest',
                 steps: [
                     checkout(),
+                    {
+                        name: 'Restore governance npm cache',
+                        id: 'governance-npm-cache',
+                        uses: 'https://github.com/actions/cache/restore@v4',
+                        with: {
+                            path: NPM_CACHE_PATH,
+                            key: NPM_CACHE_KEY,
+                            'restore-keys': NPM_CACHE_RESTORE_KEY,
+                        },
+                    },
                     { name: 'Install locked workflow checker dependencies', run: 'npm ci --prefix src/web' },
                     { name: 'Self-test immutable CI diff resolver', run: 'node scripts/resolve-ci-diff-refs.mjs --self-test' },
+                    { name: 'Check E2E scope classifier', run: E2E_SCOPE_TEST_COMMAND },
+                    { name: 'Check E2E outcome verifier', run: E2E_OUTCOME_TEST_COMMAND },
                     { name: 'Self-test Gitea workflow checker', run: 'node scripts/check-gitea-workflow.mjs --self-test' },
                     { name: 'Check Gitea workflow', run: 'node scripts/check-gitea-workflow.mjs' },
                     { name: 'Ensure tracked source tree is Rust-only', run: RUST_ONLY_COMMAND },
                 ],
             },
-            'e2e-ci': {
+            'e2e-scope': {
                 'runs-on': 'ubuntu-latest',
+                outputs: {
+                    required: '${{ steps.e2e-scope.outputs.required }}',
+                    reason: '${{ steps.e2e-scope.outputs.reason }}',
+                },
+                steps: [
+                    { ...checkout(), name: 'Checkout E2E scope source' },
+                    { name: 'Setup E2E scope Node.js 22', uses: 'https://github.com/actions/setup-node@v4', with: { 'node-version': '22' } },
+                    { name: 'Resolve E2E immutable CI diff refs', run: RESOLVER_COMMAND },
+                    { name: 'Classify E2E scope', id: 'e2e-scope', run: E2E_SCOPE_COMMAND },
+                ],
+            },
+            'e2e-heavy': {
+                'runs-on': 'ubuntu-latest',
+                needs: 'e2e-scope',
+                if: E2E_HEAVY_CONDITION,
                 env: {
                     BILL_ANALYSER_DATABASE_BACKEND: 'postgres',
                     BILL_ANALYSER_POSTGRES_URL: 'postgresql://bill_analyser_e2e:bill_analyser_e2e@postgres:5432/bill_analyser_e2e',
@@ -754,6 +898,16 @@ function workflowFixture() {
                     { name: 'Install locked E2E dependencies', run: 'npm ci --prefix src/web' },
                     { name: 'Install Playwright Chromium', run: 'npm --prefix src/web run e2e:install -- --with-deps' },
                     { name: 'Run deterministic E2E supervisor', run: E2E_SUPERVISOR_COMMAND },
+                ],
+            },
+            'e2e-ci': {
+                'runs-on': 'ubuntu-latest',
+                needs: ['e2e-scope', 'e2e-heavy'],
+                if: E2E_AGGREGATOR_CONDITION,
+                steps: [
+                    { ...checkout(), name: 'Checkout E2E outcome source' },
+                    { name: 'Setup E2E outcome Node.js 22', uses: 'https://github.com/actions/setup-node@v4', with: { 'node-version': '22' } },
+                    { name: 'Verify E2E outcome', run: E2E_AGGREGATOR_COMMAND },
                 ],
             },
         },
@@ -886,8 +1040,20 @@ function selfTest(parser) {
         value.jobs['repo-governance'].steps.find(step => step.name === 'Install locked workflow checker dependencies').run = 'npm install js-yaml';
     }, /command drift/);
     expectWorkflowFailure(fixture, value => {
+        value.jobs['repo-governance'].steps = value.jobs['repo-governance'].steps.filter(step => step.name !== 'Restore governance npm cache');
+    }, /governance npm cache/);
+    expectWorkflowFailure(fixture, value => {
+        value.jobs['repo-governance'].steps.find(step => step.name === 'Restore governance npm cache').with.key = '${{ runner.os }}-npm-floating';
+    }, /cache key drift/);
+    expectWorkflowFailure(fixture, value => {
         value.jobs['repo-governance'].steps = value.jobs['repo-governance'].steps.filter(step => step.name !== 'Ensure tracked source tree is Rust-only');
     }, /tracked source tree is Rust-only/);
+    expectWorkflowFailure(fixture, value => {
+        value.jobs['repo-governance'].steps = value.jobs['repo-governance'].steps.filter(step => step.name !== 'Check E2E scope classifier');
+    }, /E2E scope classifier/);
+    expectWorkflowFailure(fixture, value => {
+        value.jobs['repo-governance'].steps = value.jobs['repo-governance'].steps.filter(step => step.name !== 'Check E2E outcome verifier');
+    }, /E2E outcome verifier/);
     expectWorkflowFailure(fixture, value => {
         value.jobs['repo-governance'].steps.find(step => step.name === 'Ensure tracked source tree is Rust-only').run = 'git ls-files *.py';
     }, /command drift/);
@@ -903,46 +1069,79 @@ function selfTest(parser) {
     }, /Missing required job e2e-ci/);
     expectWorkflowFailure(fixture, value => {
         value.jobs['e2e-ci'].if = 'false';
-    }, /condition-skipped/);
+    }, /aggregator condition drift/);
     expectWorkflowFailure(fixture, value => {
-        value.jobs['e2e-ci'].steps.find(step => step.name === 'Run deterministic E2E supervisor').run += ' --drift';
+        value.jobs['e2e-ci'].needs = ['e2e-scope'];
+    }, /aggregator needs drift/);
+    expectWorkflowFailure(fixture, value => {
+        value.jobs['e2e-ci'].steps.find(step => step.name === 'Verify E2E outcome').run = 'exit 0';
+    }, /E2E outcome.*command drift/);
+    expectWorkflowFailure(fixture, value => {
+        delete value.jobs['e2e-scope'];
+    }, /Missing E2E scope job/);
+    expectWorkflowFailure(fixture, value => {
+        value.jobs['e2e-scope'].steps = value.jobs['e2e-scope'].steps.filter(step => step.name !== 'Classify E2E scope');
+    }, /setup step inventory drift|Classify E2E scope/);
+    expectWorkflowFailure(fixture, value => {
+        value.jobs['e2e-scope'].steps.find(step => step.name === 'Classify E2E scope').run = 'echo required=false';
+    }, /E2E scope.*command drift/);
+    expectWorkflowFailure(fixture, value => {
+        value.jobs['e2e-scope'].outputs.required = 'false';
+    }, /E2E scope output drift/);
+    expectWorkflowFailure(fixture, value => {
+        delete value.jobs['e2e-heavy'];
+    }, /Missing E2E heavy job/);
+    expectWorkflowFailure(fixture, value => {
+        value.jobs['e2e-heavy'].if = 'false';
+    }, /E2E heavy condition drift/);
+    expectWorkflowFailure(fixture, value => {
+        value.jobs['e2e-heavy'].needs = 'backend-ci';
+    }, /E2E heavy needs drift/);
+    expectWorkflowFailure(fixture, value => {
+        value.jobs['e2e-heavy'].steps.find(step => step.name === 'Run deterministic E2E supervisor').run += ' --drift';
     }, /command drift/);
     expectWorkflowFailure(fixture, value => {
-        value.jobs['e2e-ci'].steps = value.jobs['e2e-ci'].steps.filter(step => step.name !== 'Run deterministic E2E supervisor');
+        value.jobs['e2e-heavy'].steps = value.jobs['e2e-heavy'].steps.filter(step => step.name !== 'Run deterministic E2E supervisor');
     }, /setup step inventory drift|deterministic E2E supervisor/);
     expectWorkflowFailure(fixture, value => {
-        value.jobs['e2e-ci'].steps.find(step => step.name === 'Run deterministic E2E supervisor').if = 'false';
+        value.jobs['e2e-heavy'].steps.find(step => step.name === 'Run deterministic E2E supervisor').if = 'false';
     }, /condition-skipped/);
     expectWorkflowFailure(fixture, value => {
-        value.jobs['e2e-ci'].services.weaviate.image = 'weaviate:latest';
+        value.jobs['e2e-heavy'].services.weaviate.image = 'weaviate:latest';
     }, /Weaviate service image/);
     expectWorkflowFailure(fixture, value => {
-        value.jobs['e2e-ci'].services.postgres.image = 'postgres:16';
+        value.jobs['e2e-heavy'].services.postgres.image = 'postgres:16';
     }, /postgres service image/);
     expectWorkflowFailure(fixture, value => {
-        value.jobs['e2e-ci'].services.postgres.ports = ['5432:5432'];
+        value.jobs['e2e-heavy'].services.postgres.ports = ['5432:5432'];
     }, /fixed PostgreSQL host port/);
     expectWorkflowFailure(fixture, value => {
-        value.jobs['e2e-ci'].services.weaviate.ports = ['8088:8080'];
+        value.jobs['e2e-heavy'].services.weaviate.ports = ['8088:8080'];
     }, /fixed Weaviate host port/);
     expectWorkflowFailure(fixture, value => {
-        value.jobs['e2e-ci'].services.postgres.env.POSTGRES_PASSWORD = 'wrong';
+        value.jobs['e2e-heavy'].services.postgres.env.POSTGRES_PASSWORD = 'wrong';
     }, /test credentials/);
     expectWorkflowFailure(fixture, value => {
-        value.jobs['e2e-ci'].steps.find(step => step.name === 'Restore E2E Cargo cache').with.path += '\ntarget';
+        value.jobs['e2e-heavy'].steps.find(step => step.name === 'Restore E2E Cargo cache').with.path += '\ntarget';
     }, /cache path drift|generated outputs/);
     expectWorkflowFailure(fixture, value => {
-        value.jobs['e2e-ci'].steps.find(step => step.name === 'Restore E2E npm cache').with.key = '${{ runner.os }}-npm-floating';
+        value.jobs['e2e-heavy'].steps.find(step => step.name === 'Restore E2E npm cache').with.key = '${{ runner.os }}-npm-floating';
     }, /cache key drift/);
     expectWorkflowFailure(fixture, value => {
-        value.jobs['e2e-ci'].steps.find(step => step.name === E2E_RUST_SETUP_STEP).uses = 'https://github.com/dtolnay/rust-toolchain@stable';
+        value.jobs['e2e-heavy'].steps.find(step => step.name === E2E_RUST_SETUP_STEP).uses = 'https://github.com/dtolnay/rust-toolchain@stable';
     }, /Rust setup drift/);
     expectWorkflowFailure(fixture, value => {
-        value.jobs['e2e-ci'].steps.find(step => step.name === 'Restore E2E Cargo cache').with.key = '${{ runner.os }}-cargo-floating';
+        value.jobs['e2e-heavy'].steps.find(step => step.name === 'Restore E2E Cargo cache').with.key = '${{ runner.os }}-cargo-floating';
     }, /cache key drift/);
     expectWorkflowFailure(fixture, value => {
-        value.jobs['e2e-ci'].steps = value.jobs['e2e-ci'].steps.filter(step => step.name !== 'Restore E2E Rust toolchain cache');
+        value.jobs['e2e-heavy'].steps = value.jobs['e2e-heavy'].steps.filter(step => step.name !== 'Restore E2E Rust toolchain cache');
     }, /setup step inventory drift|Rust toolchain cache/);
+    expectWorkflowFailure(fixture, value => {
+        value.on.push = { branches: ['main'], paths: ['src/**'] };
+    }, /push must not use paths filters/);
+    expectWorkflowFailure(fixture, value => {
+        value.on.pull_request = { paths: ['src/**'] };
+    }, /pull_request must not use paths filters/);
 
     const activeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'bill-active-config-'));
     try {

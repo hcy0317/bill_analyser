@@ -4,47 +4,7 @@ on:
   push:
     branches:
       - main
-    paths:
-      - 'AGENTS.md'
-      - 'CLAUDE.md'
-      - '.github/**'
-      - '.claude/**'
-      - '.codex/**'
-      - '.agents/**'
-      - '.gitea/**'
-      - '.omx/plans/**'
-      - 'docs/**'
-      - 'scripts/**'
-      - 'src/web/**'
-      - 'tests/backend/**'
-      - 'tests/fixtures/**'
-      - 'tests/web/**'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - 'src/backend/**'
-      - '*.ps1'
-      - '*.bat'
   pull_request:
-    paths:
-      - 'AGENTS.md'
-      - 'CLAUDE.md'
-      - '.github/**'
-      - '.claude/**'
-      - '.codex/**'
-      - '.agents/**'
-      - '.gitea/**'
-      - '.omx/plans/**'
-      - 'docs/**'
-      - 'scripts/**'
-      - 'src/web/**'
-      - 'tests/backend/**'
-      - 'tests/fixtures/**'
-      - 'tests/web/**'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - 'src/backend/**'
-      - '*.ps1'
-      - '*.bat'
   workflow_dispatch:
     inputs:
       base_sha:
@@ -332,11 +292,26 @@ jobs:
         with:
           node-version: '22'
 
+      - name: Restore governance npm cache
+        id: governance-npm-cache
+        uses: https://github.com/actions/cache/restore@v4
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-npm-slim-v1-${{ hashFiles('src/web/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-npm-slim-v1-
+
       - name: Install locked workflow checker dependencies
         run: npm ci --prefix src/web
 
       - name: Self-test immutable CI diff resolver
         run: node scripts/resolve-ci-diff-refs.mjs --self-test
+
+      - name: Check E2E scope classifier
+        run: node scripts/check-e2e-scope.mjs
+
+      - name: Check E2E outcome verifier
+        run: node scripts/check-e2e-outcome.mjs
 
       - name: Self-test Gitea workflow checker
         run: node scripts/check-gitea-workflow.mjs --self-test
@@ -353,9 +328,35 @@ jobs:
       - name: Ensure tracked source tree is Rust-only
         run: node scripts/check-rust-only-source-tree.mjs
 
-  e2e-ci:
-    name: e2e-ci
+  e2e-scope:
+    name: e2e-scope
     runs-on: ubuntu-latest
+    outputs:
+      required: ${{ steps.e2e-scope.outputs.required }}
+      reason: ${{ steps.e2e-scope.outputs.reason }}
+    steps:
+      - name: Checkout E2E scope source
+        uses: https://github.com/actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup E2E scope Node.js 22
+        uses: https://github.com/actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Resolve E2E immutable CI diff refs
+        run: node scripts/resolve-ci-diff-refs.mjs resolve --event-name "$GITHUB_EVENT_NAME" --event-path "$GITHUB_EVENT_PATH" --remote origin --default-base refs/heads/main --out .omx/ultragoal/evidence/ci-diff-refs.json
+
+      - name: Classify E2E scope
+        id: e2e-scope
+        run: node scripts/classify-e2e-scope.mjs --event-name "$GITHUB_EVENT_NAME" --input .omx/ultragoal/evidence/ci-diff-refs.json --out "$GITHUB_OUTPUT"
+
+  e2e-heavy:
+    name: e2e-heavy
+    runs-on: ubuntu-latest
+    needs: e2e-scope
+    if: needs.e2e-scope.outputs.required == 'true'
     env:
       BILL_ANALYSER_DATABASE_BACKEND: postgres
       BILL_ANALYSER_POSTGRES_URL: postgresql://bill_analyser_e2e:bill_analyser_e2e@postgres:5432/bill_analyser_e2e
@@ -463,3 +464,24 @@ jobs:
 
       - name: Run deterministic E2E supervisor
         run: npm --prefix src/web run e2e:ci:smoke
+
+  e2e-ci:
+    name: e2e-ci
+    runs-on: ubuntu-latest
+    needs:
+      - e2e-scope
+      - e2e-heavy
+    if: ${{ always() }}
+    steps:
+      - name: Checkout E2E outcome source
+        uses: https://github.com/actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup E2E outcome Node.js 22
+        uses: https://github.com/actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Verify E2E outcome
+        run: node scripts/verify-e2e-outcome.mjs --scope-result "${{ needs.e2e-scope.result }}" --scope-required "${{ needs.e2e-scope.outputs.required }}" --scope-reason "${{ needs.e2e-scope.outputs.reason }}" --heavy-result "${{ needs.e2e-heavy.result }}"

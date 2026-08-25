@@ -54,6 +54,8 @@ $runBackend = -not $FrontendOnly
 $runFrontend = -not $BackendOnly
 
 Invoke-RepoCommand "Immutable CI diff resolver self-test" "node scripts/resolve-ci-diff-refs.mjs --self-test"
+Invoke-RepoCommand "E2E scope classifier" "node scripts/check-e2e-scope.mjs"
+Invoke-RepoCommand "E2E outcome verifier" "node scripts/check-e2e-outcome.mjs"
 Invoke-RepoCommand "Governance normalizer self-test" "node scripts/check-governance-normalizers.mjs"
 Invoke-RepoCommand "Rust-only source tree" "node scripts/check-rust-only-source-tree.mjs"
 Invoke-RepoCommand "Gitea workflow checker self-test" "node scripts/check-gitea-workflow.mjs --self-test"

@@ -86,6 +86,8 @@
 - 补 YAML 解析、Rust-only source tree gate 和受影响 CI 本地等价命令
 - 后端 PR job 以 `cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 35` 作为唯一的全工作区测试执行器；该命令执行完整 workspace tests 并生成覆盖率，不再额外串行执行一次 `cargo test --workspace`
 - focused route ownership 契约保持独立阻断；`scripts/check-gitea-workflow.mjs` 必须拒绝新增第二个全工作区测试执行器
+- PR 的无服务 `e2e-scope` job 先按后端、前端、全部测试、脚本、CI 与构建入口路径分类；配置/文档-only PR 整体跳过带 PostgreSQL/Weaviate 的 `e2e-heavy`，最终 required `e2e-ci` 只接受带非空原因的精确 `true` / `false` 输出并聚合结果，`main` push 与手工调度始终执行完整 E2E
+- `repo-governance` 在 `npm ci` 前仅恢复由 `src/web/package-lock.json` 驱动的 `~/.npm` 下载缓存，不缓存 `node_modules`
 
 ### `.github/**` / `.agents/**` / `.claude/**` / `scripts/**`
 
