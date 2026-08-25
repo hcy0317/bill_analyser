@@ -2901,6 +2901,8 @@
     "Recurring Suggestions": "週期帳單建議",
     "No pending actions": "目前沒有待處理事項",
     "No pending recurring suggestions": "目前沒有需要審核的週期帳單建議",
+    "Review History": "審核歷史",
+    "No recurring suggestion history": "暫無已審核的週期帳單建議",
     "Review": "查看",
     "Ignore": "忽略",
     "Recurring detection result": "偵測到 {detected} 條模式，新增 {created} 條，更新 {updated} 條",

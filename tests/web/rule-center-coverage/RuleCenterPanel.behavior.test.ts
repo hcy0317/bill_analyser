@@ -147,7 +147,7 @@ function setupPanel(props: Record<string, unknown> = {}): { bindings: any; expos
     const exposed: Record<string, unknown> = {};
     const bindings = RuleCenterPanel.setup({
         initTab: 'rules',
-        tabs: ['rules', 'learning', 'recurring'],
+        tabs: ['rules', 'learning'],
         title: '',
         hideHeader: false,
         headerActionsTarget: '',
@@ -263,7 +263,7 @@ describe('RuleCenterPanel production-loaded setup and derived state', () => {
         expect(bindings.showTabSwitcher.value).toBe(true);
         expect(bindings.hasHeaderActionsTarget.value).toBe(false);
         expect(bindings.headerActionsTarget.value).toBe('body');
-        expect(bindings.hasTab('recurring')).toBe(true);
+        expect(bindings.hasTab('recurring')).toBe(false);
         expect(bindings.normalizeTab('invalid')).toBe('rules');
 
         await mountedCallbacks[0]!();
@@ -292,7 +292,7 @@ describe('RuleCenterPanel production-loaded setup and derived state', () => {
 
     test('falls back to default tabs, an empty rule range, and the first valid tab slot', () => {
         const defaultTabs = setupPanel({ tabs: undefined }).bindings;
-        expect(defaultTabs.visibleTabs.value).toStrictEqual(['rules', 'learning', 'recurring']);
+        expect(defaultTabs.visibleTabs.value).toStrictEqual(['rules', 'learning']);
         expect(defaultTabs.rulePaginationStart.value).toBe(0);
         expect(defaultTabs.rulePaginationLabel.value).toBe('0 / 0');
 
@@ -534,10 +534,10 @@ describe('RuleCenterPanel production-loaded mutations', () => {
 });
 
 describe('RuleCenterPanel production template', () => {
-    test('renders populated rules, learning, recurring, alerts, and dialogs', async () => {
+    test('renders populated rules, learning, alerts, and dialogs without recurring review links', async () => {
         const html = await renderPanel({
             initTab: 'rules',
-            tabs: ['rules', 'learning', 'recurring'],
+            tabs: ['rules', 'learning'],
             title: 'Rule Center',
             hideHeader: false,
             headerActionsTarget: ''
@@ -564,7 +564,8 @@ describe('RuleCenterPanel production template', () => {
         expect(html).toContain('Rule Center');
         expect(html).toContain('visible error');
         expect(html).toContain('Food');
-        expect(html).toContain('Manage Scheduled Templates');
+        expect(html).not.toContain('Manage Scheduled Templates');
+        expect(html).not.toContain('Review Recurring Suggestions');
         expect(html).toContain('Match!');
         expect(html).toContain('Coffee rule');
         await invokeCapturedTemplateHandlers();
@@ -598,14 +599,7 @@ describe('RuleCenterPanel production template', () => {
         }, bindings => {
             bindings.overview.value = createOverview();
         });
-        expect(learningHtml).toContain('Category and Recurring Rules');
-
-        const recurringHtml = await renderPanel({
-            initTab: 'recurring', tabs: ['recurring'], title: '', hideHeader: false, headerActionsTarget: ''
-        }, bindings => {
-            bindings.overview.value = createOverview();
-        });
-        expect(recurringHtml).toContain('Review Recurring Suggestions');
+        expect(learningHtml).toContain('Rule Center');
         await flushAsync();
     });
 });

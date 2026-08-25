@@ -3189,6 +3189,8 @@
     "Recurring Suggestions": "周期账单建议",
     "No pending actions": "当前没有待处理事项",
     "No pending recurring suggestions": "当前没有需要审核的周期账单建议",
+    "Review History": "审核历史",
+    "No recurring suggestion history": "暂无已审核的周期账单建议",
     "Review": "查看",
     "Ignore": "忽略",
     "Recurring detection result": "检测到 {detected} 条模式，新建 {created} 条，更新 {updated} 条",

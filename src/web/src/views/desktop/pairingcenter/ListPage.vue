@@ -129,17 +129,6 @@
                                     </div>
                                 </template>
 
-                                <template v-else-if="activeDomain === 'transfer' && activeTab === 'rules' && activeRuleConfigTab === 'recurring'">
-                                    <div class="embedded-rule-panel">
-                                        <rule-center-panel init-tab="recurring"
-                                                           ref="recurringRulePanel"
-                                                           :tabs="['recurring']"
-                                                           :title="tt('Recurring Recognition')"
-                                                           :header-actions-target="ruleHeaderActionsTarget"
-                                                           hide-header />
-                                    </div>
-                                </template>
-
                                 <template v-else-if="activeDomain === 'learning' && activeTab === 'overview'">
                                     <learning-center-panel
                                         key="learning-overview"
@@ -236,7 +225,6 @@ type SecondaryNavValue =
     | 'duplicate-overview'
     | 'category-recognition'
     | 'account-recognition'
-    | 'recurring-recognition'
     | 'learning-overview'
     | 'learning-rules'
     | 'llm-recognition'
@@ -286,7 +274,6 @@ interface RefreshablePanel {
 
 const categoryRulePanel = ref<RefreshablePanel | null>(null);
 const accountRulePanel = ref<RefreshablePanel | null>(null);
-const recurringRulePanel = ref<RefreshablePanel | null>(null);
 const ruleHeaderActionsTargetId = 'rule-center-rule-title-actions';
 const ruleHeaderActionsTarget = `#${ruleHeaderActionsTargetId}`;
 const learningHeaderActionsTargetId = 'rule-center-learning-title-actions';
@@ -336,10 +323,6 @@ const activePrimary = computed<PrimaryNavValue>(() => {
 const activeSecondary = computed<SecondaryNavValue>(() => {
     if (activeDomain.value === 'duplicate' && activeTab.value === 'overview') {
         return 'duplicate-overview';
-    }
-
-    if (activeDomain.value === 'transfer' && activeTab.value === 'rules' && activeRuleConfigTab.value === 'recurring') {
-        return 'recurring-recognition';
     }
 
     if (activeDomain.value === 'transfer' && activeTab.value === 'rules' && activeRuleConfigTab.value === 'accounts') {
@@ -417,15 +400,6 @@ function secondaryTabsForPrimary(primary: PrimaryNavValue): SecondaryTabOption[]
                     ruleConfigTab: 'accounts',
                 },
             },
-            {
-                value: 'recurring-recognition',
-                label: tt('Recurring Recognition'),
-                selection: {
-                    domain: 'transfer',
-                    tab: 'rules',
-                    ruleConfigTab: 'recurring',
-                },
-            },
         ];
     }
 
@@ -495,9 +469,6 @@ const isPairingOverview = computed(() =>
 const isCategoryRecognition = computed(() =>
     activeDomain.value === 'transfer' && activeTab.value === 'rules' && activeRuleConfigTab.value === 'rules'
 );
-const isRecurringRecognition = computed(() =>
-    activeDomain.value === 'transfer' && activeTab.value === 'rules' && activeRuleConfigTab.value === 'recurring'
-);
 const isAccountRecognition = computed(() =>
     activeDomain.value === 'transfer' && activeTab.value === 'rules' && activeRuleConfigTab.value === 'accounts'
 );
@@ -505,7 +476,7 @@ const showLearningHeaderActions = computed(() =>
     activeDomain.value === 'learning' || activeDomain.value === 'llm'
 );
 const showRuleHeaderActions = computed(() =>
-    isCategoryRecognition.value || isAccountRecognition.value || isRecurringRecognition.value
+    isCategoryRecognition.value || isAccountRecognition.value
 );
 const currentPageTitle = computed(() => currentTabOption.value.label);
 const filteredPairs = computed(() => matchingStore.pairs.filter(pair => {
@@ -521,7 +492,6 @@ const canRefreshActiveView = computed(() => (
     isPairingOverview.value
         || isCategoryRecognition.value
         || isAccountRecognition.value
-        || isRecurringRecognition.value
 ));
 const showHeaderRefresh = computed(() => (
     canRefreshActiveView.value && !isCategoryRecognition.value && !isAccountRecognition.value
@@ -603,8 +573,6 @@ async function refreshActiveView(): Promise<void> {
         ? categoryRulePanel.value
         : isAccountRecognition.value
             ? accountRulePanel.value
-            : isRecurringRecognition.value
-            ? recurringRulePanel.value
             : null;
 
     if (activeRulePanel) {

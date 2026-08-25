@@ -59,6 +59,10 @@ describe('desktop router', () => {
         expect(route('/action-center').component).toEqual(expect.objectContaining({
             name: 'Stub:insights/InsightsPage'
         }));
+        expect(route('/recurring/discover').redirect).toEqual({
+            path: '/action-center',
+            query: { recurring: 'history' }
+        });
     });
 
     test('protects signed-in routes for logged-out, locked, and unlocked states', () => {

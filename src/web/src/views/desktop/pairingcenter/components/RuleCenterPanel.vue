@@ -4,7 +4,7 @@
             <v-card>
                 <v-card-title v-if="!props.hideHeader" class="d-flex align-center">
                     <v-icon :icon="mdiBookCogOutline" class="me-2" />
-                    <span>{{ title || tt('Category and Recurring Rules') }}</span>
+                    <span>{{ title || tt('Rule Center') }}</span>
                     <v-spacer />
                     <v-btn variant="outlined" :disabled="loading" @click="fetchAll">
                         <v-icon start :icon="mdiRefresh" />
@@ -26,10 +26,6 @@
                     <v-tab v-if="hasTab('learning')" value="learning">
                         <v-icon start :icon="mdiBrain" />
                         {{ tt('Learning Rules') }} ({{ overview.learningRuleCount }})
-                    </v-tab>
-                    <v-tab v-if="hasTab('recurring')" value="recurring">
-                        <v-icon start :icon="mdiCalendarSync" />
-                        {{ tt('Recurring Rules') }} ({{ overview.recurringRuleCount }})
                     </v-tab>
                 </v-tabs>
 
@@ -516,40 +512,6 @@
                         </v-data-table>
                     </v-tabs-window-item>
 
-                    <!-- Recurring Rules -->
-                    <v-tabs-window-item v-if="hasTab('recurring')" value="recurring">
-                        <v-card-text>
-                            <div class="d-flex flex-column flex-md-row align-md-center ga-3">
-                                <div class="text-body-2 text-medium-emphasis">
-                                    {{ tt('Recurring matching uses scheduled templates. Manage the templates in Scheduled Templates, or review newly detected recurring bills in discovery.') }}
-                                </div>
-                                <v-spacer />
-                                <v-btn
-                                    variant="outlined"
-                                    :prepend-icon="mdiTextBoxEditOutline"
-                                    :to="{ path: '/schedule/list' }"
-                                >
-                                    {{ tt('Manage Scheduled Templates') }}
-                                </v-btn>
-                                <v-btn
-                                    variant="tonal"
-                                    :prepend-icon="mdiCalendarSearch"
-                                    :to="{ path: '/recurring/discover' }"
-                                >
-                                    {{ tt('Review Recurring Suggestions') }}
-                                </v-btn>
-                            </div>
-                            <v-alert
-                                class="mt-4"
-                                variant="tonal"
-                                type="info"
-                                density="compact"
-                            >
-                                {{ tt('This panel does not edit scheduled-template matches directly. Current scheduled templates') }}:
-                                {{ overview.recurringRuleCount }}
-                            </v-alert>
-                        </v-card-text>
-                    </v-tabs-window-item>
                 </v-tabs-window>
             </v-card>
         </v-col>
@@ -684,9 +646,9 @@
 import axios from 'axios';
 import { ref, computed, onMounted, watch, useTemplateRef } from 'vue';
 import {
-    mdiBookCogOutline, mdiRefresh, mdiBrain, mdiCalendarSync,
+    mdiBookCogOutline, mdiRefresh, mdiBrain,
     mdiCheckCircle, mdiCloseCircle, mdiPlus, mdiPencilOutline, mdiDeleteOutline,
-    mdiTestTube, mdiCalendarSearch, mdiTextBoxEditOutline,
+    mdiTestTube,
     mdiChevronDown, mdiChevronRight, mdiFilterVariant, mdiViewGridOutline,
 } from '@mdi/js';
 import services from '@/lib/services.ts';
@@ -745,7 +707,7 @@ import type {
 const categoryStore = useTransactionCategoriesStore();
 const { tt, getAllTransactionDefaultCategories, getCurrentLanguageTag } = useI18n();
 type SnackBarType = InstanceType<typeof SnackBar>;
-type RuleCenterPanelTab = 'rules' | 'learning' | 'recurring';
+type RuleCenterPanelTab = 'rules' | 'learning';
 
 const props = defineProps<{
     initTab?: string;
@@ -763,7 +725,7 @@ const error = ref<string | null>(null);
 const snackbar = useTemplateRef<SnackBarType>('snackbar');
 const visibleTabs = computed<RuleCenterPanelTab[]>(() => props.tabs && props.tabs.length > 0
     ? props.tabs
-    : ['rules', 'learning', 'recurring']
+    : ['rules', 'learning']
 );
 const showTabSwitcher = computed(() => visibleTabs.value.length > 1);
 const title = computed(() => props.title);
@@ -775,7 +737,7 @@ function hasTab(tab: RuleCenterPanelTab): boolean {
 }
 
 function normalizeTab(tab?: string): RuleCenterPanelTab {
-    if ((tab === 'learning' || tab === 'recurring') && hasTab(tab)) {
+    if (tab === 'learning' && hasTab(tab)) {
         return tab;
     }
 

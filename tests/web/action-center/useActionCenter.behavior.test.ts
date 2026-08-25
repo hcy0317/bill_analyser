@@ -45,10 +45,15 @@ beforeEach(() => {
         startDate: '2026-03-01',
         endDate: '2026-08-12'
     }));
-    getRecurringSuggestions.mockResolvedValue(response({
-        items: [recurring(1), recurring(2, 'accepted')],
-        total: 2
-    }));
+    getRecurringSuggestions.mockImplementation(async ({ status }: { status?: string } = {}) => {
+        if (status === 'pending') {
+            return response({ items: [recurring(1)], total: 1 });
+        }
+        if (status === 'accepted') {
+            return response({ items: [recurring(2, 'accepted')], total: 1 });
+        }
+        return response({ items: [], total: 0 });
+    });
     detectRecurringPatterns.mockResolvedValue(response({ detected: 2, created: 1, updated: 1, skipped: 0 }));
     acceptRecurringSuggestion.mockResolvedValue(response({ suggestionId: 1, recurringId: 9, status: 'accepted' }));
     rejectRecurringSuggestion.mockResolvedValue(response({ suggestionId: 1, status: 'rejected' }));
@@ -60,8 +65,11 @@ describe('action center shared controller', () => {
 
         expect(await state.load()).toBe(true);
         expect(getAnomalies).toHaveBeenCalledWith({ months: 6 });
-        expect(getRecurringSuggestions).toHaveBeenCalledWith({ status: 'pending', limit: 500 });
+        expect(getRecurringSuggestions).toHaveBeenCalledWith({ status: 'pending', limit: 500, offset: 0 });
+        expect(getRecurringSuggestions).toHaveBeenCalledWith({ status: 'accepted', limit: 500, offset: 0 });
+        expect(getRecurringSuggestions).toHaveBeenCalledWith({ status: 'rejected', limit: 500, offset: 0 });
         expect(state.recurringSuggestions.value.map(item => item.id)).toEqual([1]);
+        expect(state.recurringHistory.value.map(item => item.id)).toEqual([2]);
         expect(state.summary.value).toEqual({
             total: 2,
             anomalyCount: 1,
@@ -69,6 +77,36 @@ describe('action center shared controller', () => {
             hasWork: true
         });
         expect(state.loading.value).toBe(false);
+    });
+
+    test('paginates each status independently and excludes unknown states from history', async () => {
+        const firstPendingPage = Array.from({ length: 500 }, (_, index) => recurring(index + 1));
+        getRecurringSuggestions.mockImplementation(async ({ status, offset }: {
+            status?: string;
+            offset?: number;
+        } = {}) => {
+            if (status === 'pending') {
+                return response({
+                    items: offset === 0 ? firstPendingPage : [recurring(501)],
+                    total: 501
+                });
+            }
+            if (status === 'accepted') {
+                return response({
+                    items: [recurring(700, 'accepted'), recurring(701, 'archived')],
+                    total: 2
+                });
+            }
+            return response({ items: [recurring(800, 'rejected')], total: 1 });
+        });
+
+        const state = useActionCenter();
+        expect(await state.load()).toBe(true);
+
+        expect(getRecurringSuggestions).toHaveBeenCalledWith({ status: 'pending', limit: 500, offset: 500 });
+        expect(state.recurringSuggestions.value).toHaveLength(501);
+        expect(state.recurringHistory.value.map(item => item.id)).toEqual([800, 700]);
+        expect(state.recurringHistory.value.map(item => item.status)).toEqual(['rejected', 'accepted']);
     });
 
     test('reports transport and unsuccessful-envelope failures without leaving busy state', async () => {
@@ -100,10 +138,14 @@ describe('action center shared controller', () => {
     test('accepts or rejects pending suggestions locally and preserves failed items', async () => {
         const state = useActionCenter();
         state.recurringSuggestions.value = [recurring(1), recurring(2)];
+        state.recurringHistory.value = [];
 
         expect(await state.acceptRecurring(1)).toBe(true);
         expect(acceptRecurringSuggestion).toHaveBeenCalledWith({ suggestionId: 1 });
         expect(state.recurringSuggestions.value.map(item => item.id)).toEqual([2]);
+        expect(state.recurringHistory.value).toEqual([
+            expect.objectContaining({ id: 1, status: 'accepted' })
+        ]);
 
         rejectRecurringSuggestion.mockRejectedValueOnce(new Error('mutation failed'));
         expect(await state.rejectRecurring(2)).toBe(false);
@@ -114,6 +156,10 @@ describe('action center shared controller', () => {
         rejectRecurringSuggestion.mockResolvedValueOnce(response({ status: 'rejected' }));
         expect(await state.rejectRecurring(2)).toBe(true);
         expect(state.recurringSuggestions.value).toEqual([]);
+        expect(state.recurringHistory.value).toEqual([
+            expect.objectContaining({ id: 2, status: 'rejected' }),
+            expect.objectContaining({ id: 1, status: 'accepted' })
+        ]);
         await actualVue.nextTick();
         expect(state.summary.value.hasWork).toBe(false);
     });

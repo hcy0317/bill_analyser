@@ -230,14 +230,12 @@ describe('pairing center ListPage production-loaded navigation', () => {
         expect(bindings.activePrimary.value).toBe('rule-config');
         expect(bindings.activeSecondary.value).toBe('category-recognition');
         expect(bindings.secondaryTabs.value.map((item: any) => item.value)).toStrictEqual([
-            'category-recognition', 'account-recognition', 'recurring-recognition',
+            'category-recognition', 'account-recognition',
         ]);
 
         bindings.selectSecondaryNav('account-recognition');
         expect(bindings.activeSecondary.value).toBe('account-recognition');
         expect(bindings.currentPageTitle.value).toBe('Account Recognition');
-        bindings.selectSecondaryNav('recurring-recognition');
-        expect(bindings.activeSecondary.value).toBe('recurring-recognition');
         bindings.selectSecondaryNav('category-recognition');
         expect(bindings.activeSecondary.value).toBe('category-recognition');
 
@@ -316,6 +314,16 @@ describe('pairing center ListPage production-loaded navigation', () => {
         await flushAsync();
         expect(bindings.activeDomain.value).toBe('duplicate');
         expect(bindings.activeTab.value).toBe('overview');
+
+        mockRouterReplace.mockClear();
+        props.initDomain = 'transfer';
+        props.initTab = 'recurring';
+        await flushAsync();
+        expect(bindings.activeRuleConfigTab.value).toBe('rules');
+        expect(mockRouterReplace).toHaveBeenLastCalledWith({
+            path: '/pairing/list',
+            query: { keep: 'preserved', domain: 'transfer', tab: 'rules' },
+        });
     });
 });
 
@@ -354,10 +362,8 @@ describe('pairing center ListPage production-loaded panels and pairs', () => {
 
         const categoryRefresh = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
         const accountRefresh = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
-        const recurringRefresh = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
         bindings.categoryRulePanel.value = { refresh: categoryRefresh };
         bindings.accountRulePanel.value = { refresh: accountRefresh };
-        bindings.recurringRulePanel.value = { refresh: recurringRefresh };
 
         bindings.selectPrimaryNav('rule-config');
         await bindings.refreshActiveView();
@@ -368,18 +374,6 @@ describe('pairing center ListPage production-loaded panels and pairs', () => {
         await bindings.refreshActiveView();
         expect(accountRefresh).toHaveBeenCalled();
 
-        bindings.selectSecondaryNav('recurring-recognition');
-        await bindings.refreshActiveView();
-        expect(recurringRefresh).toHaveBeenCalled();
-        expect(bindings.showHeaderRefresh.value).toBe(true);
-        expect(bindings.activeToolbarRefreshing.value).toBe(false);
-
-        recurringRefresh.mockRejectedValueOnce(new Error('recurring unavailable'));
-        await expect(bindings.refreshActiveView()).rejects.toThrow('recurring unavailable');
-        expect(bindings.rulePanelRefreshing.value).toBe(false);
-
-        bindings.recurringRulePanel.value = null;
-        await bindings.refreshActiveView();
         bindings.selectPrimaryNav('learning');
         await bindings.refreshActiveView();
         expect(bindings.canRefreshActiveView.value).toBe(false);
@@ -427,7 +421,6 @@ describe('pairing center ListPage production template', () => {
     test.each([
         ['transfer', 'rules', 'Category Recognition', 'RuleCenterPanelStub'],
         ['transfer', 'accounts', 'Account Recognition', 'AccountRulePanelStub'],
-        ['transfer', 'recurring', 'Recurring Recognition', 'RuleCenterPanelStub'],
         ['learning', 'overview', 'Auto Suggestions', 'LearningCenterPanelStub'],
         ['learning', 'rules', 'Learning Rules', 'LearningCenterPanelStub'],
         ['llm', 'overview', 'LLM Recognition', 'LearningCenterPanelStub'],

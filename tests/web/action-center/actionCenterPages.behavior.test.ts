@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, jest, test } from '@jest/globa
 
 const actualVue = jest.requireActual('vue') as any;
 const push = jest.fn();
+const replace = jest.fn();
+const mockRoute = actualVue.reactive({ query: {} as Record<string, unknown> });
 const navigate = jest.fn();
 const load = jest.fn<() => Promise<boolean>>();
 const detectRecurring = jest.fn<() => Promise<boolean>>();
@@ -67,6 +69,7 @@ const controller = {
         startDate: '2026-03-01', endDate: '2026-08-12'
     }),
     recurringSuggestions: actualVue.ref([] as any[]),
+    recurringHistory: actualVue.ref([] as any[]),
     summary: actualVue.computed(() => {
         const anomalyCount = controller.anomalyData.value.items.length;
         const recurringCount = controller.recurringSuggestions.value.length;
@@ -83,7 +86,10 @@ const controller = {
     rejectRecurring
 };
 
-jest.mock('vue-router', () => ({ useRouter: () => ({ push }) }));
+jest.mock('vue-router', () => ({
+    useRoute: () => mockRoute,
+    useRouter: () => ({ push, replace })
+}));
 jest.mock('@/locales/helpers.ts', () => ({
     useI18n: () => ({
         tt: (key: string) => `tt:${key}`,
@@ -111,6 +117,8 @@ beforeEach(() => {
         startDate: '2026-03-01', endDate: '2026-08-12'
     };
     controller.recurringSuggestions.value = [];
+    controller.recurringHistory.value = [];
+    mockRoute.query = {};
     load.mockResolvedValue(true);
     detectRecurring.mockResolvedValue(true);
     acceptRecurring.mockResolvedValue(true);
@@ -175,7 +183,8 @@ async function renderDesktopWithExpandedSlots(): Promise<Array<(value?: unknown)
     for (const name of [
         'v-row', 'v-col', 'v-card', 'v-card-text', 'v-icon', 'v-chip', 'v-spacer',
         'v-select', 'v-btn', 'v-progress-linear', 'v-alert', 'v-list', 'v-divider',
-        'v-list-item', 'v-avatar', 'v-list-item-title', 'v-list-item-subtitle'
+        'v-list-item', 'v-avatar', 'v-list-item-title', 'v-list-item-subtitle',
+        'v-tabs', 'v-tab', 'v-tabs-window', 'v-tabs-window-item'
     ]) app.component(name, Stub);
     app.config.warnHandler = () => undefined;
     await renderToString(app);
@@ -195,6 +204,61 @@ describe('action center desktop and mobile pages', () => {
             path: '/transaction/list',
             query: { keyword: 'Coffee' }
         });
+    });
+
+    test('desktop opens legacy recurring discovery links on the history view', () => {
+        mockRoute.query = { recurring: 'history' };
+        controller.recurringHistory.value = [{ ...recurringSuggestion, status: 'accepted' }];
+
+        const bindings = DesktopPage.setup({}, {
+            attrs: {}, slots: {}, emit: jest.fn(), expose: () => undefined
+        });
+
+        expect(bindings.recurringView.value).toBe('history');
+        expect(bindings.recurringHistory.value).toEqual([
+            expect.objectContaining({ id: recurringSuggestion.id, status: 'accepted' })
+        ]);
+    });
+
+    test('desktop recurring tabs keep the canonical query in sync without losing other filters', async () => {
+        mockRoute.query = { source: 'direct' };
+        const bindings = DesktopPage.setup({}, {
+            attrs: {}, slots: {}, emit: jest.fn(), expose: () => undefined
+        });
+
+        bindings.recurringView.value = 'history';
+        await actualVue.nextTick();
+        expect(replace).toHaveBeenLastCalledWith({
+            query: { source: 'direct', recurring: 'history' }
+        });
+
+        mockRoute.query = { source: 'legacy', recurring: 'history' };
+        await actualVue.nextTick();
+        bindings.recurringView.value = 'pending';
+        await actualVue.nextTick();
+        expect(replace).toHaveBeenLastCalledWith({ query: { source: 'legacy' } });
+    });
+
+    test('mobile exposes pending and terminal recurring views', () => {
+        controller.recurringSuggestions.value = [recurringSuggestion];
+        controller.recurringHistory.value = [
+            { ...recurringSuggestion, id: 8, status: 'accepted' },
+            { ...recurringSuggestion, id: 9, status: 'rejected' }
+        ];
+        const bindings = MobilePage.setup({ f7router: { navigate } }, {
+            attrs: {}, slots: {}, emit: jest.fn(), expose: () => undefined
+        });
+
+        expect(bindings.recurringView.value).toBe('pending');
+        bindings.recurringView.value = 'history';
+        expect(bindings.recurringStatusLabel(controller.recurringHistory.value[0])).toBe('tt:Accepted');
+        expect(bindings.recurringStatusLabel(controller.recurringHistory.value[1])).toBe('tt:Rejected');
+        expect(bindings.recurringStatusLabel({ ...recurringSuggestion, status: 'archived' })).toBe('');
+        expect(renderAndCollectHandlers(
+            MobilePage,
+            bindings,
+            { f7router: { navigate } }
+        ).vnode).toBeTruthy();
     });
 
     test('mobile refresh completes the pull-to-refresh callback and uses its own route syntax', async () => {

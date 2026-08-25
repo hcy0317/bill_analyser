@@ -3188,6 +3188,8 @@
     "Recurring Suggestions": "Recurring Suggestions",
     "No pending actions": "You're all caught up",
     "No pending recurring suggestions": "No recurring suggestions need review",
+    "Review History": "Review History",
+    "No recurring suggestion history": "No reviewed recurring suggestions yet",
     "Review": "Review",
     "Ignore": "Ignore",
     "Recurring detection result": "Detected {detected} patterns, created {created}, updated {updated}",

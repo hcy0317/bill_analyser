@@ -33,7 +33,6 @@ import ExchangeRatesListPage from '@/views/desktop/exchangerates/ListPage.vue';
 import AboutPage from '@/views/desktop/AboutPage.vue';
 import BudgetListPage from '@/views/desktop/budgets/ListPage.vue';
 import PairingCenterPage from '@/views/desktop/pairingcenter/ListPage.vue';
-import RecurringDiscoverPage from '@/views/desktop/recurring/DiscoverPage.vue';
 import InsightsPage from '@/views/desktop/insights/InsightsPage.vue';
 
 function checkLogin(): NavigationGuardReturn {
@@ -199,8 +198,10 @@ const router = createRouter({
                 },
                 {
                     path: '/recurring/discover',
-                    component: RecurringDiscoverPage,
-                    beforeEnter: checkLogin
+                    redirect: {
+                        path: '/action-center',
+                        query: { recurring: 'history' }
+                    }
                 },
                 {
                     path: '/action-center',

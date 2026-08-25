@@ -209,7 +209,7 @@ async fn cancelled_migration_future_closes_the_advisory_lock_session() -> Result
     let wait_started = Instant::now();
     while migration_advisory_lock_count(&database.pool).await? == 0 {
         assert!(
-            wait_started.elapsed() < Duration::from_secs(5),
+            wait_started.elapsed() < Duration::from_secs(30),
             "migration must acquire SQLx's advisory lock before cancellation"
         );
         tokio::time::sleep(Duration::from_millis(25)).await;

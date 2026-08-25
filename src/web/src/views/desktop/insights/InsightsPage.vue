@@ -107,7 +107,21 @@
                                 {{ summary.recurringCount }}
                             </v-chip>
                         </div>
-                        <v-list v-if="recurringSuggestions.length" lines="three" class="pa-0">
+                        <v-tabs v-model="recurringView" color="primary" density="compact" class="mb-2">
+                            <v-tab value="pending">
+                                {{ tt('Pending') }}
+                                <v-chip class="ml-2" size="x-small" variant="tonal">
+                                    {{ recurringSuggestions.length }}
+                                </v-chip>
+                            </v-tab>
+                            <v-tab value="history">
+                                {{ tt('Review History') }}
+                                <v-chip class="ml-2" size="x-small" variant="tonal">
+                                    {{ recurringHistory.length }}
+                                </v-chip>
+                            </v-tab>
+                        </v-tabs>
+                        <v-list v-if="recurringView === 'pending' && recurringSuggestions.length" lines="three" class="pa-0">
                             <template v-for="(suggestion, index) in recurringSuggestions" :key="suggestion.id">
                                 <v-divider v-if="index > 0" />
                                 <v-list-item class="px-0 py-2">
@@ -146,8 +160,37 @@
                                 </v-list-item>
                             </template>
                         </v-list>
-                        <p v-else-if="!loading" class="text-body-2 text-medium-emphasis py-3 mb-0">
+                        <p v-else-if="recurringView === 'pending' && !loading" class="text-body-2 text-medium-emphasis py-3 mb-0">
                             {{ tt('No pending recurring suggestions') }}
+                        </p>
+                        <v-list v-if="recurringView === 'history' && recurringHistory.length" lines="three" class="pa-0">
+                            <template v-for="(suggestion, index) in recurringHistory" :key="suggestion.id">
+                                <v-divider v-if="index > 0" />
+                                <v-list-item class="px-0 py-2">
+                                    <v-list-item-title class="font-weight-medium">
+                                        {{ suggestion.name || suggestion.counterparty }}
+                                    </v-list-item-title>
+                                    <v-list-item-subtitle class="action-center-subtitle">
+                                        {{ suggestion.counterparty || suggestion.description }}
+                                        <span v-if="suggestion.suggestedNextDate"> · {{ tt('Next Date') }}: {{ suggestion.suggestedNextDate }}</span>
+                                    </v-list-item-subtitle>
+                                    <v-list-item-subtitle>
+                                        {{ formatAmount(suggestion.amountCents) }} · {{ tt('Confidence') }} {{ formatPercent(suggestion.confidenceScore) }}
+                                    </v-list-item-subtitle>
+                                    <template #append>
+                                        <v-chip
+                                            :color="suggestion.status === 'accepted' ? 'success' : 'error'"
+                                            size="small"
+                                            variant="tonal"
+                                        >
+                                            {{ tt(suggestion.status === 'accepted' ? 'Accepted' : 'Rejected') }}
+                                        </v-chip>
+                                    </template>
+                                </v-list-item>
+                            </template>
+                        </v-list>
+                        <p v-else-if="recurringView === 'history' && !loading" class="text-body-2 text-medium-emphasis py-3 mb-0">
+                            {{ tt('No recurring suggestion history') }}
                         </p>
                     </section>
                 </v-card-text>
@@ -157,8 +200,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, watch } from 'vue';
-import { useRouter } from 'vue-router';
+import { computed, onMounted, ref, watch } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import {
     mdiAlertCircleOutline,
     mdiArrowRight,
@@ -182,6 +225,7 @@ import {
 } from '@/views/base/action-center/actionCenterModel.ts';
 import { useActionCenter } from '@/views/base/action-center/useActionCenter.ts';
 
+const route = useRoute();
 const router = useRouter();
 const { tt, formatAmountToLocalizedNumerals } = useI18n();
 const {
@@ -193,12 +237,17 @@ const {
     detectResult,
     anomalyData,
     recurringSuggestions,
+    recurringHistory,
     summary,
     load,
     detectRecurring,
     acceptRecurring,
     rejectRecurring
 } = useActionCenter();
+
+const recurringView = ref<'pending' | 'history'>(
+    route.query['recurring'] === 'history' ? 'history' : 'pending'
+);
 
 const monthOptions = computed(() => [3, 6, 12].map(value => ({
     title: tt('Month count', { count: value }),
@@ -240,6 +289,24 @@ function reviewAnomaly(anomaly: ActionCenterAnomaly): void {
 }
 
 watch(months, () => load());
+watch(
+    () => route.query['recurring'],
+    value => { recurringView.value = value === 'history' ? 'history' : 'pending'; }
+);
+watch(recurringView, value => {
+    const recurringQuery = route.query['recurring'];
+    if (value === 'history') {
+        if (recurringQuery !== 'history') {
+            void router.replace({ query: { ...route.query, recurring: 'history' } });
+        }
+        return;
+    }
+    if (recurringQuery !== undefined) {
+        const query = { ...route.query };
+        delete query['recurring'];
+        void router.replace({ query });
+    }
+});
 onMounted(() => load());
 </script>
 

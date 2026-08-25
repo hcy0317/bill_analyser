@@ -126,7 +126,9 @@ describe('rule center UX source guards', () => {
         const accountDialogsSource = readSource('src/views/desktop/pairingcenter/components/AccountRuleDialogs.vue');
         const listSource = readSource('src/views/desktop/pairingcenter/ListPage.vue');
 
-        expect(source).toContain("type RuleCenterPanelTab = 'rules' | 'learning' | 'recurring';");
+        expect(source).toContain("type RuleCenterPanelTab = 'rules' | 'learning';");
+        expect(source).not.toContain("hasTab('recurring')");
+        expect(source).not.toContain("path: '/recurring/discover'");
         expect(source).toContain('CategoryRuleBuilderFields');
         expect(source).toContain('rule-center-rules-table');
         expect(source).toContain("tt('No category rules')");
