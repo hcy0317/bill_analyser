@@ -29,3 +29,14 @@ src/backend/db/postgres/migrations/0026_import_signal_projection_columns.sql tex
 src/backend/db/postgres/migrations/0027_import_confirm_receipts.sql text eol=lf
 src/backend/db/postgres/migrations/0028_budget_period_type_constraint.sql text eol=lf
 src/backend/db/postgres/migrations/0029_import_parser_signal_evidence.sql text eol=lf
+src/backend/db/postgres/migrations/0030_bills_foreign_key_indexes.sql text eol=lf
+src/backend/db/postgres/migrations/0031_import_decision_members_history_bill_index.sql text eol=lf
+src/backend/db/postgres/migrations/0032_import_history_materializations_bill_index.sql text eol=lf
+src/backend/db/postgres/migrations/0033_import_confirm_history_bill_index.sql text eol=lf
+src/backend/db/postgres/migrations/0034_import_confirm_created_bill_index.sql text eol=lf
+src/backend/db/postgres/migrations/0035_import_confirm_deleted_bill_index.sql text eol=lf
+src/backend/db/postgres/migrations/0036_matching_pairs_left_bill_index.sql text eol=lf
+src/backend/db/postgres/migrations/0037_matching_pairs_right_bill_index.sql text eol=lf
+src/backend/db/postgres/migrations/0038_matching_suppressions_left_bill_index.sql text eol=lf
+src/backend/db/postgres/migrations/0039_matching_suppressions_right_bill_index.sql text eol=lf
+src/backend/db/postgres/migrations/0040_import_learning_samples_bill_index.sql text eol=lf

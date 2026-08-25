@@ -27,7 +27,7 @@ fn main() {
     });
 }
 
-fn discover_migrations(directory: &Path) -> Vec<(i64, String, String)> {
+fn discover_migrations(directory: &Path) -> Vec<(i64, String, String, bool)> {
     let entries = fs::read_dir(directory).unwrap_or_else(|error| {
         panic!(
             "PostgreSQL migration source directory is required at build time ({}): {error}",
@@ -62,7 +62,11 @@ fn discover_migrations(directory: &Path) -> Vec<(i64, String, String)> {
             let version = raw_version.parse::<i64>().unwrap_or_else(|error| {
                 panic!("invalid PostgreSQL migration version in {file_name}: {error}")
             });
-            Some((version, raw_description.replace('_', " "), file_name))
+            let sql = fs::read_to_string(&path).unwrap_or_else(|error| {
+                panic!("failed to read PostgreSQL migration {file_name}: {error}")
+            });
+            let no_tx = sql.starts_with("-- no-transaction");
+            Some((version, raw_description.replace('_', " "), file_name, no_tx))
         })
         .collect::<Vec<_>>();
     migrations.sort_by_key(|migration| migration.0);
@@ -71,7 +75,7 @@ fn discover_migrations(directory: &Path) -> Vec<(i64, String, String)> {
         "PostgreSQL migration source directory contains no SQL migrations: {}",
         directory.display()
     );
-    for (index, (version, _, file_name)) in migrations.iter().enumerate() {
+    for (index, (version, _, file_name, _)) in migrations.iter().enumerate() {
         let expected = i64::try_from(index + 1).expect("migration count fits i64");
         assert_eq!(
             *version, expected,
@@ -81,13 +85,13 @@ fn discover_migrations(directory: &Path) -> Vec<(i64, String, String)> {
     migrations
 }
 
-fn render_embedded_migrator(migrations: &[(i64, String, String)]) -> String {
+fn render_embedded_migrator(migrations: &[(i64, String, String, bool)]) -> String {
     let mut output = String::from(
         "fn embedded_postgres_migrator() -> sqlx::migrate::Migrator {\n    sqlx::migrate::Migrator {\n        migrations: std::borrow::Cow::Owned(vec![\n",
     );
-    for (version, description, file_name) in migrations {
+    for (version, description, file_name, no_tx) in migrations {
         output.push_str(&format!(
-            "            sqlx::migrate::Migration::new({version}, std::borrow::Cow::Borrowed({description:?}), sqlx::migrate::MigrationType::Simple, std::borrow::Cow::Borrowed(include_str!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/{MIGRATIONS_RELATIVE_DIR}/{file_name}\"))), false),\n"
+            "            sqlx::migrate::Migration::new({version}, std::borrow::Cow::Borrowed({description:?}), sqlx::migrate::MigrationType::Simple, std::borrow::Cow::Borrowed(include_str!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/{MIGRATIONS_RELATIVE_DIR}/{file_name}\"))), {no_tx}),\n"
         ));
     }
     output.push_str("        ]),\n        ..sqlx::migrate::Migrator::DEFAULT\n    }\n}\n");

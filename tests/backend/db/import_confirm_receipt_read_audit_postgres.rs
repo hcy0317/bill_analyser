@@ -133,10 +133,10 @@ async fn target_audit_covers_matching_receipts_in_bounded_read_only_batches(
         let report = audit_import_confirm_receipt_target_snapshot(&isolated.pool, 2).await?;
 
         assert!(report.is_match());
-        assert_eq!(report.expected_migration_version, 29);
-        assert_eq!(report.expected_migration_count, 29);
-        assert_eq!(report.actual_migration_version, 29);
-        assert_eq!(report.migration_count, 29);
+        assert_eq!(report.expected_migration_version, 40);
+        assert_eq!(report.expected_migration_count, 40);
+        assert_eq!(report.actual_migration_version, 40);
+        assert_eq!(report.migration_count, 40);
         assert!(!report.snapshot_token.is_empty());
         assert_eq!(report.batch_size, 2);
         assert_eq!(report.target_sessions, 3);

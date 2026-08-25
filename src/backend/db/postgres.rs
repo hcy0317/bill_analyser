@@ -7,6 +7,8 @@ pub const POSTGRES_INITIAL_SCHEMA_FILE: &str = "0001_initial_authoritative_schem
 
 pub type PostgresPool = sqlx::PgPool;
 
+static POSTGRES_MIGRATION_GATE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PostgresMigrationDescriptor {
     pub version: i64,
@@ -40,8 +42,21 @@ pub fn embedded_postgres_migration_versions() -> Vec<i64> {
 pub async fn run_postgres_migrations(
     pool: &PostgresPool,
 ) -> Result<(), sqlx::migrate::MigrateError> {
+    // Concurrent index creation waits for every active virtual transaction.
+    // Serialize in-process migration callers before SQLx takes its database
+    // advisory lock so parallel tests cannot deadlock the waiting connection
+    // against the concurrent index builder. SQLx still owns cross-process locking.
+    // SQLx 0.8.6 does not unlock on an apply error, so consume and close the
+    // checked-out connection before returning that error.
+    let _migration_guard = POSTGRES_MIGRATION_GATE.lock().await;
     let migrator = embedded_postgres_migrator();
-    migrator.run(pool).await
+    let mut connection = pool.acquire().await?;
+    connection.close_on_drop();
+    let result = migrator.run_direct(&mut *connection).await;
+    if result.is_err() {
+        let _ = connection.close().await;
+    }
+    result
 }
 
 #[cfg(test)]
@@ -54,7 +69,7 @@ mod tests {
     #[test]
     fn postgres_manifest_points_to_existing_initial_schema() {
         let manifest = postgres_migration_manifest();
-        assert_eq!(manifest.len(), 29);
+        assert_eq!(manifest.len(), 40);
         assert_eq!(manifest[0].version, 1);
         assert_eq!(manifest[0].file_name, POSTGRES_INITIAL_SCHEMA_FILE);
         for (index, descriptor) in manifest.iter().enumerate() {
@@ -93,6 +108,8 @@ mod tests {
     #[test]
     fn postgres_migration_files_preserve_deployed_line_endings() {
         const CRLF_VERSIONS: &[i64] = &[1, 2, 3, 4, 10, 11, 12, 13, 19, 20, 24];
+        let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
+        let attributes = fs::read_to_string(repo_root.join(".gitattributes")).unwrap();
 
         for descriptor in postgres_migration_manifest() {
             let bytes = fs::read(postgres_migrations_dir().join(descriptor.file_name)).unwrap();
@@ -105,6 +122,16 @@ mod tests {
 
             assert!(!has_bare_cr, "{} contains a bare CR", descriptor.file_name);
             assert_eq!(has_crlf, expected_crlf, "{}", descriptor.file_name);
+            if descriptor.version >= 30 {
+                assert!(
+                    attributes.contains(&format!(
+                        "src/backend/db/postgres/migrations/{} text eol=lf",
+                        descriptor.file_name
+                    )),
+                    "{} must pin its immutable SQLx checksum to LF",
+                    descriptor.file_name
+                );
+            }
         }
     }
 
@@ -317,6 +344,53 @@ mod tests {
             assert!(migration.contains(index), "missing index {index}");
         }
         assert!(migration.contains("session_id, user_id, occurred_at, id"));
+    }
+
+    #[test]
+    fn bills_foreign_key_index_migrations_are_non_transactional_and_complete() {
+        let expected_indexes = [
+            "idx_import_preview_rows_history_bill_id",
+            "idx_import_decision_group_members_history_bill_id",
+            "idx_import_history_materializations_history_bill_id",
+            "idx_import_confirm_operations_history_bill_id",
+            "idx_import_confirm_operations_created_bill_id",
+            "idx_import_confirm_operations_deleted_bill_id",
+            "idx_matching_pairs_left_bill_id",
+            "idx_matching_pairs_right_bill_id",
+            "idx_matching_suppressions_left_bill_id",
+            "idx_matching_suppressions_right_bill_id",
+            "idx_import_learning_samples_bill_id",
+        ];
+        let migrator = embedded_postgres_migrator();
+        let index_migrations = &postgres_migration_manifest()[29..];
+        assert_eq!(index_migrations.len(), expected_indexes.len());
+
+        for (descriptor, expected_index) in index_migrations.iter().zip(expected_indexes) {
+            let migration =
+                fs::read_to_string(postgres_migrations_dir().join(descriptor.file_name)).unwrap();
+            assert!(migration.starts_with("-- no-transaction"));
+            assert_eq!(migration.matches("CREATE INDEX CONCURRENTLY").count(), 1);
+            assert!(
+                !migration.contains("IF NOT EXISTS"),
+                "{} must fail closed on a same-name invalid index",
+                descriptor.file_name
+            );
+            assert!(
+                migration.contains(expected_index),
+                "missing index {expected_index}"
+            );
+            assert_eq!(descriptor.required_indexes, &[expected_index]);
+
+            let embedded = migrator
+                .iter()
+                .find(|candidate| candidate.version == descriptor.version)
+                .expect("embedded bills foreign-key migration");
+            assert!(
+                embedded.no_tx,
+                "{} must disable transactions",
+                descriptor.file_name
+            );
+        }
     }
 
     #[test]
