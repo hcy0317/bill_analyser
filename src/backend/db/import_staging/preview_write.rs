@@ -30,17 +30,46 @@ pub fn insert_preview_bills_batch(
     drafts: &[ImportPreviewDraft],
 ) -> DbResult<usize> {
     block_on_db(async move {
+        let total_started_at = std::time::Instant::now();
         let user_id = user_id_i64(user_id)?;
+        let transaction_begin_started_at = std::time::Instant::now();
         let mut tx = pool.begin().await?;
+        let elapsed_transaction_begin_ms = transaction_begin_started_at.elapsed().as_millis();
+        let session_lock_started_at = std::time::Instant::now();
         let session_db_id =
             lock_active_import_session_on_tx(&mut tx, session_id, user_id).await?;
+        let elapsed_session_lock_ms = session_lock_started_at.elapsed().as_millis();
         if drafts.is_empty() {
             tx.commit().await?;
             return Ok(0);
         }
-        insert_preview_rows_batch_async(&mut tx, session_db_id, user_id, drafts).await?;
+        let write_timing =
+            insert_preview_rows_batch_async(&mut tx, session_db_id, user_id, drafts).await?;
+        let counter_refresh_started_at = std::time::Instant::now();
         update_session_preview_count(&mut tx, session_db_id, user_id).await?;
+        let elapsed_counter_refresh_ms = counter_refresh_started_at.elapsed().as_millis();
+        let commit_started_at = std::time::Instant::now();
         tx.commit().await?;
+        let elapsed_commit_ms = commit_started_at.elapsed().as_millis();
+        tracing::info!(
+            target: "bill_analyser::import_preview_write",
+            operation = "insert_preview_bills_batch",
+            preview_rows = write_timing.preview_rows,
+            query_chunks = write_timing.query_chunks,
+            elapsed_transaction_begin_ms,
+            elapsed_session_lock_ms,
+            elapsed_identity_load_ms = write_timing.elapsed_identity_load_ms,
+            elapsed_draft_clone_ms = write_timing.elapsed_draft_clone_ms,
+            elapsed_identity_validation_ms = write_timing.elapsed_identity_validation_ms,
+            elapsed_row_encode_ms = write_timing.elapsed_row_encode_ms,
+            elapsed_query_build_ms = write_timing.elapsed_query_build_ms,
+            elapsed_query_execute_ms = write_timing.elapsed_query_execute_ms,
+            elapsed_signal_shadow_ms = write_timing.elapsed_signal_shadow_ms,
+            elapsed_counter_refresh_ms,
+            elapsed_commit_ms,
+            elapsed_total_ms = total_started_at.elapsed().as_millis(),
+            "preview batch insert complete"
+        );
         Ok(drafts.len())
     })
 }
@@ -208,49 +237,109 @@ struct ImportIdentityMaps {
     active_categories: BTreeMap<i64, Option<i64>>,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct PreviewRowsBatchWriteTiming {
+    preview_rows: usize,
+    query_chunks: usize,
+    elapsed_identity_load_ms: u128,
+    elapsed_draft_clone_ms: u128,
+    elapsed_identity_validation_ms: u128,
+    elapsed_row_encode_ms: u128,
+    elapsed_query_build_ms: u128,
+    elapsed_query_execute_ms: u128,
+    elapsed_signal_shadow_ms: u128,
+}
+
 async fn insert_preview_rows_batch_async(
     tx: &mut sqlx::Transaction<'_, Postgres>,
     session_db_id: i64,
     user_id: i64,
     drafts: &[ImportPreviewDraft],
-) -> DbResult<usize> {
+) -> DbResult<PreviewRowsBatchWriteTiming> {
+    let identity_load_started_at = std::time::Instant::now();
     let identity_maps = load_import_identity_maps_on_tx(tx, user_id).await?;
+    let elapsed_identity_load_ms = identity_load_started_at.elapsed().as_millis();
+    let draft_clone_started_at = std::time::Instant::now();
     let mut drafts = drafts.to_vec();
+    let elapsed_draft_clone_ms = draft_clone_started_at.elapsed().as_millis();
+    let identity_validation_started_at = std::time::Instant::now();
     for draft in &mut drafts {
         apply_identity_validation_to_draft(draft, &identity_maps);
     }
+    let elapsed_identity_validation_ms = identity_validation_started_at.elapsed().as_millis();
+    let row_encode_started_at = std::time::Instant::now();
     let rows = drafts
         .iter()
         .map(preview_row_batch_value_from_draft)
         .collect::<DbResult<Vec<_>>>()?;
+    let elapsed_row_encode_ms = row_encode_started_at.elapsed().as_millis();
     let mut shadow_sample_ids = Vec::with_capacity(
         rows.len()
             .min(IMPORT_PREVIEW_SIGNAL_SHADOW_SAMPLE_SIZE),
     );
+    let mut query_chunks = 0usize;
+    let mut elapsed_query_build_ms = 0u128;
+    let mut elapsed_query_execute_ms = 0u128;
     for chunk in rows.chunks(IMPORT_PREVIEW_BULK_INSERT_CHUNK_SIZE) {
-        let mut query = build_preview_rows_insert_query(session_db_id, user_id, chunk);
-        let inserted = query.build().fetch_all(&mut **tx).await?;
-        for row in inserted.iter().take(
-            IMPORT_PREVIEW_SIGNAL_SHADOW_SAMPLE_SIZE.saturating_sub(shadow_sample_ids.len()),
-        ) {
-            shadow_sample_ids.push(row.try_get::<i64, _>("id")?);
+        query_chunks = query_chunks.saturating_add(1);
+        let capture_shadow_ids =
+            shadow_sample_ids.len() < IMPORT_PREVIEW_SIGNAL_SHADOW_SAMPLE_SIZE;
+        let query_build_started_at = std::time::Instant::now();
+        let mut query = build_preview_rows_insert_query(
+            session_db_id,
+            user_id,
+            chunk,
+            capture_shadow_ids,
+        );
+        elapsed_query_build_ms = elapsed_query_build_ms
+            .saturating_add(query_build_started_at.elapsed().as_millis());
+        let query_execute_started_at = std::time::Instant::now();
+        if capture_shadow_ids {
+            let inserted = query.build().fetch_all(&mut **tx).await?;
+            for row in inserted.iter().take(
+                IMPORT_PREVIEW_SIGNAL_SHADOW_SAMPLE_SIZE.saturating_sub(shadow_sample_ids.len()),
+            ) {
+                shadow_sample_ids.push(row.try_get::<i64, _>("id")?);
+            }
+        } else {
+            query.build().execute(&mut **tx).await?;
         }
+        elapsed_query_execute_ms = elapsed_query_execute_ms
+            .saturating_add(query_execute_started_at.elapsed().as_millis());
     }
+    let signal_shadow_started_at = std::time::Instant::now();
     observe_import_preview_signal_projection_parity(
         tx,
         &shadow_sample_ids,
         "preview_insert_batch",
     )
     .await?;
-    Ok(rows.len())
+    let elapsed_signal_shadow_ms = signal_shadow_started_at.elapsed().as_millis();
+    Ok(PreviewRowsBatchWriteTiming {
+        preview_rows: rows.len(),
+        query_chunks,
+        elapsed_identity_load_ms,
+        elapsed_draft_clone_ms,
+        elapsed_identity_validation_ms,
+        elapsed_row_encode_ms,
+        elapsed_query_build_ms,
+        elapsed_query_execute_ms,
+        elapsed_signal_shadow_ms,
+    })
 }
 
 fn build_preview_rows_insert_query<'a>(
     session_db_id: i64,
     user_id: i64,
     rows: &'a [PreviewRowBatchValue],
+    capture_shadow_ids: bool,
 ) -> QueryBuilder<'a, Postgres> {
-    let mut query = QueryBuilder::<Postgres>::new(
+    let mut query = QueryBuilder::<Postgres>::new(if capture_shadow_ids {
+        "WITH inserted AS ("
+    } else {
+        ""
+    });
+    query.push(
         r#"
         INSERT INTO import_preview_rows (
             session_id, user_id, page_sort_key, operation_kind, selected,
@@ -293,7 +382,10 @@ fn build_preview_rows_insert_query<'a>(
             .push("now()")
             .push("now()");
     });
-    query.push(" RETURNING id");
+    if capture_shadow_ids {
+        query.push(" RETURNING id) SELECT id FROM inserted ORDER BY id ASC LIMIT ");
+        query.push(IMPORT_PREVIEW_SIGNAL_SHADOW_SAMPLE_SIZE);
+    }
     query
 }
 

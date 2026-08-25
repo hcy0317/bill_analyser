@@ -583,6 +583,63 @@ fn stage2_materialization_dispatches_decision_groups_after_preview() {
 }
 
 #[test]
+fn preview_materialization_observability_separates_writer_hot_path_phases() {
+    let handlers = source("src/backend/http/import_routes/stage_handlers.rs");
+    let handler = section_between(
+        &handlers,
+        "pub async fn import_dedup_runtime_handler",
+        "#[derive(Debug, Clone, Default)]",
+    );
+    for field in [
+        "elapsed_preview_clear_ms",
+        "elapsed_preview_writer_ms",
+        "elapsed_history_materialization_ms",
+    ] {
+        assert!(
+            handler.contains(field),
+            "missing stage2 timing field {field}"
+        );
+    }
+
+    let writer = source("src/backend/db/import_staging/preview_write.rs");
+    let telemetry = section_between(
+        &writer,
+        "tracing::info!(",
+        "\"preview batch insert complete\"",
+    );
+    for field in [
+        "elapsed_transaction_begin_ms",
+        "elapsed_session_lock_ms",
+        "elapsed_identity_load_ms",
+        "elapsed_identity_validation_ms",
+        "elapsed_row_encode_ms",
+        "elapsed_query_build_ms",
+        "elapsed_query_execute_ms",
+        "elapsed_signal_shadow_ms",
+        "elapsed_counter_refresh_ms",
+        "elapsed_commit_ms",
+        "query_chunks",
+        "preview_rows",
+    ] {
+        assert!(
+            telemetry.contains(field),
+            "missing writer timing field {field}"
+        );
+    }
+    for forbidden in [
+        "preview_payload",
+        "merchant",
+        "description",
+        "payment_method",
+    ] {
+        assert!(
+            !telemetry.contains(forbidden),
+            "writer telemetry must not expose transaction data: {forbidden}"
+        );
+    }
+}
+
+#[test]
 fn matching_candidate_action_is_not_an_unconditional_conflict() {
     let payloads = source("src/backend/http/matching_routes/payloads.rs");
     let response = section_between(

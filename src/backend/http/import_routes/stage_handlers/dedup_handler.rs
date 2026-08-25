@@ -243,6 +243,7 @@ pub async fn import_dedup_runtime_handler(
     );
     refresh_history_transfer_materialization_payloads(&mut history_transfer_plan, &preview_drafts);
     let _preview_insert_started_at = Instant::now();
+    let _preview_clear_started_at = Instant::now();
     if !templates.is_empty() {
         if let Err(error) =
             clear_import_preview_materialization_state(runtime.connection_mut(), &session_id, user_id)
@@ -250,6 +251,8 @@ pub async fn import_dedup_runtime_handler(
             return route_response(db_error_response(error));
         }
     }
+    let _preview_clear_elapsed_ms = import_stage_elapsed_ms(_preview_clear_started_at);
+    let _preview_writer_started_at = Instant::now();
     let inserted_preview = match insert_preview_bills_batch(
         runtime.connection_mut(),
         &session_id,
@@ -259,6 +262,8 @@ pub async fn import_dedup_runtime_handler(
         Ok(inserted) => inserted,
         Err(error) => return route_response(db_error_response(error)),
     };
+    let _preview_writer_elapsed_ms = import_stage_elapsed_ms(_preview_writer_started_at);
+    let _history_materialization_started_at = Instant::now();
     if let Err(error) = insert_import_history_materializations_batch(
         runtime.connection_mut(),
         &session_id,
@@ -275,6 +280,8 @@ pub async fn import_dedup_runtime_handler(
     ) {
         return route_response(db_error_response(error));
     }
+    let _history_materialization_elapsed_ms =
+        import_stage_elapsed_ms(_history_materialization_started_at);
     let _preview_insert_elapsed_ms = import_stage_elapsed_ms(_preview_insert_started_at);
     let database_candidate_count = history_duplicate_plan.len() + history_transfer_plan.len();
     if let Err(error) = set_import_decision_materialization_status(
@@ -306,6 +313,9 @@ pub async fn import_dedup_runtime_handler(
         session_id = %session_id,
         preview_rows = inserted_preview,
         elapsed_ms = _preview_insert_elapsed_ms,
+        elapsed_preview_clear_ms = _preview_clear_elapsed_ms,
+        elapsed_preview_writer_ms = _preview_writer_elapsed_ms,
+        elapsed_history_materialization_ms = _history_materialization_elapsed_ms,
         decision_groups_deferred = true,
         decision_groups_elapsed_ms = _decision_groups_elapsed_ms,
         "stage2 preview inserted"
@@ -377,6 +387,9 @@ pub async fn import_dedup_runtime_handler(
         elapsed_learning_ms = _vector_recall_elapsed_ms,
         elapsed_identity_validation_ms = 0u128,
         elapsed_preview_insert_ms = _preview_insert_elapsed_ms,
+        elapsed_preview_clear_ms = _preview_clear_elapsed_ms,
+        elapsed_preview_writer_ms = _preview_writer_elapsed_ms,
+        elapsed_history_materialization_ms = _history_materialization_elapsed_ms,
         elapsed_decision_groups_ms = _decision_groups_elapsed_ms,
         decision_groups_deferred = true,
         elapsed_api_response_ms = _api_response_elapsed_ms,

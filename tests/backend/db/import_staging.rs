@@ -536,6 +536,61 @@ async fn real_postgres_import_six_signal_families_e2e() -> Result<(), Box<dyn Er
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn preview_batch_insert_writes_every_row_after_shadow_sample_is_full(
+) -> Result<(), Box<dyn Error>> {
+    let test_db = strict_isolated_postgres_database("preview_multi_chunk_shadow_sample").await?;
+    let pool = &test_db.pool;
+    let user_id = insert_user(pool, "preview-multi-chunk-shadow-sample").await?;
+    let scoped_user_id = UserId::new(user_id as u64).expect("positive user id");
+    let session_id = "preview-multi-chunk-shadow-sample-session";
+    create_import_session(
+        pool,
+        &ImportSessionDraft {
+            session_id: session_id.to_string(),
+            user_id: scoped_user_id,
+            file_count: 1,
+        },
+    )?;
+
+    let drafts = (0..2_701)
+        .map(|index| {
+            let mut draft = preview_draft(
+                "2026-08-25 12:00:00",
+                "支出",
+                -i64::from(index + 1),
+                None,
+                None,
+                None,
+                true,
+            );
+            draft.preview_description = format!("multi chunk row {index}");
+            draft
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        insert_preview_bills_batch(pool, session_id, scoped_user_id, &drafts)?,
+        drafts.len()
+    );
+
+    let counts = sqlx::query(
+        r#"SELECT count(*)::bigint AS row_count,
+                  count(*) FILTER (WHERE p.signal_projection_version = 1)::bigint AS projected_count
+           FROM import_preview_rows p
+           JOIN import_sessions s ON s.id = p.session_id AND s.user_id = p.user_id
+           WHERE s.session_key = $1 AND p.user_id = $2"#,
+    )
+    .bind(session_id)
+    .bind(user_id)
+    .fetch_one(pool)
+    .await?;
+    assert_eq!(counts.try_get::<i64, _>("row_count")?, 2_701);
+    assert_eq!(counts.try_get::<i64, _>("projected_count")?, 2_701);
+
+    test_db.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn real_postgres_transfer_signal_projection_uses_shared_parity_corpus(
 ) -> Result<(), Box<dyn Error>> {
     let test_db = strict_isolated_postgres_database("transfer_signal_projection_parity").await?;

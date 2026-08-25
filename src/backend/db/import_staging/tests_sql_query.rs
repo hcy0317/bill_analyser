@@ -321,7 +321,7 @@ fn bulk_insert_query_builders_preserve_insert_shapes() {
     let preview_values = vec![
         preview_row_batch_value_from_draft(&preview_draft).expect("preview batch value")
     ];
-    let mut preview_builder = build_preview_rows_insert_query(1, 2, &preview_values);
+    let mut preview_builder = build_preview_rows_insert_query(1, 2, &preview_values, true);
     let preview_query = preview_builder.build();
     let preview_sql = preview_query.sql();
     assert!(preview_sql.contains("INSERT INTO import_preview_rows"));
@@ -411,19 +411,45 @@ fn bulk_insert_query_builders_preserve_insert_shapes() {
 }
 
 #[test]
+fn preview_bulk_insert_returns_only_the_bounded_shadow_sample() {
+    let preview_draft = ImportPreviewDraft {
+        preview_date: "2026-08-25 12:00:00".to_string(),
+        preview_type: "支出".to_string(),
+        preview_amount_cents: -1234,
+        preview_counterparty: "shadow sample fixture".to_string(),
+        ..ImportPreviewDraft::default()
+    };
+    let preview_values = vec![
+        preview_row_batch_value_from_draft(&preview_draft).expect("preview batch value")
+    ];
+
+    let mut sampled_builder = build_preview_rows_insert_query(1, 2, &preview_values, true);
+    let sampled_sql = sampled_builder.build().sql().to_string();
+    assert!(sampled_sql.starts_with("WITH inserted AS ("));
+    assert!(sampled_sql.contains("RETURNING id"));
+    assert!(sampled_sql.contains("SELECT id FROM inserted ORDER BY id ASC LIMIT 64"));
+
+    let mut plain_builder = build_preview_rows_insert_query(1, 2, &preview_values, false);
+    let plain_sql = plain_builder.build().sql().to_string();
+    assert!(plain_sql.contains("INSERT INTO import_preview_rows"));
+    assert!(!plain_sql.contains("RETURNING id"));
+    assert!(!plain_sql.contains("WITH inserted AS"));
+}
+
+#[test]
 fn preview_bulk_insert_chunk_policy_respects_postgres_bind_budget() {
     const POSTGRES_BIND_PARAMETER_LIMIT: usize = 65_535;
     const PREVIEW_BINDS_PER_ROW: usize = 24;
 
     assert_eq!(IMPORT_STAGING_BULK_INSERT_CHUNK_SIZE, 500);
-    assert_eq!(IMPORT_PREVIEW_BULK_INSERT_CHUNK_SIZE, 2_000);
+    assert_eq!(IMPORT_PREVIEW_BULK_INSERT_CHUNK_SIZE, 2_700);
     let preview_bind_count = IMPORT_PREVIEW_BULK_INSERT_CHUNK_SIZE
         .checked_mul(PREVIEW_BINDS_PER_ROW)
         .expect("preview bind count must fit usize");
     assert!(preview_bind_count <= POSTGRES_BIND_PARAMETER_LIMIT);
     assert_eq!(
         13_082usize.div_ceil(IMPORT_PREVIEW_BULK_INSERT_CHUNK_SIZE),
-        7
+        5
     );
 }
 
