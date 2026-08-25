@@ -8,5 +8,12 @@
       "Bash(git reset *)",
       "Bash(git *)"
     ]
-  }
+  },
+  "enabledMcpjsonServers": [
+    "github",
+    "context7",
+    "memory",
+    "playwright",
+    "sequential-thinking"
+  ]
 }
