@@ -6,6 +6,8 @@ pub struct ClearSessionDataResult {
     pub session_count: usize,
 }
 
+const INCOMPLETE_IMPORT_SESSION_RETENTION_LIMIT: i64 = 2;
+
 /// 当前 Postgres 运行态的导入 staging schema 由迁移管理，这里保留初始化入口以维持旧调用方合同。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn init_import_staging_schema(_pool: &PostgresPool) -> DbResult<()> {
@@ -79,6 +81,15 @@ pub fn get_import_session(
     user_id: UserId,
 ) -> DbResult<Option<ImportSessionRow>> {
     block_on_db(get_import_session_async(pool, session_id, user_id))
+}
+
+/// 返回当前用户仍可恢复的预览会话，按最近更新时间倒序排列。
+#[tracing::instrument(level = "debug", skip_all)]
+pub fn list_recoverable_import_sessions(
+    pool: &PostgresPool,
+    user_id: UserId,
+) -> DbResult<Vec<ImportSessionRow>> {
+    block_on_db(list_recoverable_import_sessions_async(pool, user_id))
 }
 
 /// 按 session 清理导入子表数据并返回各子表删除数量，用于取消导入和测试生命周期。
@@ -161,11 +172,87 @@ async fn create_import_session_async(
     draft: &ImportSessionDraft,
 ) -> DbResult<i64> {
     let mut tx = pool.begin().await?;
-    let session_db_id = prepare_import_session_for_staging_on_tx(&mut tx, draft, false)
+    let session_db_id = prepare_import_session_with_retention_on_tx(&mut tx, draft, false)
         .await?
         .ok_or_else(|| DbError::InvalidOperation("import session not found".to_string()))?;
     tx.commit().await?;
     Ok(session_db_id)
+}
+
+async fn prepare_import_session_with_retention_on_tx(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    draft: &ImportSessionDraft,
+    require_existing_session: bool,
+) -> DbResult<Option<i64>> {
+    let user_id = user_id_i64(draft.user_id)?;
+    lock_import_session_retention_owner_on_tx(tx, user_id).await?;
+    let session =
+        prepare_import_session_for_staging_on_tx(tx, draft, require_existing_session).await?;
+    if !require_existing_session {
+        prune_incomplete_import_sessions_on_tx(
+            tx,
+            user_id,
+            INCOMPLETE_IMPORT_SESSION_RETENTION_LIMIT,
+        )
+        .await?;
+    }
+    Ok(session)
+}
+
+async fn lock_import_session_retention_owner_on_tx(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    user_id: i64,
+) -> DbResult<()> {
+    let owner = sqlx::query_scalar::<_, i64>("SELECT id FROM users WHERE id = $1 FOR UPDATE")
+        .bind(user_id)
+        .fetch_optional(&mut **tx)
+        .await?;
+    if owner.is_none() {
+        return Err(DbError::InvalidOperation(
+            "import session user not found".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+async fn prune_incomplete_import_sessions_on_tx(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    user_id: i64,
+    retained_count: i64,
+) -> DbResult<usize> {
+    let stale_sessions = sqlx::query(
+        r#"
+        SELECT id, session_key
+        FROM import_sessions
+        WHERE user_id = $1 AND status <> 'confirmed'
+        ORDER BY updated_at DESC, id DESC
+        OFFSET $2
+        FOR UPDATE
+        "#,
+    )
+    .bind(user_id)
+    .bind(retained_count)
+    .fetch_all(&mut **tx)
+    .await?;
+
+    let mut deleted_count = 0usize;
+    for session in stale_sessions {
+        let session_db_id = session.try_get::<i64, _>("id")?;
+        let session_key = session.try_get::<String, _>("session_key")?;
+        clear_import_session_child_data_on_tx(tx, user_id, session_db_id, &session_key).await?;
+        let rows_affected = sqlx::query(
+            "DELETE FROM import_sessions WHERE id = $1 AND user_id = $2 AND status <> 'confirmed'",
+        )
+        .bind(session_db_id)
+        .bind(user_id)
+        .execute(&mut **tx)
+        .await?
+        .rows_affected();
+        deleted_count = deleted_count.saturating_add(
+            usize::try_from(rows_affected).unwrap_or(usize::MAX),
+        );
+    }
+    Ok(deleted_count)
 }
 
 async fn prepare_import_session_for_staging_on_tx(

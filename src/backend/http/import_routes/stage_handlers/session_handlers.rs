@@ -47,6 +47,33 @@ fn import_session_summary(session: ImportSessionRow) -> ImportSessionSummary {
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
+pub async fn import_sessions_recovery_runtime_handler(
+    State(state): State<HttpAppState>,
+    headers: HeaderMap,
+) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(user_id) => user_id,
+        Err(response) => return route_response(response),
+    };
+    let runtime = match open_runtime(&state) {
+        Ok(runtime) => runtime,
+        Err(response) => return route_response(response),
+    };
+    if let Err(response) = init_import_runtime_schema(&runtime) {
+        return route_response(response);
+    }
+    match list_recoverable_import_sessions(runtime.connection(), user_id) {
+        Ok(sessions) => route_response(import_v2_data_response(
+            sessions
+                .into_iter()
+                .map(import_session_summary)
+                .collect::<Vec<_>>(),
+        )),
+        Err(error) => route_response(db_error_response(error)),
+    }
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
 pub async fn import_session_cancel_runtime_handler(
     State(state): State<HttpAppState>,
     Path(session_id): Path<String>,

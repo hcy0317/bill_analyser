@@ -1,5 +1,5 @@
 <template>
-    <v-dialog :persistent="!!persistent" v-model="showState">
+    <v-dialog :persistent="loading || submitting" :model-value="showState" @update:model-value="onDialogVisibilityChange">
         <v-card class="pa-6 pa-sm-10 pa-md-12" data-testid="desktop.import.dialog">
             <template #title>
                 <div class="d-flex align-center justify-center">
@@ -77,7 +77,6 @@
                     </v-btn>
                 </div>
             </template>
-
             <import-flow-progress
                 class="mt-4"
                 :current-index="currentFlowProgressIndex"
@@ -89,7 +88,6 @@
                 :progress-value="currentFlowProgressValue"
                 :trail-label="tt('Import Preview')"
             />
-
             <v-window class="disable-tab-transition" v-model="currentStep">
                 <v-window-item value="uploadFile">
                     <v-row>
@@ -428,6 +426,7 @@ import { createImportFlowMilestoneLogger } from './import-dialog/importFlowProfi
 import { useImportFlowProgress } from './import-dialog/useImportFlowProgress.ts';
 import { useImportCheckDataFilterMenu } from './import-dialog/useImportCheckDataFilterMenu.ts';
 import { useImportSourceSelection } from './import-dialog/useImportSourceSelection.ts';
+import { useImportEntryContinuity } from './import-dialog/useImportEntryContinuity.ts';
 import { ref, computed, nextTick, useTemplateRef } from 'vue';
 import { useI18n } from '@/locales/helpers.ts';
 import { useAccountsStore } from '@/stores/account.ts';
@@ -438,18 +437,13 @@ import { useOverviewStore } from '@/stores/overview.ts';
 import { useStatisticsStore } from '@/stores/statistics.ts';
 import { useSettingsStore } from '@/stores/setting.ts';
 import { useUserStore } from '@/stores/user.ts';
-
 import { type NumeralSystem } from '@/core/numeral.ts';
 import { CategoryType } from '@/core/category.ts';
-
 import { ImportTransaction } from '@/models/imported_transaction.ts';
-
 import { getCurrentToken } from '@/lib/userstate.ts';
-import { openImportFileDialog } from '@/lib/importFileDialog.ts';
 import services from '@/lib/services.ts';
 import logger from '@/lib/logger.ts';
 import { DEFAULT_IMPORT_API_TIMEOUT, DEFAULT_IMPORT_PARSE_API_TIMEOUT } from '@/consts/api.ts';
-
 import {
     mdiCheck,
     mdiContentSaveOutline,
@@ -465,10 +459,6 @@ type SnackBarType = InstanceType<typeof SnackBar>;
 type ImportTransactionDefineColumnTabType = InstanceType<typeof ImportTransactionDefineColumnTab>;
 type ImportTransactionExecuteCustomScriptTabType = InstanceType<typeof ImportTransactionExecuteCustomScriptTab>;
 type ImportTransactionCheckDataTabType = InstanceType<typeof ImportTransactionCheckDataTab>;
-
-defineProps<{
-    persistent?: boolean;
-}>();
 
 const {
     tt,
@@ -590,6 +580,30 @@ function getDisplayCount(count: number): string {
 }
 
 const {
+    cleanupServerSession,
+    loadDefaultImportDirectory,
+    offerRecoverableImportSession,
+    openConfiguredImportFileDialog,
+    reportImportContinuityError
+} = useImportEntryContinuity({
+    currentStep,
+    formatCount: getDisplayCount,
+    getConfiguredDirectoryName: () => settingsStore.appSettings.billImportDefaultDirectoryName,
+    getConfirmDialog: () => confirmDialog.value,
+    importProcess,
+    importTransactions,
+    pendingInitialCheckDataPageRequest,
+    previewMetadata,
+    previewPageSortBy,
+    previewPageSortDirection,
+    previewTotalCount,
+    serverPagedPreviewMode,
+    serverSessionId,
+    showError: error => snackbar.value?.showError(error instanceof Error ? error.message : String(error)),
+    showState
+});
+
+const {
     currentFlowProgressDetail,
     currentFlowProgressIndex,
     currentFlowProgressItem,
@@ -621,14 +635,15 @@ const { isActiveCheckDataFilterGroup } = useImportCheckDataFilterMenu({
 
 function open(): Promise<void> {
     abortPendingPreviewPageRequest();
+    loading.value = true;
     importDialogOpenedAt.value = Date.now();
     importSubmitStartedAt.value = null;
     firstOperablePreviewLogged.value = false;
     logImportFlowMilestone('import_dialog_opened_at');
-    // 确保每次打开导入对话框时 bills_parser_template 和 bills_preview 表都是干净的
-    if (serverSessionId.value) {
-        cleanupServerSession();
-    }
+    // 先完成组件内上一次会话的清理，再检查服务端是否存在可恢复的意外退出会话。
+    const staleSessionCleanup = serverSessionId.value
+        ? cleanupServerSession()
+        : Promise.resolve();
 
     selectedFileTypes.value = ['auto'];
     currentStep.value = 'uploadFile';
@@ -668,12 +683,15 @@ function open(): Promise<void> {
     importTransactionCheckDataTab.value?.reset();
     showState.value = true;
     const promises = [
+        staleSessionCleanup,
         accountsStore.loadAllAccounts({ force: false }),
         transactionCategoriesStore.loadAllCategories({ force: false }),
-        transactionTagsStore.loadAllTags({ force: false })
+        transactionTagsStore.loadAllTags({ force: false }),
+        loadDefaultImportDirectory()
     ];
 
-    Promise.all(promises).then(() => {
+    Promise.all(promises).then(async () => {
+        await offerRecoverableImportSession();
         loading.value = false;
     }).catch(error => {
         logger.error('failed to load essential data for importing transaction', error);
@@ -682,6 +700,7 @@ function open(): Promise<void> {
         showState.value = false;
 
         if (!error.processed) {
+            snackbar.value?.showError(error instanceof Error ? error.message : error);
             if (rejectFunc) {
                 rejectFunc(error);
             }
@@ -699,7 +718,7 @@ async function showOpenFileDialog(): Promise<void> {
         return;
     }
 
-    await openImportFileDialog({
+    await openConfiguredImportFileDialog({
         accept: supportedImportFileExtensions.value,
         fileInput: fileInput.value,
         onFilesSelected: setSelectedImportFiles
@@ -1348,7 +1367,9 @@ async function parseData(): Promise<void> {
         logger.error('[三阶段导入] 失败:', error);
         snackbar.value?.showError(`导入失败: ${error}`);
         if (serverSessionId.value) {
-            cleanupServerSession();
+            await cleanupServerSession().catch(error => (
+                reportImportContinuityError('[三阶段导入] 失败后清理会话失败:', error)
+            ));
         }
     } finally {
         submitting.value = false;
@@ -1402,32 +1423,6 @@ function onReclassified(previewData: ImportPreviewRecord[], removedPreviewIds: n
         // 普通重新分类响应仍代表完整预览集合。
         importTransactions.value = convertedTransactions;
     }
-}
-
-/**
- * 清理后端导入会话
- */
-async function cleanupServerSession(): Promise<void> {
-    if (!serverSessionId.value) return;
-
-    try {
-        const token = getCurrentToken();
-        const headers: Record<string, string> = {};
-        if (token) {
-            headers['Authorization'] = `Bearer ${token}`;
-        }
-
-        await fetch(`/api/bills/import/v2/session/${serverSessionId.value}`, {
-            method: 'DELETE',
-            headers: headers
-        });
-        logger.info(`[三阶段导入] 已清理会话: ${serverSessionId.value}`);
-    } catch (e) {
-        logger.warn('[三阶段导入] 清理会话失败:', e);
-    }
-
-    serverSessionId.value = '';
-    previewMetadata.value = null;
 }
 
 function getPreviewIdFromTransaction(transaction: ImportTransaction): number | null {
@@ -1698,8 +1693,7 @@ async function submit(): Promise<void> {
             importedCount.value = Number(result?.imported_count) || selectedCount;
             currentStep.value = 'finalResult';
 
-            // 但为了健壮性，在成功时也显式调用清理以确保数据被删除）
-            await cleanupServerSession();
+            // canonical confirm 已在同一事务中清理 staging；这里只释放客户端会话状态。
             serverSessionId.value = '';
             serverPagedPreviewMode.value = false;
             previewTotalCount.value = 0;
@@ -1725,15 +1719,24 @@ async function submit(): Promise<void> {
     });
 }
 
-function close(completed: boolean): void {
+async function close(completed: boolean): Promise<void> {
+    if (!completed && serverSessionId.value) {
+        submitting.value = true;
+        try {
+            await cleanupServerSession();
+        } catch (error) {
+            reportImportContinuityError('[三阶段导入] 关闭前清理会话失败:', error);
+            submitting.value = false;
+            return;
+        }
+        submitting.value = false;
+    }
+
     if (completed) {
         if (resolveFunc) {
             resolveFunc();
         }
     } else {
-        if (serverSessionId.value) {
-            cleanupServerSession();
-        }
         if (rejectFunc) {
             rejectFunc();
         }
@@ -1747,6 +1750,14 @@ function close(completed: boolean): void {
     previewPageSortDirection.value = 'asc';
     pendingInitialCheckDataPageRequest.value = null;
     showState.value = false;
+}
+
+function onDialogVisibilityChange(visible: boolean): void {
+    if (visible) {
+        showState.value = true;
+    } else if (showState.value) {
+        void close(false);
+    }
 }
 
 

@@ -33,7 +33,7 @@ fn embedded_migrations_cover_every_declared_postgres_migration() {
 
     assert_eq!(embedded_versions, declared_versions);
     assert_eq!(embedded_versions.first(), Some(&1));
-    assert_eq!(embedded_versions.last(), Some(&40));
+    assert_eq!(embedded_versions.last(), Some(&41));
 }
 
 #[tokio::test]

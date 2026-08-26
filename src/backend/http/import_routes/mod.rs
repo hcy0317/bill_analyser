@@ -71,11 +71,11 @@ use bill_analyser_db::{
     has_postgres_llm_rule_candidate_duplicate, init_import_staging_schema,
     insert_import_decision_groups_batch, insert_import_history_materializations_batch,
     insert_preview_bills_batch, list_postgres_llm_candidates, list_postgres_llm_configs,
-    load_import_account_catalog_records, load_import_category_catalog_records,
-    load_import_stage2_account_rule_candidates, load_import_stage2_category_rule_records,
-    load_import_stage2_context, load_import_stage2_learning_lifecycle_views,
-    load_import_stage2_recurring_template_records, load_postgres_ocr_config_setting,
-    mark_unprocessed_parser_templates_processed_for_session,
+    list_recoverable_import_sessions, load_import_account_catalog_records,
+    load_import_category_catalog_records, load_import_stage2_account_rule_candidates,
+    load_import_stage2_category_rule_records, load_import_stage2_context,
+    load_import_stage2_learning_lifecycle_views, load_import_stage2_recurring_template_records,
+    load_postgres_ocr_config_setting, mark_unprocessed_parser_templates_processed_for_session,
     parser_template_draft_from_standard_bill, patch_preview_selection,
     preview_draft_from_history_duplicate, preview_draft_from_history_transfer,
     preview_drafts_from_dedup_bills, preview_id_snapshot_hash, query_preview_page_by_session,
@@ -161,6 +161,7 @@ pub const IMPORT_SKELETON_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("POST", "/api/bills/import/v2/confirm"),
     ("GET", "/api/bills/import/v2/session/{session_id}"),
     ("DELETE", "/api/bills/import/v2/session/{session_id}"),
+    ("GET", "/api/bills/import/v2/sessions/recoverable"),
     ("GET", "/api/bills/import/v2/preview/{session_id}"),
     ("GET", "/api/bills/import/v2/preview/{session_id}/index"),
     ("PUT", "/api/bills/import/v2/preview/{session_id}/selection"),
@@ -241,6 +242,10 @@ pub fn import_runtime_router() -> Router<HttpAppState> {
         .route(
             "/api/bills/import/v2/session/:session_id",
             get(import_session_runtime_handler).delete(import_session_cancel_runtime_handler),
+        )
+        .route(
+            "/api/bills/import/v2/sessions/recoverable",
+            get(import_sessions_recovery_runtime_handler),
         )
         .route(
             "/api/bills/import/v2/preview/:session_id",

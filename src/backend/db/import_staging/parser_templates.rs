@@ -11,9 +11,12 @@ pub fn stage_import_parser_templates_with_sources(
     block_on_db(async move {
         let user_id = user_id_i64(draft.user_id)?;
         let mut tx = pool.begin().await?;
-        let session =
-            prepare_import_session_for_staging_on_tx(&mut tx, draft, require_existing_session)
-                .await?;
+        let session = prepare_import_session_with_retention_on_tx(
+            &mut tx,
+            draft,
+            require_existing_session,
+        )
+        .await?;
         let Some(session_db_id) = session else {
             tx.commit().await?;
             return Ok(ImportParseStagingResult {

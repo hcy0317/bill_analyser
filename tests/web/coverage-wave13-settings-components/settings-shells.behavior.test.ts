@@ -20,6 +20,9 @@ const mockLoadAccounts = jest.fn<(...args: any[]) => Promise<void>>();
 const mockLoadCategories = jest.fn<(...args: any[]) => Promise<void>>();
 const mockLogout = jest.fn<() => Promise<void>>();
 const mockSnackbarError = jest.fn();
+const mockChooseImportDirectory = jest.fn<() => Promise<{ name: string }>>();
+const mockClearImportDirectory = jest.fn<() => Promise<void>>();
+const mockSetImportDirectoryName = jest.fn();
 
 const mockBase = {
     loadingAccounts: ref(false),
@@ -59,6 +62,7 @@ const mockSettingsStore = reactive({
         applicationLock: false,
         showAddTransactionButtonInDesktopNavbar: true,
         timeZone: 'UTC',
+        billImportDefaultDirectoryName: '',
     },
     setTheme(value: string) {
         mockSetTheme(value);
@@ -75,6 +79,10 @@ const mockSettingsStore = reactive({
     setShowAddTransactionButtonInDesktopNavbar(value: boolean) {
         mockSetNavbarButton(value);
         this.appSettings.showAddTransactionButtonInDesktopNavbar = value;
+    },
+    setBillImportDefaultDirectoryName(value: string) {
+        mockSetImportDirectoryName(value);
+        this.appSettings.billImportDefaultDirectoryName = value;
     },
     clearAppSettings: mockClearAppSettings,
     updateLocalizedDefaultSettings: mockUpdateLocalizedDefaults,
@@ -136,6 +144,10 @@ jest.mock('@/lib/ui/common.ts', () => ({
     setExpenseAndIncomeAmountColor: (...args: any[]) => mockSetAmountColors(...args),
     getSystemTheme: () => 'system-dark',
 }));
+jest.mock('@/lib/importDirectoryPreference.ts', () => ({
+    chooseDefaultImportDirectory: () => mockChooseImportDirectory(),
+    clearDefaultImportDirectory: () => mockClearImportDirectory(),
+}));
 for (const path of [
     '@/components/desktop/SnackBar.vue',
     '@/views/desktop/common/cards/AccountFilterSettingsCard.vue',
@@ -146,6 +158,9 @@ for (const path of [
 
 const MobileSettingsPage = require('@/views/mobile/SettingsPage.vue').default as any;
 const AppBasicSettingTab = require('@/views/desktop/app/settings/tabs/AppBasicSettingTab.vue').default as any;
+const DefaultImportDirectorySettingsCard = require(
+    '@/views/desktop/app/settings/tabs/DefaultImportDirectorySettingsCard.vue'
+).default as any;
 
 const originalLocation = Object.getOwnPropertyDescriptor(globalThis, 'location');
 const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
@@ -215,6 +230,9 @@ beforeEach(() => {
     mockSettingsStore.appSettings.animate = true;
     mockSettingsStore.appSettings.applicationLock = false;
     mockSettingsStore.appSettings.showAddTransactionButtonInDesktopNavbar = true;
+    mockSettingsStore.appSettings.billImportDefaultDirectoryName = '';
+    mockChooseImportDirectory.mockResolvedValue({ name: '账单目录' });
+    mockClearImportDirectory.mockResolvedValue(undefined);
     mockUserStore.currentUserNickname = 'Alice';
     mockExchangeRatesStore.exchangeRatesLastUpdateTime = 1_700_000_000;
     mockBase.timeZone.value = 'UTC';
@@ -345,6 +363,21 @@ describe('desktop AppBasicSettingTab production behavior', () => {
         expect(mockSnackbarError).not.toHaveBeenCalledWith({ processed: true, message: 'handled categories' });
         expect(mockBase.loadingAccounts.value).toBe(false);
         expect(mockBase.loadingTransactionCategories.value).toBe(false);
+    });
+
+    test('stores and resets the local-only default import directory', async () => {
+        const bindings = setup(DefaultImportDirectorySettingsCard);
+        await bindings.chooseDirectory();
+        expect(mockSetImportDirectoryName).toHaveBeenLastCalledWith('账单目录');
+        expect(bindings.displayName.value).toBe('账单目录');
+
+        await bindings.resetDirectory();
+        expect(mockSetImportDirectoryName).toHaveBeenLastCalledWith('');
+        expect(mockClearImportDirectory).toHaveBeenCalledTimes(1);
+
+        mockChooseImportDirectory.mockRejectedValueOnce(new Error('picker failed'));
+        await bindings.chooseDirectory();
+        expect(mockSnackbarError).toHaveBeenLastCalledWith('picker failed');
     });
 
     test('executes production template update, click, and settings-change handlers', async () => {

@@ -2,7 +2,12 @@
 // 维护重点：这些测试读取迁移清单和权威 schema，避免 import stage2 拆分时破坏 staging 表关系。
 // 不变式：staging 子表必须由 import_sessions 级联清理，preview 与决策/历史 materialization 保持可重建。
 
-use std::{env, error::Error, fs, time::Duration};
+use std::{
+    env,
+    error::Error,
+    fs,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 
 use bill_analyser_core::{
     build_import_history_rewrite_ack_token, build_import_history_rewrite_operation_id,
@@ -20,8 +25,9 @@ use bill_analyser_db::{
     get_preview_bill_by_id, get_unprocessed_templates_for_dedup,
     insert_import_decision_groups_batch, insert_import_history_materializations_batch,
     insert_parser_template, insert_parser_templates_batch, insert_preview_bill,
-    insert_preview_bills_batch, mark_unprocessed_parser_templates_processed_for_session,
-    postgres_initial_schema_path, postgres_migration_manifest, query_preview_page_by_session,
+    insert_preview_bills_batch, list_recoverable_import_sessions,
+    mark_unprocessed_parser_templates_processed_for_session, postgres_initial_schema_path,
+    postgres_migration_manifest, query_preview_page_by_session,
     record_import_learning_lifecycle_feedback, replace_preview_selection_with_patches,
     reset_session_preview_selection, review_preview_llm_recommendation,
     set_import_decision_materialization_failed, set_import_decision_materialization_status,
@@ -1042,7 +1048,8 @@ async fn real_postgres_signal_filters_fail_closed_for_unknown_review_statuses(
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn creating_import_session_keeps_existing_user_sessions() -> Result<(), Box<dyn Error>> {
+async fn creating_import_session_keeps_only_two_incomplete_user_sessions(
+) -> Result<(), Box<dyn Error>> {
     let Some(test_db) =
         postgres_test_support::isolated_postgres_database("import_session_create_keeps_old")
             .await?
@@ -1056,28 +1063,228 @@ async fn creating_import_session_keeps_existing_user_sessions() -> Result<(), Bo
     create_import_session(
         pool,
         &ImportSessionDraft {
-            session_id: "first-import-session".to_string(),
+            session_id: "confirmed-import-session".to_string(),
             user_id: scoped_user_id,
             file_count: 1,
         },
     )?;
-    create_import_session(
+    sqlx::query(
+        "UPDATE import_sessions SET status = 'confirmed' WHERE user_id = $1 AND session_key = $2",
+    )
+    .bind(user_id)
+    .bind("confirmed-import-session")
+    .execute(pool)
+    .await?;
+
+    stage_import_parser_templates_with_sources(
+        pool,
+        &ImportSessionDraft {
+            session_id: "first-import-session".to_string(),
+            user_id: scoped_user_id,
+            file_count: 1,
+        },
+        &[],
+        &[],
+        &[],
+        false,
+    )?;
+    stage_import_parser_templates_with_sources(
         pool,
         &ImportSessionDraft {
             session_id: "second-import-session".to_string(),
             user_id: scoped_user_id,
             file_count: 1,
         },
+        &[],
+        &[],
+        &[],
+        false,
+    )?;
+    stage_import_parser_templates_with_sources(
+        pool,
+        &ImportSessionDraft {
+            session_id: "third-import-session".to_string(),
+            user_id: scoped_user_id,
+            file_count: 1,
+        },
+        &[],
+        &[],
+        &[],
+        false,
     )?;
 
-    assert!(get_import_session(pool, "first-import-session", scoped_user_id)?.is_some());
+    assert!(get_import_session(pool, "first-import-session", scoped_user_id)?.is_none());
     assert!(get_import_session(pool, "second-import-session", scoped_user_id)?.is_some());
+    assert!(get_import_session(pool, "third-import-session", scoped_user_id)?.is_some());
+    assert!(get_import_session(pool, "confirmed-import-session", scoped_user_id)?.is_some());
     let session_count: i64 =
         sqlx::query_scalar("SELECT COUNT(*)::BIGINT FROM import_sessions WHERE user_id = $1")
             .bind(user_id)
             .fetch_one(pool)
             .await?;
-    assert_eq!(session_count, 2);
+    assert_eq!(
+        session_count, 3,
+        "terminal receipt sessions do not count toward preview retention"
+    );
+
+    update_import_session_status(
+        pool,
+        &ImportSessionStatusUpdate {
+            session_id: "second-import-session".to_string(),
+            user_id: scoped_user_id,
+            status: "preview".to_string(),
+            total_parsed: Some(2),
+            total_preview: Some(2),
+            total_confirmed: None,
+        },
+    )?;
+    let recoverable = list_recoverable_import_sessions(pool, scoped_user_id)?;
+    assert_eq!(recoverable.len(), 1);
+    assert_eq!(recoverable[0].session_id, "second-import-session");
+
+    test_db.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn concurrent_parser_staging_keeps_two_sessions_per_user_without_cross_user_cleanup(
+) -> Result<(), Box<dyn Error>> {
+    let Some(test_db) =
+        postgres_test_support::isolated_postgres_database("import_session_concurrent_retention")
+            .await?
+    else {
+        return Ok(());
+    };
+    let pool = &test_db.pool;
+    let user_id = insert_user(pool, "import-session-concurrent-retention").await?;
+    let other_user_id = insert_user(pool, "import-session-concurrent-other").await?;
+    let scoped_user_id = UserId::new(user_id as u64).expect("positive user id");
+    let other_scoped_user_id = UserId::new(other_user_id as u64).expect("positive user id");
+    stage_import_parser_templates_with_sources(
+        pool,
+        &ImportSessionDraft {
+            session_id: "other-user-session".to_string(),
+            user_id: other_scoped_user_id,
+            file_count: 1,
+        },
+        &[],
+        &[],
+        &[],
+        false,
+    )?;
+
+    for session_id in ["continued-session", "previous-session"] {
+        stage_import_parser_templates_with_sources(
+            pool,
+            &ImportSessionDraft {
+                session_id: session_id.to_string(),
+                user_id: scoped_user_id,
+                file_count: 1,
+            },
+            &[],
+            &[],
+            &[],
+            false,
+        )?;
+    }
+
+    let lock_key = i64::try_from(
+        SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos() % (i64::MAX as u128),
+    )?;
+    sqlx::query(&format!(
+        r#"
+        CREATE FUNCTION block_continued_session_update() RETURNS trigger AS $$
+        BEGIN
+            IF NEW.session_key = 'continued-session' THEN
+                PERFORM pg_advisory_xact_lock({lock_key});
+            END IF;
+            RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql
+        "#,
+    ))
+    .execute(pool)
+    .await?;
+    sqlx::query(
+        "CREATE TRIGGER block_continued_session_update BEFORE UPDATE ON import_sessions FOR EACH ROW EXECUTE FUNCTION block_continued_session_update()",
+    )
+    .execute(pool)
+    .await?;
+
+    let mut blocker = pool.begin().await?;
+    sqlx::query("SELECT pg_advisory_xact_lock($1)")
+        .bind(lock_key)
+        .execute(&mut *blocker)
+        .await?;
+    let continuation_pool = pool.clone();
+    let continuation = tokio::task::spawn_blocking(move || {
+        stage_import_parser_templates_with_sources(
+            &continuation_pool,
+            &ImportSessionDraft {
+                session_id: "continued-session".to_string(),
+                user_id: scoped_user_id,
+                file_count: 1,
+            },
+            &[],
+            &[],
+            &[],
+            true,
+        )
+    });
+    let mut continuation_waiting = false;
+    for _ in 0..100 {
+        let waiting: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*)::BIGINT FROM pg_stat_activity WHERE datname = current_database() AND wait_event = 'advisory'",
+        )
+        .fetch_one(pool)
+        .await?;
+        if waiting > 0 {
+            continuation_waiting = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(
+        continuation_waiting,
+        "continuation should reach the blocking update trigger"
+    );
+
+    let new_session_pool = pool.clone();
+    let mut new_session = tokio::task::spawn_blocking(move || {
+        stage_import_parser_templates_with_sources(
+            &new_session_pool,
+            &ImportSessionDraft {
+                session_id: "third-session".to_string(),
+                user_id: scoped_user_id,
+                file_count: 1,
+            },
+            &[],
+            &[],
+            &[],
+            false,
+        )
+    });
+    assert!(
+        tokio::time::timeout(Duration::from_millis(200), &mut new_session)
+            .await
+            .is_err(),
+        "new session must wait for the active continuation's user retention lock"
+    );
+    blocker.rollback().await?;
+    continuation.await??;
+    new_session.await??;
+
+    let retained_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*)::BIGINT FROM import_sessions WHERE user_id = $1 AND status <> 'confirmed'",
+    )
+    .bind(user_id)
+    .fetch_one(pool)
+    .await?;
+    assert_eq!(retained_count, 2);
+    assert!(get_import_session(pool, "continued-session", scoped_user_id)?.is_some());
+    assert!(get_import_session(pool, "third-session", scoped_user_id)?.is_some());
+    assert!(get_import_session(pool, "previous-session", scoped_user_id)?.is_none());
+    assert!(get_import_session(pool, "other-user-session", other_scoped_user_id)?.is_some());
 
     test_db.cleanup().await?;
     Ok(())

@@ -26,7 +26,9 @@ export type NativeImportFileDialog = (
 
 export interface ImportFileDialogOpenOptions {
     readonly accept: string;
+    readonly browserFilePicker?: BrowserImportFilePicker;
     readonly defaultDirectory?: string;
+    readonly defaultDirectoryHandle?: FileSystemDirectoryHandle | null;
     readonly fileInput?: Pick<HTMLInputElement, 'click'> | null;
     readonly multiple?: boolean;
     readonly nativeDialog?: NativeImportFileDialog;
@@ -36,10 +38,30 @@ export interface ImportFileDialogOpenOptions {
 export interface ImportFileDialogOpenResult {
     readonly defaultDirectory: string;
     readonly filesSelected: number;
-    readonly method: 'native-default-directory' | 'browser-file-input-fallback';
+    readonly method: 'native-default-directory' | 'browser-default-directory' | 'browser-file-input-fallback';
 }
 
+export interface BrowserImportFileHandle {
+    readonly getFile: () => Promise<File>;
+}
+
+export interface BrowserImportFilePickerOptions {
+    readonly excludeAcceptAllOption: boolean;
+    readonly id: string;
+    readonly multiple: boolean;
+    readonly startIn?: FileSystemDirectoryHandle;
+    readonly types: ReadonlyArray<{
+        readonly description: string;
+        readonly accept: Readonly<Record<string, readonly string[]>>;
+    }>;
+}
+
+export type BrowserImportFilePicker = (
+    options: BrowserImportFilePickerOptions
+) => Promise<readonly BrowserImportFileHandle[]>;
+
 interface WindowWithNativeImportDialog extends Window {
+    readonly showOpenFilePicker?: BrowserImportFilePicker;
     readonly billAnalyserImportFileDialog?: {
         readonly openImportFiles?: NativeImportFileDialog;
     };
@@ -47,6 +69,8 @@ interface WindowWithNativeImportDialog extends Window {
         readonly openImportFiles?: NativeImportFileDialog;
     };
 }
+
+const IMPORT_FILE_PICKER_ID = 'bill-analyser-import-files';
 
 function isObjectLike(value: unknown): value is Record<string, unknown> {
     return !!value && typeof value === 'object';
@@ -102,9 +126,33 @@ function resolveNativeImportFileDialog(): NativeImportFileDialog | undefined {
         : undefined;
 }
 
+function resolveBrowserImportFilePicker(): BrowserImportFilePicker | undefined {
+    if (typeof window === 'undefined') {
+        return undefined;
+    }
+    const picker = (window as WindowWithNativeImportDialog).showOpenFilePicker;
+    return typeof picker === 'function' ? picker.bind(window) : undefined;
+}
+
+function browserPickerTypes(accept: string): BrowserImportFilePickerOptions['types'] {
+    const extensions = accept
+        .split(',')
+        .map(value => value.trim().toLowerCase())
+        .filter(value => /^\.[a-z0-9]+$/.test(value));
+    return extensions.length > 0 ? [{
+        description: 'Bill files',
+        accept: { 'application/octet-stream': extensions }
+    }] : [];
+}
+
+function isAbortError(error: unknown): boolean {
+    return error instanceof DOMException && error.name === 'AbortError';
+}
+
 export async function openImportFileDialog(options: ImportFileDialogOpenOptions): Promise<ImportFileDialogOpenResult> {
     const defaultDirectory = options.defaultDirectory ?? IMPORT_FILE_DIALOG_DEFAULT_DIRECTORY;
     const nativeDialog = options.nativeDialog ?? resolveNativeImportFileDialog();
+    const browserFilePicker = options.browserFilePicker ?? resolveBrowserImportFilePicker();
     const multiple = options.multiple ?? true;
 
     if (nativeDialog) {
@@ -125,6 +173,37 @@ export async function openImportFileDialog(options: ImportFileDialogOpenOptions)
                 filesSelected: files?.length ?? 0,
                 method: 'native-default-directory'
             };
+        }
+    }
+
+
+    if (browserFilePicker) {
+        try {
+            const handles = await browserFilePicker({
+                excludeAcceptAllOption: false,
+                id: IMPORT_FILE_PICKER_ID,
+                multiple,
+                ...(options.defaultDirectoryHandle ? { startIn: options.defaultDirectoryHandle } : {}),
+                types: browserPickerTypes(options.accept)
+            });
+            const files = await Promise.all(handles.map(handle => handle.getFile()));
+            if (files.length > 0) {
+                options.onFilesSelected?.(files);
+            }
+            return {
+                defaultDirectory,
+                filesSelected: files.length,
+                method: 'browser-default-directory'
+            };
+        } catch (error) {
+            if (isAbortError(error)) {
+                return {
+                    defaultDirectory,
+                    filesSelected: 0,
+                    method: 'browser-default-directory'
+                };
+            }
+            throw error;
         }
     }
 

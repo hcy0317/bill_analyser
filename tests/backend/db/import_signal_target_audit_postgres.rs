@@ -113,9 +113,9 @@ async fn target_audit_covers_every_row_and_bounded_query_corpus_in_one_snapshot(
             audit_import_preview_signal_target_snapshot(&isolated.pool, 2, 25).await?;
 
         assert!(report.is_match());
-        assert_eq!(report.expected_migration_version, 40);
-        assert_eq!(report.actual_migration_version, 40);
-        assert_eq!(report.migration_count, 40);
+        assert_eq!(report.expected_migration_version, 41);
+        assert_eq!(report.actual_migration_version, 41);
+        assert_eq!(report.migration_count, 41);
         assert!(!report.snapshot_token.is_empty());
         assert_eq!(report.preview_rows, 3);
         assert_eq!(report.sessions, 2);

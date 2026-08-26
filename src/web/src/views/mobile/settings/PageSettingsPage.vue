@@ -91,6 +91,22 @@
             </f7-list-item>
         </f7-list>
 
+        <f7-block-title>{{ tt('Import Transactions') }}</f7-block-title>
+        <f7-list strong inset dividers>
+            <f7-list-item
+                link="#"
+                :title="tt('Default Import Folder')"
+                :after="settingsStore.appSettings.billImportDefaultDirectoryName || tt('Browser default')"
+                @click="chooseBillImportDirectory"
+            ></f7-list-item>
+            <f7-list-item
+                v-if="settingsStore.appSettings.billImportDefaultDirectoryName"
+                link="#"
+                :title="tt('Reset')"
+                @click="resetBillImportDirectory"
+            ></f7-list-item>
+        </f7-list>
+
         <f7-block-title>{{ tt('Account List Page') }}</f7-block-title>
         <f7-list strong inset dividers>
             <f7-list-item :disabled="!hasAnyVisibleAccount"
@@ -141,6 +157,10 @@ import { useTransactionCategoriesStore } from '@/stores/transactionCategory.ts';
 import { CategoryType } from '@/core/category.ts';
 
 import { findNameByValue, findDisplayNameByType } from '@/lib/common.ts';
+import {
+    chooseDefaultImportDirectory,
+    clearDefaultImportDirectory
+} from '@/lib/importDirectoryPreference.ts';
 
 const { tt } = useI18n();
 const { showToast } = useI18nUIComponents();
@@ -177,6 +197,27 @@ const alwaysShowTransactionPicturesInMobileTransactionEditPage = computed<boolea
     get: () => settingsStore.appSettings.alwaysShowTransactionPicturesInMobileTransactionEditPage,
     set: (value) => settingsStore.setAlwaysShowTransactionPicturesInMobileTransactionEditPage(value)
 });
+
+async function chooseBillImportDirectory(): Promise<void> {
+    try {
+        const selection = await chooseDefaultImportDirectory();
+        settingsStore.setBillImportDefaultDirectoryName(selection.name);
+        showToast('Default import folder updated');
+    } catch (error) {
+        if (!(error instanceof DOMException && error.name === 'AbortError')) {
+            showToast(error instanceof Error ? error.message : String(error));
+        }
+    }
+}
+
+async function resetBillImportDirectory(): Promise<void> {
+    try {
+        await clearDefaultImportDirectory();
+        settingsStore.setBillImportDefaultDirectoryName('');
+    } catch (error) {
+        showToast(error instanceof Error ? error.message : String(error));
+    }
+}
 
 function init(): void {
     loadingAccounts.value = true;

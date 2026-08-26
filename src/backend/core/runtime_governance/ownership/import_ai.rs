@@ -66,6 +66,15 @@ pub(super) const ROUTES: &[EndpointOwnership] = &[
     },
     EndpointOwnership {
         method: "GET",
+        pattern: "/api/bills/import/v2/sessions/recoverable",
+        domain: "bills-import",
+        state: RuntimeState::RustOwnedVerified,
+        envelope: ResponseEnvelopeFamily::ImportV2Stage,
+        deletion_blocked_until_all_import_gates: false,
+        notes: "Rust import_db_runtime returns the current user's newest recoverable preview sessions.",
+    },
+    EndpointOwnership {
+        method: "GET",
         pattern: "/api/bills/import/v2/preview/{session_id}",
         domain: "bills-import",
         state: RuntimeState::RustOwnedVerified,

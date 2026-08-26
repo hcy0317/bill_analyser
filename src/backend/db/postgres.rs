@@ -69,7 +69,7 @@ mod tests {
     #[test]
     fn postgres_manifest_points_to_existing_initial_schema() {
         let manifest = postgres_migration_manifest();
-        assert_eq!(manifest.len(), 40);
+        assert_eq!(manifest.len(), 41);
         assert_eq!(manifest[0].version, 1);
         assert_eq!(manifest[0].file_name, POSTGRES_INITIAL_SCHEMA_FILE);
         for (index, descriptor) in manifest.iter().enumerate() {
@@ -362,7 +362,7 @@ mod tests {
             "idx_import_learning_samples_bill_id",
         ];
         let migrator = embedded_postgres_migrator();
-        let index_migrations = &postgres_migration_manifest()[29..];
+        let index_migrations = &postgres_migration_manifest()[29..40];
         assert_eq!(index_migrations.len(), expected_indexes.len());
 
         for (descriptor, expected_index) in index_migrations.iter().zip(expected_indexes) {

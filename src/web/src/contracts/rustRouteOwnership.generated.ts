@@ -78,6 +78,7 @@ export const RUST_ROUTE_OWNERSHIP: readonly RustRouteOwnership[] = [
     {"method":"POST","pattern":"/api/bills/import/v2/confirm","domain":"bills-import","state":"rust_owned_verified"},
     {"method":"GET","pattern":"/api/bills/import/v2/session/{session_id}","domain":"bills-import","state":"rust_owned_verified"},
     {"method":"DELETE","pattern":"/api/bills/import/v2/session/{session_id}","domain":"bills-import","state":"rust_owned_verified"},
+    {"method":"GET","pattern":"/api/bills/import/v2/sessions/recoverable","domain":"bills-import","state":"rust_owned_verified"},
     {"method":"GET","pattern":"/api/bills/import/v2/preview/{session_id}","domain":"bills-import","state":"rust_owned_verified"},
     {"method":"GET","pattern":"/api/bills/import/v2/preview/{session_id}/index","domain":"bills-import","state":"rust_owned_verified"},
     {"method":"PUT","pattern":"/api/bills/import/v2/preview/{session_id}/selection","domain":"bills-import","state":"rust_owned_verified"},

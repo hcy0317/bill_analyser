@@ -357,6 +357,12 @@
     },
     {
       "method": "GET",
+      "pattern": "/api/bills/import/v2/sessions/recoverable",
+      "domain": "bills-import",
+      "state": "rust_owned_verified"
+    },
+    {
+      "method": "GET",
       "pattern": "/api/bills/import/v2/preview/{session_id}",
       "domain": "bills-import",
       "state": "rust_owned_verified"

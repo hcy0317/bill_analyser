@@ -64,6 +64,11 @@ const importSessionServices = {
             `bills/import/v2/session/${encodeURIComponent(sessionId)}`
         ).then(response => buildApiResponse(response, response.data?.data))
     ),
+    getRecoverableImportSessions: (): ApiResponsePromise<ImportSessionSummary[]> => (
+        axios.get<ApiDataResponse<ImportSessionSummary[]>>(
+            'bills/import/v2/sessions/recoverable'
+        ).then(response => buildApiResponse(response, response.data?.data || []))
+    ),
     // 中文说明：confirm 的 session token 独立于 preview row/selection token，并且当前客户端必须显式携带。
     confirmImportPreview: ({
         sessionId,

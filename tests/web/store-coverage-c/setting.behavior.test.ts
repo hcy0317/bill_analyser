@@ -143,6 +143,7 @@ describe('settings store behavior', () => {
         store.setAutoSaveTransactionDraft('always');
         store.setAutoGetCurrentGeoLocation(true);
         store.setAlwaysShowTransactionPicturesInMobileTransactionEditPage(true);
+        store.setBillImportDefaultDirectoryName('账单目录');
         store.setTotalAmountExcludeAccountIds(excludedAccounts);
         store.setCurrencySortByInExchangeRatesPage(3);
 
@@ -168,12 +169,14 @@ describe('settings store behavior', () => {
             autoSaveTransactionDraft: 'always',
             autoGetCurrentGeoLocation: true,
             alwaysShowTransactionPicturesInMobileTransactionEditPage: true,
+            billImportDefaultDirectoryName: '账单目录',
             totalAmountExcludeAccountIds: excludedAccounts,
             currencySortByInExchangeRatesPage: 3
         });
-        expect(mockUpdateValue).toHaveBeenCalledTimes(22);
+        expect(mockUpdateValue).toHaveBeenCalledTimes(23);
         expect(mockUpdateValue).toHaveBeenCalledWith('theme', 'dark');
         expect(mockUpdateValue).toHaveBeenCalledWith('totalAmountExcludeAccountIds', excludedAccounts);
+        expect(mockUpdateValue).toHaveBeenCalledWith('billImportDefaultDirectoryName', '账单目录');
         expect(mockUpdateCloudValue.mock.calls.map(call => call[0])).toStrictEqual([
             'showAccountBalance',
             'showAmountInHomePage',

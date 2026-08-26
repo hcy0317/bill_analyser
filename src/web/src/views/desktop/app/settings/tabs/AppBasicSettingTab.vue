@@ -223,7 +223,7 @@
                 </v-form>
             </v-card>
         </v-col>
-
+        <default-import-directory-settings-card />
         <v-col cols="12">
             <v-card :title="tt('Account List Page')">
                 <v-form>
@@ -295,10 +295,9 @@
 import SnackBar from '@/components/desktop/SnackBar.vue';
 import AccountFilterSettingsCard from '@/views/desktop/common/cards/AccountFilterSettingsCard.vue';
 import CategoryFilterSettingsCard from '@/views/desktop/common/cards/CategoryFilterSettingsCard.vue';
-
+import DefaultImportDirectorySettingsCard from './DefaultImportDirectorySettingsCard.vue';
 import { ref, computed, useTemplateRef } from 'vue';
 import { useTheme } from 'vuetify';
-
 import { useI18n } from '@/locales/helpers.ts';
 import { useAppSettingPageBase } from '@/views/base/settings/AppSettingsPageBase.ts';
 
@@ -370,6 +369,7 @@ const showAddTransactionButtonInDesktopNavbar = computed<boolean>({
     get: () => settingsStore.appSettings.showAddTransactionButtonInDesktopNavbar,
     set: (value) => settingsStore.setShowAddTransactionButtonInDesktopNavbar(value)
 });
+
 
 function init(): void {
     loadingAccounts.value = true;

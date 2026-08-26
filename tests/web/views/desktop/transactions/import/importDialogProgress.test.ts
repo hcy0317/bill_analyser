@@ -14,6 +14,13 @@ function readImportFlowProgressSource(): string {
     );
 }
 
+function readTransactionListTemplate(): string {
+    return fs.readFileSync(
+        path.resolve(process.cwd(), 'src/views/desktop/transactions/list/ListPage.template.html'),
+        'utf-8'
+    );
+}
+
 describe('import dialog progress UI contract', () => {
     test('uses active import-flow progress instead of the obsolete StepsBar copy', () => {
         const dialogSource = readImportDialogSource();
@@ -35,5 +42,15 @@ describe('import dialog progress UI contract', () => {
         expect(source).toContain("fetchImportStage('/api/bills/import/v2/dedup'");
         expect(source).toContain('services.getImportSession');
         expect(source).toContain('services.confirmImportPreview');
+    });
+
+    test('allows overlay and Escape close while idle but stays persistent during active work', () => {
+        const dialogSource = readImportDialogSource();
+        const callerSource = readTransactionListTemplate();
+
+        expect(dialogSource).toContain(':persistent="loading || submitting"');
+        expect(dialogSource).toContain('@update:model-value="onDialogVisibilityChange"');
+        expect(callerSource).toContain('<import-dialog ref="importDialog" />');
+        expect(callerSource).not.toContain('<import-dialog ref="importDialog" :persistent="true"');
     });
 });

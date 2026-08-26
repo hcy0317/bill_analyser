@@ -49,6 +49,8 @@ export interface ApplicationSettings extends BaseApplicationSetting {
     autoSaveTransactionDraft: string;
     autoGetCurrentGeoLocation: boolean;
     alwaysShowTransactionPicturesInMobileTransactionEditPage: boolean;
+    // 账单导入页（仅保存本机展示名称；目录句柄保存在浏览器 IndexedDB）
+    billImportDefaultDirectoryName: string;
     // 账户列表页
     totalAmountExcludeAccountIds: Record<string, boolean>;
     // 汇率数据页
@@ -158,6 +160,7 @@ export const DEFAULT_APPLICATION_SETTINGS: ApplicationSettings = {
     autoSaveTransactionDraft: 'disabled',
     autoGetCurrentGeoLocation: false,
     alwaysShowTransactionPicturesInMobileTransactionEditPage: false,
+    billImportDefaultDirectoryName: '',
     // 账户列表页
     totalAmountExcludeAccountIds: {},
     // 汇率数据页

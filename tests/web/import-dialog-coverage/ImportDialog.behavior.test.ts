@@ -4,6 +4,7 @@ const mockTemplateRefs = new Map<string, any>();
 const mockTemplateEvents: Array<{ name: string; handler: (...args: any[]) => any }> = [];
 const mockFetchImportStage = jest.fn<(...args: any[]) => Promise<any>>();
 const mockOpenImportFileDialog = jest.fn<(...args: any[]) => Promise<void>>();
+const mockGetDefaultImportDirectoryHandle = jest.fn<() => Promise<FileSystemDirectoryHandle | null>>();
 const mockGetCurrentToken = jest.fn<() => string>();
 const mockLogMilestone = jest.fn();
 const mockLogger = {
@@ -21,6 +22,7 @@ const mockServices = {
     matchImportConfig: jest.fn<(...args: any[]) => Promise<any>>(),
     suggestImportConfig: jest.fn<(...args: any[]) => Promise<any>>(),
     getImportSession: jest.fn<(...args: any[]) => Promise<any>>(),
+    getRecoverableImportSessions: jest.fn<(...args: any[]) => Promise<any>>(),
     getImportSessionVersionConflict: jest.fn<(...args: any[]) => any>(),
     confirmImportPreview: jest.fn<(...args: any[]) => Promise<any>>()
 };
@@ -123,6 +125,9 @@ jest.mock('@/stores/setting.ts', () => ({ useSettingsStore: () => mockSettingsSt
 jest.mock('@/stores/user.ts', () => ({ useUserStore: () => mockUserStore }));
 jest.mock('@/lib/userstate.ts', () => ({ getCurrentToken: () => mockGetCurrentToken() }));
 jest.mock('@/lib/importFileDialog.ts', () => ({ openImportFileDialog: (...args: any[]) => mockOpenImportFileDialog(...args) }));
+jest.mock('@/lib/importDirectoryPreference.ts', () => ({
+    getDefaultImportDirectoryHandle: () => mockGetDefaultImportDirectoryHandle()
+}));
 jest.mock('@/lib/services.ts', () => ({ __esModule: true, default: mockServices }));
 jest.mock('@/lib/logger.ts', () => ({ __esModule: true, default: mockLogger }));
 
@@ -272,13 +277,15 @@ for (const componentPath of [
 
 const ImportDialog = require('@/views/desktop/transactions/import/ImportDialog.vue').default as any;
 
-function createResponse({ ok = true, result = {}, text = 'failed' }: {
+function createResponse({ ok = true, result = {}, status = ok ? 200 : 500, text = 'failed' }: {
     ok?: boolean;
     result?: any;
+    status?: number;
     text?: string;
 } = {}): any {
     return {
         ok,
+        status,
         json: jest.fn(async () => result),
         text: jest.fn(async () => text)
     };
@@ -388,6 +395,8 @@ beforeEach(() => {
     mockServices.getImportSession.mockResolvedValue({
         data: { result: { session_id: 'default-session', session_version: 1 } }
     });
+    mockServices.getRecoverableImportSessions.mockResolvedValue({ data: { result: [] } });
+    mockGetDefaultImportDirectoryHandle.mockResolvedValue(null);
     mockServices.getImportSessionVersionConflict.mockReturnValue(null);
     mockServices.confirmImportPreview.mockResolvedValue({
         data: { result: { imported_count: 0 } }
@@ -568,6 +577,30 @@ describe('ImportDialog production-loaded behavior coverage', () => {
         );
     });
 
+    test('keeps every reopen busy until the recoverable-session gate completes', async () => {
+        const bindings = createBindings();
+        const firstOpen = bindings.open();
+        await flushAsync();
+        expect(bindings.loading.value).toBe(false);
+        await bindings.close(true);
+        await expect(firstOpen).resolves.toBeUndefined();
+
+        let resolveRecovery!: (value: any) => void;
+        mockServices.getRecoverableImportSessions.mockReturnValueOnce(new Promise(resolve => {
+            resolveRecovery = resolve;
+        }));
+        const secondOpen = bindings.open();
+        await Promise.resolve();
+        expect(bindings.loading.value).toBe(true);
+        expect(bindings.showState.value).toBe(true);
+
+        resolveRecovery({ data: { result: [] } });
+        await flushAsync();
+        expect(bindings.loading.value).toBe(false);
+        await bindings.close(true);
+        await expect(secondOpen).resolves.toBeUndefined();
+    });
+
     test('selects import files through both input paths and computes display names', async () => {
         const bindings = createBindings();
         const snackbar = createSnackbar();
@@ -580,8 +613,17 @@ describe('ImportDialog production-loaded behavior coverage', () => {
         await bindings.showOpenFileDialog();
         expect(mockOpenImportFileDialog).toHaveBeenCalledWith(expect.objectContaining({
             accept: '.csv',
+            defaultDirectoryHandle: null,
             onFilesSelected: expect.any(Function)
         }));
+        const pickerError = new DOMException('permission denied', 'SecurityError');
+        mockOpenImportFileDialog.mockRejectedValueOnce(pickerError);
+        await bindings.showOpenFileDialog();
+        expect(snackbar.showError).toHaveBeenCalledWith(expect.stringContaining('permission denied'));
+        expect(mockLogger.warn).toHaveBeenCalledWith(
+            '[三阶段导入] 打开文件选择器失败:',
+            pickerError
+        );
 
         bindings.setImportFile(undefined as unknown as Event);
         bindings.setImportFile({ target: null } as unknown as Event);
@@ -601,6 +643,130 @@ describe('ImportDialog production-loaded behavior coverage', () => {
             total_size_bytes: 6
         });
         expect(bindings.activeImportSource.value.fileFormat).toBe('csv');
+    });
+
+    test('offers the newest unfinished preview and resumes it when confirmed', async () => {
+        const bindings = createBindings();
+        const confirmation = { open: jest.fn<(...args: any[]) => Promise<boolean>>(async () => true) };
+        setTemplateRef('confirmDialog', confirmation);
+        mockServices.getRecoverableImportSessions.mockResolvedValueOnce({
+            data: {
+                result: [{
+                    session_id: 'recover-session',
+                    session_version: 4,
+                    status: 'preview',
+                    created_at: '2026-08-26T01:00:00Z',
+                    parsed_count: 12,
+                    preview_count: 9,
+                    file_paths: []
+                }]
+            }
+        });
+
+        const pending = bindings.open();
+        await flushAsync();
+
+        expect(confirmation.open).toHaveBeenCalledWith(
+            'Unfinished import session found',
+            'Resume the previous import preview?',
+            expect.objectContaining({ details: ['2026-08-26T01:00:00Z · #9'] })
+        );
+        expect(bindings.serverSessionId.value).toBe('recover-session');
+        expect(bindings.currentStep.value).toBe('checkData');
+        expect(bindings.serverPagedPreviewMode.value).toBe(true);
+        expect(bindings.previewTotalCount.value).toBe(9);
+
+        (globalThis.fetch as any).mockResolvedValue(createResponse());
+        await bindings.close(false);
+        await expect(pending).rejects.toBeUndefined();
+    });
+
+    test('discards retained unfinished previews when recovery is declined', async () => {
+        const bindings = createBindings();
+        setTemplateRef('confirmDialog', {
+            open: jest.fn<(...args: any[]) => Promise<boolean>>(async () => false)
+        });
+        mockServices.getRecoverableImportSessions.mockResolvedValueOnce({
+            data: {
+                result: [
+                    { session_id: 'latest-session', preview_count: 3, created_at: 'latest' },
+                    { session_id: 'previous-session', preview_count: 2, created_at: 'previous' }
+                ]
+            }
+        });
+        (globalThis.fetch as any).mockResolvedValue(createResponse());
+
+        const pending = bindings.open();
+        await flushAsync();
+
+        expect(globalThis.fetch).toHaveBeenCalledWith(
+            '/api/bills/import/v2/session/latest-session',
+            expect.objectContaining({ method: 'DELETE' })
+        );
+        expect(globalThis.fetch).toHaveBeenCalledWith(
+            '/api/bills/import/v2/session/previous-session',
+            expect.objectContaining({ method: 'DELETE' })
+        );
+        expect(bindings.currentStep.value).toBe('uploadFile');
+        await bindings.close(true);
+        await expect(pending).resolves.toBeUndefined();
+    });
+
+    test('keeps directory preference failure nonfatal but blocks import when recovery lookup fails', async () => {
+        const bindings = createBindings();
+        const directoryError = new Error('directory unavailable');
+        mockGetDefaultImportDirectoryHandle.mockRejectedValueOnce(directoryError);
+
+        const pending = bindings.open();
+        await flushAsync();
+
+        expect(bindings.showState.value).toBe(true);
+        expect(bindings.currentStep.value).toBe('uploadFile');
+        expect(mockLogger.warn).toHaveBeenCalledWith(
+            '[三阶段导入] 读取默认导入位置失败:',
+            directoryError
+        );
+        await bindings.close(true);
+        await expect(pending).resolves.toBeUndefined();
+
+        const recoveryBindings = createBindings();
+        const snackbar = createSnackbar();
+        const recoveryError = new Error('recovery unavailable');
+        setTemplateRef('snackbar', snackbar);
+        mockServices.getRecoverableImportSessions.mockRejectedValueOnce(recoveryError);
+        const failedOpen = recoveryBindings.open();
+        await expect(failedOpen).rejects.toBe(recoveryError);
+        expect(mockLogger.warn).toHaveBeenCalledWith(
+            '[三阶段导入] 检查残留会话失败:',
+            recoveryError
+        );
+        expect(snackbar.showError).toHaveBeenCalledWith('recovery unavailable');
+        expect(recoveryBindings.showState.value).toBe(false);
+    });
+
+    test('keeps retained sessions recoverable when one decline cleanup request fails', async () => {
+        const bindings = createBindings();
+        const snackbar = createSnackbar();
+        setTemplateRef('snackbar', snackbar);
+        setTemplateRef('confirmDialog', {
+            open: jest.fn<(...args: any[]) => Promise<boolean>>(async () => false)
+        });
+        mockServices.getRecoverableImportSessions.mockResolvedValueOnce({
+            data: {
+                result: [
+                    { session_id: 'cleanup-ok', preview_count: 2, created_at: 'latest' },
+                    { session_id: 'cleanup-failed', preview_count: 1, created_at: 'previous' }
+                ]
+            }
+        });
+        (globalThis.fetch as any)
+            .mockResolvedValueOnce(createResponse())
+            .mockResolvedValueOnce(createResponse({ ok: false, status: 500 }));
+
+        const failedOpen = bindings.open();
+        await expect(failedOpen).rejects.toThrow('HTTP 500');
+        expect(snackbar.showError).toHaveBeenCalledWith(expect.stringContaining('HTTP 500'));
+        expect(bindings.showState.value).toBe(false);
     });
 
     test('loads, applies, edits, saves, and removes mapping templates across success and failure paths', async () => {
@@ -977,6 +1143,19 @@ describe('ImportDialog production-loaded behavior coverage', () => {
             expect.objectContaining({ method: 'DELETE' })
         );
 
+        mockFetchImportStage
+            .mockResolvedValueOnce(createResponse({
+                result: { success: true, data: { session_id: 'session-cleanup-fail', unmatched_files: [] } }
+            }))
+            .mockResolvedValueOnce(createResponse({ ok: false, text: 'dedup failed again' }));
+        (globalThis.fetch as any).mockRejectedValueOnce(new Error('cleanup failed after parse'));
+        await bindings.parseData();
+        expect(bindings.serverSessionId.value).toBe('session-cleanup-fail');
+        expect(mockLogger.warn).toHaveBeenCalledWith(
+            '[三阶段导入] 失败后清理会话失败:',
+            expect.any(Error)
+        );
+
         bindings.serverSessionId.value = 'session-business-fail';
         mockFetchImportStage.mockResolvedValueOnce(createResponse({
             result: { success: false, error: 'dedup business failed', data: {} }
@@ -1240,7 +1419,7 @@ describe('ImportDialog production-loaded behavior coverage', () => {
         expect(bindings.submitting.value).toBe(false);
     });
 
-    test('confirms server-paged preview updates, history acknowledgement, cleanup, and failure reporting', async () => {
+    test('confirms server-paged preview updates without a redundant cleanup request', async () => {
         const bindings = createBindings();
         const snackbar = createSnackbar();
         const confirmDialog = { open: jest.fn<(...args: any[]) => Promise<boolean>>(async () => true) };
@@ -1263,7 +1442,6 @@ describe('ImportDialog production-loaded behavior coverage', () => {
         setTemplateRef('importTransactionCheckDataTab', checkTab);
         bindings.serverSessionId.value = 'session-confirm';
         bindings.serverPagedPreviewMode.value = true;
-        (globalThis.fetch as any).mockResolvedValue(createResponse());
         mockServices.getImportSession.mockResolvedValueOnce({
             data: { result: { session_id: 'session-confirm', session_version: 13 } }
         });
@@ -1311,10 +1489,7 @@ describe('ImportDialog production-loaded behavior coverage', () => {
         });
         expect(bindings.currentStep.value).toBe('finalResult');
         expect(bindings.serverSessionId.value).toBe('');
-        expect(globalThis.fetch).toHaveBeenCalledWith(
-            '/api/bills/import/v2/session/session-confirm',
-            expect.objectContaining({ method: 'DELETE' })
-        );
+        expect(globalThis.fetch).not.toHaveBeenCalled();
 
         const failedBindings = createBindings();
         setTemplateRef('snackbar', snackbar);
@@ -1552,7 +1727,7 @@ describe('ImportDialog production-loaded behavior coverage', () => {
         expect(await bindings.fetchSelectedPreviewTransactionsForConfirm(1)).toEqual([]);
     });
 
-    test('cleans sessions with and without tokens, tolerates cleanup errors, and rejects cancellation', async () => {
+    test('cleans sessions with and without tokens, preserves failed cleanup state, and rejects cancellation', async () => {
         const bindings = createBindings();
         await bindings.cleanupServerSession();
         expect(globalThis.fetch).not.toHaveBeenCalled();
@@ -1569,17 +1744,26 @@ describe('ImportDialog production-loaded behavior coverage', () => {
 
         bindings.serverSessionId.value = 'session-clean-error';
         (globalThis.fetch as any).mockRejectedValueOnce(new Error('cleanup unavailable'));
-        await bindings.cleanupServerSession();
-        expect(mockLogger.warn).toHaveBeenCalledWith('[三阶段导入] 清理会话失败:', expect.any(Error));
+        await expect(bindings.cleanupServerSession()).rejects.toThrow('cleanup unavailable');
+        expect(bindings.serverSessionId.value).toBe('session-clean-error');
 
         const cancelBindings = createBindings();
+        const snackbar = createSnackbar();
+        setTemplateRef('snackbar', snackbar);
         mockAccountStore.loadAllAccounts.mockResolvedValue();
         const pending = cancelBindings.open();
         await flushAsync();
+        const rejected = expect(pending).rejects.toBeUndefined();
         cancelBindings.serverSessionId.value = 'session-cancel';
-        (globalThis.fetch as any).mockResolvedValue(createResponse());
-        cancelBindings.close(false);
-        await expect(pending).rejects.toBeUndefined();
+        (globalThis.fetch as any).mockRejectedValueOnce(new Error('temporary cleanup failure'));
+        await cancelBindings.close(false);
+        expect(cancelBindings.showState.value).toBe(true);
+        expect(cancelBindings.serverSessionId.value).toBe('session-cancel');
+        expect(snackbar.showError).toHaveBeenCalledWith('temporary cleanup failure');
+
+        (globalThis.fetch as any).mockResolvedValueOnce(createResponse());
+        await cancelBindings.close(false);
+        await rejected;
         await flushAsync();
         expect(cancelBindings.showState.value).toBe(false);
     });

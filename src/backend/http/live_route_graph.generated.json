@@ -177,6 +177,10 @@
     },
     {
       "method": "GET",
+      "pattern": "/api/bills/import/v2/sessions/recoverable"
+    },
+    {
+      "method": "GET",
       "pattern": "/api/bills/reconciliation_statements"
     },
     {

@@ -511,6 +511,24 @@ describe('import preview lifecycle service behavior', () => {
         }, expect.objectContaining({ timeout: 1_800_000 }));
     });
 
+    test('loads recoverable import sessions through the typed session service', async () => {
+        const recoverable = [{
+            session_id: 'resume-1',
+            session_version: 2,
+            status: 'preview',
+            created_at: '2026-08-26T00:00:00Z',
+            parsed_count: 4,
+            preview_count: 3,
+            file_paths: []
+        }];
+        axiosGet.mockResolvedValueOnce(dataEnvelope(recoverable));
+
+        const response = await services.getRecoverableImportSessions();
+
+        expect(axiosGet).toHaveBeenCalledWith('bills/import/v2/sessions/recoverable');
+        expect(response.data.result).toEqual(recoverable);
+    });
+
     test('submits transfer review decisions with encoded ids and typed expected state', async () => {
         await services.reviewImportTransferDecision({
             previewId: 12,

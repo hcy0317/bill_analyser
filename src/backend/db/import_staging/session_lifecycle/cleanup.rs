@@ -317,6 +317,28 @@ async fn get_import_session_async(
     row.as_ref().map(import_session_from_pg_row).transpose()
 }
 
+async fn list_recoverable_import_sessions_async(
+    pool: &PostgresPool,
+    user_id: UserId,
+) -> DbResult<Vec<ImportSessionRow>> {
+    let rows = sqlx::query(
+        r#"
+        SELECT *
+        FROM import_sessions
+        WHERE user_id = $1
+          AND status = 'preview'
+          AND total_preview > 0
+        ORDER BY updated_at DESC, id DESC
+        LIMIT $2
+        "#,
+    )
+    .bind(user_id_i64(user_id)?)
+    .bind(INCOMPLETE_IMPORT_SESSION_RETENTION_LIMIT)
+    .fetch_all(pool)
+    .await?;
+    rows.iter().map(import_session_from_pg_row).collect()
+}
+
 async fn session_db_id(pool: &PostgresPool, session_id: &str, user_id: UserId) -> DbResult<i64> {
     sqlx::query_scalar::<_, Option<i64>>(
         "SELECT id FROM import_sessions WHERE session_key = $1 AND user_id = $2",

@@ -670,7 +670,7 @@
     <edit-dialog ref="editDialog" :type="TransactionEditPageType.Transaction" />
     <batch-manual-entry-dialog ref="batchManualEntryDialog" />
     <a-i-image-recognition-dialog ref="aiImageRecognitionDialog" />
-    <import-dialog ref="importDialog" :persistent="true" />
+    <import-dialog ref="importDialog" />
 
     <v-dialog width="800" v-model="showFilterAccountDialog">
         <account-filter-settings-card type="transactionListCurrent" :dialog-mode="true"

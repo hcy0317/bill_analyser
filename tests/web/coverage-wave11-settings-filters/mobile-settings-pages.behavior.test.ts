@@ -8,6 +8,9 @@ const mockShowToast = jest.fn();
 const mockLoadAllAccounts = jest.fn<(...args: any[]) => Promise<void>>();
 const mockLoadAllCategories = jest.fn<(...args: any[]) => Promise<void>>();
 const mockSetAlwaysShowPictures = jest.fn();
+const mockSetImportDirectoryName = jest.fn();
+const mockChooseImportDirectory = jest.fn<() => Promise<{ name: string }>>();
+const mockClearImportDirectory = jest.fn<() => Promise<void>>();
 const mockFindNameByValue = jest.fn((items: any[], value: unknown) => (
     items.find(item => item.value === value)?.name ?? ''
 ));
@@ -18,10 +21,15 @@ const mockFindDisplayNameByType = jest.fn((items: any[], value: unknown) => (
 const mockSettingsStore = reactive({
     appSettings: {
         alwaysShowTransactionPicturesInMobileTransactionEditPage: false,
+        billImportDefaultDirectoryName: '',
     },
     setAlwaysShowTransactionPicturesInMobileTransactionEditPage(value: boolean) {
         mockSetAlwaysShowPictures(value);
         this.appSettings.alwaysShowTransactionPicturesInMobileTransactionEditPage = value;
+    },
+    setBillImportDefaultDirectoryName(value: string) {
+        mockSetImportDirectoryName(value);
+        this.appSettings.billImportDefaultDirectoryName = value;
     },
 });
 const mockAccountsStore = {
@@ -95,6 +103,10 @@ jest.mock('@/lib/common.ts', () => ({
     findNameByValue: (items: any[], value: unknown) => mockFindNameByValue(items, value),
     findDisplayNameByType: (items: any[], value: unknown) => mockFindDisplayNameByType(items, value),
 }));
+jest.mock('@/lib/importDirectoryPreference.ts', () => ({
+    chooseDefaultImportDirectory: () => mockChooseImportDirectory(),
+    clearDefaultImportDirectory: () => mockClearImportDirectory(),
+}));
 
 const PageSettingsPage = require('@/views/mobile/settings/PageSettingsPage.vue').default as any;
 const StatisticsSettingsPage = require('@/views/mobile/statistics/SettingsPage.vue').default as any;
@@ -154,6 +166,9 @@ beforeEach(() => {
     mockLoadAllAccounts.mockResolvedValue(undefined);
     mockLoadAllCategories.mockResolvedValue(undefined);
     mockSettingsStore.appSettings.alwaysShowTransactionPicturesInMobileTransactionEditPage = false;
+    mockSettingsStore.appSettings.billImportDefaultDirectoryName = '';
+    mockChooseImportDirectory.mockResolvedValue({ name: '手机账单目录' });
+    mockClearImportDirectory.mockResolvedValue(undefined);
     mockPageBase.loadingAccounts.value = false;
     mockPageBase.loadingTransactionCategories.value = true;
     mockPageBase.showAmountInHomePage.value = true;
@@ -190,6 +205,21 @@ describe('mobile PageSettingsPage production-loaded behavior', () => {
         expect(mockPageBase.loadingTransactionCategories.value).toBe(false);
         expect(mockShowToast).toHaveBeenNthCalledWith(1, accountError);
         expect(mockShowToast).toHaveBeenNthCalledWith(2, 'category failed');
+    });
+
+    test('updates and clears the default import folder from mobile settings', async () => {
+        const bindings = setup(PageSettingsPage);
+        await bindings.chooseBillImportDirectory();
+        expect(mockSetImportDirectoryName).toHaveBeenLastCalledWith('手机账单目录');
+        expect(mockShowToast).toHaveBeenLastCalledWith('Default import folder updated');
+
+        await bindings.resetBillImportDirectory();
+        expect(mockClearImportDirectory).toHaveBeenCalledTimes(1);
+        expect(mockSetImportDirectoryName).toHaveBeenLastCalledWith('');
+
+        mockChooseImportDirectory.mockRejectedValueOnce(new Error('mobile picker failed'));
+        await bindings.chooseBillImportDirectory();
+        expect(mockShowToast).toHaveBeenLastCalledWith('mobile picker failed');
     });
 
     test('leaves processed failures to the caller and exercises popup and toggle bindings', async () => {

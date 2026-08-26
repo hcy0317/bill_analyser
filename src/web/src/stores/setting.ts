@@ -152,6 +152,11 @@ export const useSettingsStore = defineStore('settings', () => {
         updateUserApplicationCloudSettingValue('alwaysShowTransactionPicturesInMobileTransactionEditPage', value);
     }
 
+    function setBillImportDefaultDirectoryName(value: string): void {
+        updateApplicationSettingsValue('billImportDefaultDirectoryName', value);
+        appSettings.value.billImportDefaultDirectoryName = value;
+    }
+
     // 账户列表页
     function setTotalAmountExcludeAccountIds(value: Record<string, boolean>): void {
         updateApplicationSettingsValue('totalAmountExcludeAccountIds', value);
@@ -281,6 +286,7 @@ export const useSettingsStore = defineStore('settings', () => {
         setAutoSaveTransactionDraft,
         setAutoGetCurrentGeoLocation,
         setAlwaysShowTransactionPicturesInMobileTransactionEditPage,
+        setBillImportDefaultDirectoryName,
         // -- 账户列表页
         setTotalAmountExcludeAccountIds,
         // -- 汇率数据页

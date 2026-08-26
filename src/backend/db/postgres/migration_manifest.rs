@@ -502,4 +502,11 @@ const POSTGRES_MIGRATION_MANIFEST: &[PostgresMigrationDescriptor] = &[
         required_tables: &["import_learning_samples"],
         required_indexes: &["idx_import_learning_samples_bill_id"],
     },
+    PostgresMigrationDescriptor {
+        version: 41,
+        file_name: "0041_import_preview_session_retention.sql",
+        description: "retain only the two newest incomplete import preview sessions per user",
+        required_tables: &["import_sessions"],
+        required_indexes: &[],
+    },
 ];
