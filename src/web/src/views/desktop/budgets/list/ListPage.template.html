@@ -54,7 +54,7 @@
                     <v-main>
                         <v-card variant="flat" min-height="920">
                             <template #title>
-                                <div class="title-and-toolbar d-flex align-center text-no-wrap">
+                                <div class="title-and-toolbar budget-toolbar d-flex flex-wrap align-center ga-2">
                                     <v-btn class="me-3 d-md-none" density="compact" color="default" variant="plain"
                                            :ripple="false" :icon="true" @click="showNav = !showNav">
                                         <v-icon :icon="mdiMenu" size="24" />
@@ -454,7 +454,7 @@
 
                             <v-window class="d-flex flex-grow-1 disable-tab-transition w-100-window-container" v-model="activeViewMode">
                                 <!-- 预算管理视图 -->
-                                <v-window-item value="budget">
+                                <v-window-item value="budget" class="budget-view-item">
                                     <!-- 活动筛选器标签 -->
                                     <v-card-text v-if="hasActiveFilters" class="py-2 border-b">
                                         <div class="d-flex align-center flex-wrap ga-2">
@@ -506,7 +506,7 @@
                                     />
                                 </v-window-item>
 
-                                <v-window-item value="history">
+                                <v-window-item value="history" class="budget-view-item">
                                     <budget-history-panel
                                         ref="historicalChartRef"
                                         :loading="loading"
@@ -540,7 +540,7 @@
                                 </v-window-item>
 
                                 <!-- 周期预计视图 -->
-                                <v-window-item value="forecast">
+                                <v-window-item value="forecast" class="budget-view-item">
                                     <budget-forecast-panel
                                         :forecast-loading="forecastLoading"
                                         :current-forecast="currentForecast"

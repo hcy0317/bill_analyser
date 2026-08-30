@@ -1,5 +1,5 @@
 <template>
-    <v-table class="budget-table" :hover="!loading">
+    <v-table class="budget-table table-striped" density="comfortable" :hover="!loading">
         <tbody v-if="loading && filteredBudgets.length === 0">
         <tr :key="itemIdx" v-for="itemIdx in [1, 2, 3, 4, 5]">
             <td class="px-0" colspan="4">
@@ -11,9 +11,7 @@
         <tbody v-if="!loading && filteredBudgets.length === 0">
         <tr>
             <td colspan="4">
-                <div class="d-flex align-center justify-center py-8">
-                    <span class="text-grey">{{ tt('No budgets found') }}</span>
-                </div>
+                <v-empty-state :icon="mdiWalletOutline" :headline="tt('No budgets found')" />
             </td>
         </tr>
         </tbody>
@@ -203,7 +201,8 @@ import {
     mdiChevronRight,
     mdiDeleteOutline,
     mdiPencilOutline,
-    mdiPlusCircleOutline
+    mdiPlusCircleOutline,
+    mdiWalletOutline
 } from '@mdi/js';
 
 defineProps<{

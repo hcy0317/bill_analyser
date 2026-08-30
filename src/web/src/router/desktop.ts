@@ -114,6 +114,7 @@ const router = createRouter({
                         initType: route.query['type'],
                         initCategoryIds: route.query['categoryIds'],
                         initAccountIds: route.query['accountIds'],
+                        initFlowDirection: route.query['flowDirection'],
                         initTagIds: route.query['tagIds'],
                         initTagFilterType: route.query['tagFilterType'],
                         initAmountFilterCents: route.query['amountFilterCents'],

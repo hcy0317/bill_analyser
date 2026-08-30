@@ -2,6 +2,7 @@
 // 维护重点：在这里记录跨路由复用的业务不变式，避免 handler 或 repository 重复推导。
 // 不变式：金额单位、用户可见类型和API payload 在进入或离开本层时必须显式转换。
 
+mod canonicalize;
 mod matching;
 mod parser;
 mod selection;
@@ -10,6 +11,7 @@ mod terms;
 mod tests;
 mod types;
 
+pub use canonicalize::canonicalize_or_only_rule_expression;
 pub use matching::{
     match_compiled_rule, match_compiled_rule_lowercase_text, match_rule_expression,
 };

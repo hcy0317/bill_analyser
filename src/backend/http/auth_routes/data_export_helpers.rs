@@ -66,6 +66,10 @@ fn build_user_data_export_filters(
             .get("account_ids")
             .map(|value| parse_comma_separated_ints(value))
             .unwrap_or_default(),
+        flow_direction: query
+            .get("flow_direction")
+            .map(|value| value.trim().to_ascii_lowercase())
+            .filter(|value| matches!(value.as_str(), "inflow" | "outflow")),
         tag_ids: query
             .get("tag_ids")
             .map(|value| parse_comma_separated_ints(value))

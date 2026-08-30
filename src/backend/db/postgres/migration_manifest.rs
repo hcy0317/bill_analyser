@@ -509,4 +509,11 @@ const POSTGRES_MIGRATION_MANIFEST: &[PostgresMigrationDescriptor] = &[
         required_tables: &["import_sessions"],
         required_indexes: &[],
     },
+    PostgresMigrationDescriptor {
+        version: 42,
+        file_name: "0042_canonicalize_recovered_account_rule_or_chains.sql",
+        description: "canonicalize recovered account rule OR chains",
+        required_tables: &["account_rules"],
+        required_indexes: &[],
+    },
 ];

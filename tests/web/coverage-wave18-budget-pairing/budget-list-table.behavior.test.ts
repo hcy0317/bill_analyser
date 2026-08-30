@@ -24,15 +24,92 @@ jest.mock('@mdi/js', () => ({
     mdiChevronRight: 'chevron-right',
     mdiDeleteOutline: 'delete',
     mdiPencilOutline: 'pencil',
-    mdiPlusCircleOutline: 'plus'
+    mdiPlusCircleOutline: 'plus',
+    mdiWalletOutline: 'wallet',
+    mdiChartTimelineVariant: 'chart-timeline',
+    mdiInformationOutline: 'information',
+    mdiTrendingDown: 'trending-down',
+    mdiTrendingNeutral: 'trending-neutral',
+    mdiTrendingUp: 'trending-up'
 }));
 
 import BudgetListTable from '@/views/desktop/budgets/components/BudgetListTable.vue';
+import BudgetForecastPanel from '@/views/desktop/budgets/components/BudgetForecastPanel.vue';
 
 const uiComponents = [
     'v-table', 'v-skeleton-loader', 'v-icon', 'v-btn', 'v-tooltip',
-    'v-progress-circular', 'v-progress-linear'
+    'v-progress-circular', 'v-progress-linear', 'v-chip', 'v-card-text', 'v-empty-state'
 ];
+
+describe('BudgetForecastPanel shared page states', () => {
+    const formatAmount = jest.fn((amount: number) => `amount:${amount}`);
+    const getForecastConfidenceLabel = jest.fn((confidence?: string | null) => confidence || 'none');
+    const getForecastConfidenceClass = jest.fn((confidence?: string | null) => `confidence-${confidence || 'none'}`);
+    const baseProps = {
+        forecastLoading: false,
+        currentForecast: null,
+        displayForecasts: [],
+        forecastMonthsHistory: 6,
+        forecastRiskSummary: { lowConfidenceCount: 0, overBudgetCount: 0 },
+        formatAmount,
+        getForecastConfidenceLabel,
+        getForecastConfidenceClass,
+    };
+
+    test('renders loading, empty, populated trend/status and summary variants', () => {
+        for (const props of [
+            { ...baseProps, forecastLoading: true },
+            baseProps,
+            {
+                ...baseProps,
+                currentForecast: {
+                    forecasts: [],
+                    periodStart: '2026-01-01',
+                    periodEnd: '2026-01-31',
+                    forecastStrategy: 'moving_average',
+                    historyPeriods: 0,
+                    avgBacktestMape: 12.5,
+                },
+                displayForecasts: [
+                    {
+                        categoryId: 'up', categoryName: 'Up', historicalAverageCents: 1000,
+                        currentSpentCents: 2000, projectedTotalCents: 3000, budgetAmountCents: 2500,
+                        trend: 'up', projectedOverBudget: true, confidence: 'low', backtestMape: 20,
+                        strategyExplanation: 'trend', samplePeriods: 3,
+                    },
+                    {
+                        categoryId: 'down', categoryName: 'Down', historicalAverageCents: 1000,
+                        currentSpentCents: 500, projectedTotalCents: 800, budgetAmountCents: 2500,
+                        trend: 'down', projectedOverBudget: false, confidence: null, backtestMape: null,
+                        strategyExplanation: '', samplePeriods: null,
+                    },
+                    {
+                        categoryId: 'neutral', categoryName: 'Neutral', historicalAverageCents: 1000,
+                        currentSpentCents: 1000, projectedTotalCents: 1000, budgetAmountCents: 2500,
+                        trend: 'neutral', projectedOverBudget: false, confidence: 'high', backtestMape: 0,
+                        strategyExplanation: '', samplePeriods: 0,
+                    },
+                ],
+                forecastRiskSummary: { lowConfidenceCount: 1, overBudgetCount: 1 },
+            },
+            {
+                ...baseProps,
+                currentForecast: {
+                    forecasts: [], periodStart: '', periodEnd: '', forecastStrategy: 'historical_average',
+                    historyPeriods: 2, avgBacktestMape: null,
+                },
+            },
+        ]) {
+            const mounted = mountWithHostRenderer(BudgetForecastPanel as any, props, uiComponents);
+            mounted.app.unmount();
+        }
+
+        expect(formatAmount).toHaveBeenCalled();
+        expect(getForecastConfidenceLabel).toHaveBeenCalledWith('low');
+        expect(getForecastConfidenceLabel).toHaveBeenCalledWith('high');
+        expect(getForecastConfidenceClass).toHaveBeenCalledWith('low');
+    });
+});
 
 function createBudget(id: string, overrides: Record<string, unknown> = {}): any {
     const budget = {

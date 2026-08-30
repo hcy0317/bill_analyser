@@ -3,12 +3,15 @@ import { computed, onBeforeUnmount, ref } from 'vue';
 import services from '@/lib/services.ts';
 
 import {
+    applyLLMProviderDefaults,
     buildAdvancedSettingsPayload,
     buildCredentialConfigPayload,
     createEmptyLLMConfigForm,
     createLLMCredentialModeOptions,
     createLLMProviderOptions,
     createLLMReasoningDepthOptions,
+    DEFAULT_LLM_PROMPT_TEMPLATE,
+    DEFAULT_LLM_SYSTEM_PROMPT,
     getLLMProviderLabel,
     toLLMCandidates,
     toLLMConfigs,
@@ -254,6 +257,19 @@ export function useLearningCenterLlmConfig(options: LearningCenterLlmConfigOptio
         }
     }
 
+    function selectLLMProvider(provider: string): void {
+        const option = llmProviderOptions.find(item => item.value === provider);
+        if (option) {
+            applyLLMProviderDefaults(newConfigForm.value, option);
+        }
+    }
+
+    function restoreRecommendedPrompts(): void {
+        newConfigForm.value.system_prompt = DEFAULT_LLM_SYSTEM_PROMPT;
+        newConfigForm.value.classification_prompt_template = DEFAULT_LLM_PROMPT_TEMPLATE;
+        newConfigForm.value.rule_prompt_template = DEFAULT_LLM_PROMPT_TEMPLATE;
+    }
+
     /** 使用服务端保存的密钥执行最小请求，验证端点、认证和模型是否共同可用。 */
     async function handleTestConfig(configId: number) {
         testingConfigId.value = configId;
@@ -411,6 +427,8 @@ export function useLearningCenterLlmConfig(options: LearningCenterLlmConfigOptio
         closeAddConfigDialog,
         loadLLMConfigs,
         openAddConfigDialog,
+        selectLLMProvider,
+        restoreRecommendedPrompts,
         saveNewConfig,
         llmProviderLabel,
         handleActivateConfig,

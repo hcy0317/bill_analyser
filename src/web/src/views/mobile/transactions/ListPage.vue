@@ -24,7 +24,11 @@ import { useEnvironmentsStore } from '@/stores/environment.ts';
 import { useAccountsStore } from '@/stores/account.ts';
 import { useTransactionCategoriesStore } from '@/stores/transactionCategory.ts';
 import { useTransactionTagsStore } from '@/stores/transactionTag.ts';
-import { type TransactionMonthList, useTransactionsStore } from '@/stores/transaction.ts';
+import {
+    type TransactionListPartialFilter,
+    type TransactionMonthList,
+    useTransactionsStore
+} from '@/stores/transaction.ts';
 
 import { type TypeAndDisplayName, keys } from '@/core/base.ts';
 import { TextDirection } from '@/core/text.ts';
@@ -240,6 +244,7 @@ function init(): void { // 从路由 query、账期设置和缓存状态恢复�
         type: initQuery['type'] && parseInt(initQuery['type']) > 0 ? parseInt(initQuery['type']) : undefined,
         categoryIds: initQuery['categoryIds'],
         accountIds: initQuery['accountIds'],
+        flowDirection: initQuery['flowDirection'],
         tagIds: initQuery['tagIds'],
         tagFilterType: initQuery['tagFilterType'] && parseInt(initQuery['tagFilterType']) >= 0 ? parseInt(initQuery['tagFilterType']) : undefined,
         keyword: initQuery['keyword']
@@ -533,10 +538,14 @@ function changeTypeFilter(type: number): void { // 切换交易类型筛选并�
         }
     }
 
-    const changed = transactionsStore.updateTransactionListFilter({
+    const nextFilter: TransactionListPartialFilter = {
         type: type,
         categoryIds: newCategoryFilter
-    });
+    };
+    if (query.value.flowDirection) {
+        nextFilter.flowDirection = '';
+    }
+    const changed = transactionsStore.updateTransactionListFilter(nextFilter);
 
     showMorePopover.value = false;
 

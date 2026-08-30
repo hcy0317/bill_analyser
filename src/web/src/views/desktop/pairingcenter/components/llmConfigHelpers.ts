@@ -9,10 +9,13 @@ export type {
 } from './llm-config/types.ts';
 
 export {
+    applyLLMProviderDefaults,
     createEmptyLLMConfigForm,
     createLLMCredentialModeOptions,
     createLLMProviderOptions,
     createLLMReasoningDepthOptions,
+    DEFAULT_LLM_PROMPT_TEMPLATE,
+    DEFAULT_LLM_SYSTEM_PROMPT,
 } from './llm-config/options.ts';
 
 export {

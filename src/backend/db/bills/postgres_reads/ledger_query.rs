@@ -64,6 +64,7 @@ impl PostgresLedgerQueries {
             date_from: query.date_from,
             date_to: query.date_to,
             transaction_type: query.transaction_type,
+            flow_direction: query.flow_direction,
             main_category: query.main_category,
             sub_category: query.sub_category,
             batch_id: query.batch_id,

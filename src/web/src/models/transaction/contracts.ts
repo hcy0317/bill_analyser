@@ -83,6 +83,7 @@ export interface TransactionListByMaxTimeRequest {
     readonly type: number;
     readonly categoryIds: string;
     readonly accountIds: string;
+    readonly flowDirection?: string;
     readonly tagIds: string;
     readonly tagFilterType: number;
     readonly amountFilterCents: string;
@@ -95,6 +96,7 @@ export interface TransactionListInMonthByPageRequest {
     readonly type: number;
     readonly categoryIds: string;
     readonly accountIds: string;
+    readonly flowDirection?: string;
     readonly tagIds: string;
     readonly tagFilterType: number;
     readonly amountFilterCents: string;

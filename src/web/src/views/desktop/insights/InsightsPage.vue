@@ -2,8 +2,8 @@
     <v-row class="match-height">
         <v-col cols="12">
             <v-card data-testid="desktop.action-center.page">
-                <v-card-text>
-                    <div class="title-and-toolbar d-flex flex-wrap align-center ga-2 mb-4">
+                <template #title>
+                    <div class="title-and-toolbar d-flex flex-wrap align-center ga-2">
                         <div class="d-flex align-center">
                             <v-icon :icon="mdiInboxArrowDownOutline" class="mr-2" />
                             <span class="text-h6">{{ tt('Action Center') }}</span>
@@ -30,6 +30,10 @@
                             {{ tt('Refresh') }}
                         </v-btn>
                     </div>
+                </template>
+                <v-divider />
+
+                <v-card-text>
 
                     <v-progress-linear v-if="loading" indeterminate color="primary" class="mb-4" />
                     <v-alert v-if="error" type="error" closable class="mb-4" @click:close="error = null">
@@ -46,8 +50,10 @@
                         {{ tt('No pending actions') }}
                     </v-alert>
 
-                    <section aria-labelledby="anomaly-actions-title">
-                        <div class="d-flex align-center mb-2">
+                    <v-row>
+                        <v-col cols="12">
+                    <v-card variant="outlined" aria-labelledby="anomaly-actions-title">
+                        <v-card-title class="d-flex align-center">
                             <v-icon :icon="mdiAlertCircleOutline" size="small" class="mr-2" />
                             <h2 id="anomaly-actions-title" class="text-subtitle-1 font-weight-medium">
                                 {{ tt('Anomaly Insights') }}
@@ -55,7 +61,9 @@
                             <v-chip class="ml-2" size="x-small" variant="tonal">
                                 {{ summary.anomalyCount }}
                             </v-chip>
-                        </div>
+                        </v-card-title>
+                        <v-divider />
+                        <v-card-text>
                         <v-list v-if="anomalyData.items.length" lines="two" class="pa-0">
                             <template v-for="(anomaly, index) in anomalyData.items" :key="anomaly.key">
                                 <v-divider v-if="index > 0" />
@@ -82,9 +90,9 @@
                                 </v-list-item>
                             </template>
                         </v-list>
-                        <p v-else-if="!loading" class="text-body-2 text-medium-emphasis py-3 mb-0">
-                            {{ tt('No anomalies detected. Your finances look healthy!') }}
-                        </p>
+                        <v-empty-state v-else-if="!loading" :icon="mdiAlertCircleOutline"
+                                       :headline="tt('No anomalies detected')"
+                                       :text="tt('Your finances look healthy!')" />
                         <p v-if="anomalyData.analyzedBills > 0" class="text-caption text-medium-emphasis mt-2 mb-0">
                             {{ tt('Analysis coverage', {
                                 bills: anomalyData.analyzedBills,
@@ -93,12 +101,13 @@
                                 end: anomalyData.endDate
                             }) }}
                         </p>
-                    </section>
+                        </v-card-text>
+                    </v-card>
+                        </v-col>
 
-                    <v-divider class="my-5" />
-
-                    <section aria-labelledby="recurring-actions-title">
-                        <div class="d-flex align-center mb-2">
+                        <v-col cols="12">
+                    <v-card variant="outlined" aria-labelledby="recurring-actions-title">
+                        <v-card-title class="d-flex align-center flex-wrap ga-2">
                             <v-icon :icon="mdiCalendarSync" size="small" class="mr-2" />
                             <h2 id="recurring-actions-title" class="text-subtitle-1 font-weight-medium">
                                 {{ tt('Recurring Suggestions') }}
@@ -106,7 +115,9 @@
                             <v-chip class="ml-2" size="x-small" variant="tonal">
                                 {{ summary.recurringCount }}
                             </v-chip>
-                        </div>
+                        </v-card-title>
+                        <v-divider />
+                        <v-card-text>
                         <v-tabs v-model="recurringView" color="primary" density="compact" class="mb-2">
                             <v-tab value="pending">
                                 {{ tt('Pending') }}
@@ -160,9 +171,8 @@
                                 </v-list-item>
                             </template>
                         </v-list>
-                        <p v-else-if="recurringView === 'pending' && !loading" class="text-body-2 text-medium-emphasis py-3 mb-0">
-                            {{ tt('No pending recurring suggestions') }}
-                        </p>
+                        <v-empty-state v-else-if="recurringView === 'pending' && !loading" :icon="mdiCalendarSync"
+                                       :headline="tt('No pending recurring suggestions')" />
                         <v-list v-if="recurringView === 'history' && recurringHistory.length" lines="three" class="pa-0">
                             <template v-for="(suggestion, index) in recurringHistory" :key="suggestion.id">
                                 <v-divider v-if="index > 0" />
@@ -189,10 +199,12 @@
                                 </v-list-item>
                             </template>
                         </v-list>
-                        <p v-else-if="recurringView === 'history' && !loading" class="text-body-2 text-medium-emphasis py-3 mb-0">
-                            {{ tt('No recurring suggestion history') }}
-                        </p>
-                    </section>
+                        <v-empty-state v-else-if="recurringView === 'history' && !loading" :icon="mdiCalendarSync"
+                                       :headline="tt('No recurring suggestion history')" />
+                        </v-card-text>
+                    </v-card>
+                        </v-col>
+                    </v-row>
                 </v-card-text>
             </v-card>
         </v-col>

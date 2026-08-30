@@ -64,15 +64,19 @@ fn push_bill_filters(
     }
     let account_ids = normalize_ids(&filters.account_ids);
     if !account_ids.is_empty() {
-        builder.push(" AND (b.account_id IN (");
-        push_bind_list(builder, &account_ids);
-        builder.push(") OR b.source_account_id IN (");
-        push_bind_list(builder, &account_ids);
-        builder.push(") OR b.target_account_id IN (");
-        push_bind_list(builder, &account_ids);
-        builder.push(") OR b.transfer_target_account_id IN (");
-        push_bind_list(builder, &account_ids);
-        builder.push("))");
+        if let Some(flow_direction @ ("inflow" | "outflow")) = filters.flow_direction.as_deref() {
+            push_account_flow_filter(builder, &account_ids, flow_direction);
+        } else {
+            builder.push(" AND (b.account_id IN (");
+            push_bind_list(builder, &account_ids);
+            builder.push(") OR b.source_account_id IN (");
+            push_bind_list(builder, &account_ids);
+            builder.push(") OR b.target_account_id IN (");
+            push_bind_list(builder, &account_ids);
+            builder.push(") OR b.transfer_target_account_id IN (");
+            push_bind_list(builder, &account_ids);
+            builder.push("))");
+        }
     }
     push_category_filters(builder, filters);
     let tag_ids = normalize_ids(&filters.tag_ids);
@@ -94,6 +98,34 @@ fn push_bill_filters(
     if let Some(value) = text_filter(filters.amount_filter_cents.as_deref()) {
         push_amount_filter_cents(builder, &value);
     }
+}
+
+fn push_account_flow_filter(
+    builder: &mut QueryBuilder<'_, Postgres>,
+    account_ids: &[i64],
+    flow_direction: &str,
+) {
+    builder.push(" AND ((b.transaction_type = ");
+    builder.push_bind(if flow_direction == "inflow" { "income" } else { "expense" });
+    builder.push(" AND (b.account_id IN (");
+    push_bind_list(builder, account_ids);
+    builder.push(") OR b.source_account_id IN (");
+    push_bind_list(builder, account_ids);
+    builder.push("))) OR (b.transaction_type IN ('transfer', 'investment') AND ");
+    if flow_direction == "inflow" {
+        builder.push("(b.target_account_id IN (");
+        push_bind_list(builder, account_ids);
+        builder.push(") OR b.transfer_target_account_id IN (");
+        push_bind_list(builder, account_ids);
+        builder.push("))");
+    } else {
+        builder.push("(b.source_account_id IN (");
+        push_bind_list(builder, account_ids);
+        builder.push(") OR b.account_id IN (");
+        push_bind_list(builder, account_ids);
+        builder.push("))");
+    }
+    builder.push("))");
 }
 
 fn push_category_filters(builder: &mut QueryBuilder<'_, Postgres>, filters: &BillFilters) {

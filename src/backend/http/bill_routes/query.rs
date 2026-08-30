@@ -11,6 +11,9 @@ struct BillsListQuery {
     page_size_camel: Option<usize>,
     #[serde(rename = "type")]
     transaction_type: Option<String>,
+    flow_direction: Option<String>,
+    #[serde(rename = "flowDirection")]
+    flow_direction_camel: Option<String>,
     main_category: Option<String>,
     sub_category: Option<String>,
     start_date: Option<String>,
@@ -76,7 +79,18 @@ impl BillsListQuery {
         )
     }
 
+    fn flow_direction(&self) -> Option<String> {
+        let normalized = self
+            .flow_direction
+            .as_ref()
+            .or(self.flow_direction_camel.as_ref())?
+            .trim()
+            .to_ascii_lowercase();
+        matches!(normalized.as_str(), "inflow" | "outflow").then_some(normalized)
+    }
+
     fn into_ledger_list_query(self) -> LedgerListQuery {
+        let flow_direction = self.flow_direction();
         LedgerListQuery {
             page: self.page(),
             page_size: self.page_size(),
@@ -89,6 +103,7 @@ impl BillsListQuery {
                 .clone()
                 .or_else(|| self.max_time.and_then(date_from_timestamp)),
             transaction_type: transaction_list_type_filter(self.transaction_type.as_deref()),
+            flow_direction,
             main_category: non_empty_string(self.main_category.as_ref()),
             sub_category: non_empty_string(self.sub_category.as_ref()),
             batch_id: non_empty_string(self.batch_id.as_ref()),
@@ -155,6 +170,7 @@ mod bill_query_tests {
             tag_ids: Some("7,,0,8".to_string()),
             amount_filter_cents: None,
             amount_filter_cents_camel: Some(" between:1000:2000 ".to_string()),
+            flow_direction_camel: Some(" InFlow ".to_string()),
             ..BillsListQuery::default()
         };
 
@@ -163,6 +179,7 @@ mod bill_query_tests {
         assert_eq!(query.account_ids(), vec![2, 3, 2]);
         assert_eq!(query.category_ids(), vec![4, 5]);
         assert_eq!(query.tag_ids(), vec![7, 8]);
+        assert_eq!(query.flow_direction().as_deref(), Some("inflow"));
         assert_eq!(
             query.amount_filter_cents().as_deref(),
             Some("between:1000:2000")
@@ -175,6 +192,7 @@ mod bill_query_tests {
             page_size_camel: Some(10),
             amount_filter_cents: Some(" gte:20000 ".to_string()),
             amount_filter_cents_camel: Some("ignored".to_string()),
+            flow_direction: Some("inflow".to_string()),
             ..BillsListQuery::default()
         };
         assert_eq!(clamped.page(), 4);
@@ -187,6 +205,7 @@ mod bill_query_tests {
         assert_eq!(ledger_query.account_ids, Vec::<i64>::new());
         assert_eq!(ledger_query.category_ids, Vec::<i64>::new());
         assert_eq!(ledger_query.tag_ids, Vec::<i64>::new());
+        assert_eq!(ledger_query.flow_direction.as_deref(), Some("inflow"));
         assert_eq!(
             ledger_query.amount_filter_cents.as_deref(),
             Some("gte:20000")

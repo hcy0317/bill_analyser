@@ -13,6 +13,7 @@ describe('transaction service adapters', () => {
             type: 0,
             categoryIds: '',
             accountIds: '',
+            flowDirection: '',
             tagIds: '',
             tagFilterType: 0,
             amountFilterCents: '',
@@ -37,6 +38,7 @@ describe('transaction service adapters', () => {
             type: 2,
             categoryIds: 'cat/1',
             accountIds: 'acc 1',
+            flowDirection: 'inflow',
             tagIds: 'tag-a,tag-b',
             tagFilterType: 1,
             amountFilterCents: 'gte:100',
@@ -44,7 +46,7 @@ describe('transaction service adapters', () => {
         });
 
         expect(query).toBe(
-            'max_time=1778284800999&min_time=1778198400000&type=2&categoryIds=cat%2F1&accountIds=acc%201&tagIds=tag-a%2Ctag-b&tagFilterType=1&amountFilterCents=gte%3A100&keyword=coffee%20shop&page_size=50&page=2&with_count=false'
+            'max_time=1778284800999&min_time=1778198400000&type=2&categoryIds=cat%2F1&accountIds=acc%201&flowDirection=inflow&tagIds=tag-a%2Ctag-b&tagFilterType=1&amountFilterCents=gte%3A100&keyword=coffee%20shop&page_size=50&page=2&with_count=false'
         );
     });
 });

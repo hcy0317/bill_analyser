@@ -325,6 +325,33 @@ describe('RadarChart values, thresholds, display modes and themes', () => {
         expect(option.radar.splitArea.areaStyle.color).toEqual(['#555', '#555']);
         expect(option.series).toEqual([]);
     });
+
+    test('renders signed account flow amounts as magnitudes and skips an empty effective series', () => {
+        const signed = setup(RadarChart, props({
+            minValidPercent: undefined,
+            items: [
+                { name: 'Expense account', value: -60, hidden: false },
+                { name: 'Zero', value: 0, hidden: false },
+                { name: 'Hidden', value: -90, hidden: true },
+            ],
+        }));
+
+        expect(signed.bindings.radarData.value).toEqual(expect.objectContaining({
+            totalValidValue: 60,
+            maxValue: 60,
+            values: [60],
+        }));
+        expect(signed.bindings.chartOptions.value.series[0].data[0].value).toEqual([60]);
+
+        const noEffectiveItems = setup(RadarChart, props({
+            items: [
+                { name: 'Zero', value: 0, hidden: false },
+                { name: 'Hidden', value: 100, hidden: true },
+            ],
+        }));
+        expect(noEffectiveItems.bindings.radarData.value.indicators).toEqual([]);
+        expect(noEffectiveItems.bindings.chartOptions.value.series).toEqual([]);
+    });
 });
 
 describe('mobile SVG PieChart interaction and geometry', () => {

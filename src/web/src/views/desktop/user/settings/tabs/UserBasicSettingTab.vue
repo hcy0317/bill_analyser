@@ -138,7 +138,7 @@ function save(): void {
 
     saving.value = true;
 
-    rootStore.updateUserProfile(newProfile.value.toProfileUpdateRequest()).then(response => {
+    rootStore.updateUserProfile(newProfile.value.toProfileUpdateRequest(undefined, oldProfile.value)).then(response => {
         saving.value = false;
 
         doAfterProfileUpdate(response.user);

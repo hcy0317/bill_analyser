@@ -3,6 +3,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use bill_analyser_core::category_rules::canonicalize_or_only_rule_expression;
 use serde_json::{json, Map, Value};
 use sqlx::{Postgres, Row, Transaction as PgTransaction};
 

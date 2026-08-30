@@ -145,7 +145,27 @@ pub async fn store_postgres_ocr_config_setting(
         operation = "store_postgres_ocr_config_setting",
         "business operation entered"
     );
-    let config = normalize_ocr_config_for_storage(value)?;
+    let mut merged_value = value.cloned().unwrap_or_else(|| json!({}));
+    let preserve_existing = merged_value
+        .get("credential_config")
+        .and_then(|credential| credential.get("preserve_existing"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    if preserve_existing {
+        let existing = load_postgres_ocr_config_setting(pool, user_id).await?;
+        let incoming_provider = merged_value
+            .get("provider")
+            .and_then(Value::as_str)
+            .unwrap_or(OCR_DISABLED_PROVIDER_NAME)
+            .trim()
+            .to_ascii_lowercase();
+        if incoming_provider == existing.provider {
+            if let Some(object) = merged_value.as_object_mut() {
+                object.insert("credential_config".to_string(), existing.credential_config);
+            }
+        }
+    }
+    let config = normalize_ocr_config_for_storage(Some(&merged_value))?;
     let stored_value = json!({
         "provider": config.provider,
         "lang": config.lang,

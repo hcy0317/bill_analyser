@@ -700,6 +700,35 @@ async fn bills_postgres_queries_preserve_cents_filters_paging_and_user_scope(
     assert_eq!(gte_filtered.total, 1);
     assert_eq!(gte_filtered.bills[0]["id"], fixture.transfer_bill_id);
 
+    let bank_inflow = query_postgres_bills(
+        pool,
+        fixture.user_id,
+        1,
+        10,
+        &BillFilters {
+            account_ids: vec![fixture.bank_account_id],
+            flow_direction: Some("inflow".to_string()),
+            ..BillFilters::default()
+        },
+    )
+    .await?;
+    assert_eq!(bank_inflow.total, 1);
+    assert_eq!(bank_inflow.bills[0]["id"], fixture.transfer_bill_id);
+
+    let wallet_outflow = query_postgres_bills(
+        pool,
+        fixture.user_id,
+        1,
+        10,
+        &BillFilters {
+            account_ids: vec![fixture.wallet_account_id],
+            flow_direction: Some("outflow".to_string()),
+            ..BillFilters::default()
+        },
+    )
+    .await?;
+    assert_eq!(wallet_outflow.total, 3);
+
     assert!(
         get_postgres_bill_by_id(pool, fixture.user_id, fixture.deleted_bill_id)
             .await?
@@ -719,6 +748,54 @@ async fn bills_postgres_queries_preserve_cents_filters_paging_and_user_scope(
             json!({"id": fixture.coffee_tag_id.to_string(), "name": "咖啡标签", "color": "#663300", "icon": "coffee"})
         ]
     );
+
+    test_db.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn recovered_account_rule_or_chain_migration_preserves_one_rule_with_many_terms(
+) -> Result<(), Box<dyn Error>> {
+    let Some(test_db) =
+        postgres_test_support::isolated_postgres_database("account_rule_or_chain_migration")
+            .await?
+    else {
+        return Ok(());
+    };
+    let user_id = insert_user(&test_db.pool, "account-rule-or-chain").await?;
+    let account_id = insert_account(&test_db.pool, user_id, "恢复账户").await?;
+    let rule_id: i64 = sqlx::query_scalar(
+        r#"
+        INSERT INTO account_rules (
+            user_id, account_id, name, rule_expression, regex_enabled, source, source_key
+        )
+        VALUES ($1, $2, '恢复规则', $3, false, 'sqlite_account_recovery', 'fixture:or-chain')
+        RETURNING id
+        "#,
+    )
+    .bind(user_id)
+    .bind(account_id)
+    .bind(json!({
+        "expression": "(OR={账户余额})|(OR={Alipay})|(OR={余额宝})",
+        "regex_enabled": false,
+    }))
+    .fetch_one(&test_db.pool)
+    .await?;
+
+    sqlx::raw_sql(include_str!(
+        "../../../src/backend/db/postgres/migrations/0042_canonicalize_recovered_account_rule_or_chains.sql"
+    ))
+    .execute(&test_db.pool)
+    .await?;
+
+    let (expression, version): (String, i64) = sqlx::query_as(
+        "SELECT rule_expression->>'expression', version FROM account_rules WHERE id = $1",
+    )
+    .bind(rule_id)
+    .fetch_one(&test_db.pool)
+    .await?;
+    assert_eq!(expression, "OR={账户余额,Alipay,余额宝}");
+    assert_eq!(version, 2);
 
     test_db.cleanup().await?;
     Ok(())

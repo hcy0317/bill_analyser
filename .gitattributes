@@ -41,6 +41,7 @@ src/backend/db/postgres/migrations/0038_matching_suppressions_left_bill_index.sq
 src/backend/db/postgres/migrations/0039_matching_suppressions_right_bill_index.sql text eol=lf
 src/backend/db/postgres/migrations/0040_import_learning_samples_bill_index.sql text eol=lf
 src/backend/db/postgres/migrations/0041_import_preview_session_retention.sql text eol=lf
+src/backend/db/postgres/migrations/0042_canonicalize_recovered_account_rule_or_chains.sql text eol=lf
 
 # Route ownership fixtures are rendered byte-for-byte by the Node generator.
 # Keep them LF on Windows so `generate-rust-route-fixture.mjs --check` is stable.

@@ -8,6 +8,7 @@ export interface TransactionListPartialFilter {
     type?: number;
     categoryIds?: string;
     accountIds?: string;
+    flowDirection?: string;
     tagIds?: string;
     tagFilterType?: number;
     amountFilterCents?: string;
@@ -21,6 +22,7 @@ export interface TransactionListFilter extends TransactionListPartialFilter {
     type: number;
     categoryIds: string;
     accountIds: string;
+    flowDirection: string;
     tagIds: string;
     tagFilterType: number;
     amountFilterCents: string;

@@ -11,7 +11,11 @@ async fn import_postgres_settings_account_rules(
     let mut existing = load_existing_postgres_account_rules(transaction, user_id).await?;
     for item in rules {
         let account_id = resolve_settings_account_rule_account_id(item, account_ref_map).unwrap_or(0);
-        let rule_expression = safe_text(get_any(item, &["ruleExpression", "rule_expression"]), "");
+        let raw_rule_expression =
+            safe_text(get_any(item, &["ruleExpression", "rule_expression"]), "");
+        let regex_enabled = safe_bool(get_any(item, &["regexEnabled", "regex_enabled"]));
+        let rule_expression =
+            canonicalize_or_only_rule_expression(&raw_rule_expression, regex_enabled);
         let section = result.get_mut("accountRecognitionRules");
         if account_id == 0 || rule_expression.is_empty() {
             section.skipped += 1;
@@ -23,7 +27,6 @@ async fn import_postgres_settings_account_rules(
         }
         let name = safe_text(item.get("name"), "");
         let priority = safe_int(item.get("priority"), 100);
-        let regex_enabled = safe_bool(get_any(item, &["regexEnabled", "regex_enabled"]));
         let enabled = safe_bool_with_default(item.get("enabled"), true);
         let source = safe_text(item.get("source"), "manual");
         let source_key = safe_text(get_any(item, &["sourceKey", "source_key"]), "");

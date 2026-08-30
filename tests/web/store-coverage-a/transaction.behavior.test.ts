@@ -293,6 +293,7 @@ describe('transaction store behavior coverage', () => {
             type: TransactionType.Investment,
             categoryIds: 'cat-a,cat-b',
             accountIds: 'cash,usd',
+            flowDirection: 'inflow',
             tagIds: 'tag-a,tag-b',
             tagFilterType: TransactionTagFilterType.NotHasAny.type,
             amountFilterCents: 'bt:10:20',
@@ -304,7 +305,7 @@ describe('transaction store behavior coverage', () => {
         expect([store.allFilterCategoryIdsCount, store.allFilterAccountIdsCount, store.allFilterTagIdsCount])
             .toEqual([2, 2, 2]);
         expect(store.getTransactionListPageParams(3)).toBe(
-            'pageType=3&type=5&accountIds=cash,usd&categoryIds=cat-a,cat-b&tagIds=tag-a,tag-b'
+            'pageType=3&type=5&accountIds=cash,usd&flowDirection=inflow&categoryIds=cat-a,cat-b&tagIds=tag-a,tag-b'
             + '&tagFilterType=2&dateType=255&maxTime=200&minTime=100'
             + '&amountFilterCents=bt%3A10%3A20&keyword=coffee%20%26%20tea'
         );
@@ -314,6 +315,7 @@ describe('transaction store behavior coverage', () => {
             type: TransactionType.Investment,
             categoryIds: 'cat-a,cat-b',
             accountIds: 'cash,usd',
+            flowDirection: 'inflow',
             tagIds: 'tag-a,tag-b',
             tagFilterType: TransactionTagFilterType.NotHasAny.type,
             amountFilterCents: 'bt:10:20',
@@ -328,6 +330,7 @@ describe('transaction store behavior coverage', () => {
             type: TransactionType.Income,
             categoryIds: 'income-default',
             accountIds: 'bank-parent',
+            flowDirection: 'outflow',
             tagIds: 'tag-c',
             tagFilterType: TransactionTagFilterType.HasAny.type,
             amountFilterCents: 'gt:30',
@@ -337,6 +340,9 @@ describe('transaction store behavior coverage', () => {
         mockAccountsStore.getAccountStatementDate.mockReturnValueOnce(null);
         expect(store.updateTransactionListFilter({ accountIds: 'cash' })).toBe(true);
         expect(store.transactionsFilter.dateType).toBe(DateRange.Custom.type);
+        expect(store.transactionsFilter.flowDirection).toBe('outflow');
+        expect(store.updateTransactionListFilter({ type: TransactionType.Expense })).toBe(true);
+        expect(store.transactionsFilter.flowDirection).toBe('');
 
         store.resetTransactions();
         expect(store.transactionsFilter).toEqual({
@@ -346,6 +352,7 @@ describe('transaction store behavior coverage', () => {
             type: 0,
             categoryIds: '',
             accountIds: '',
+            flowDirection: '',
             tagIds: '',
             tagFilterType: TransactionTagFilterType.Default.type,
             amountFilterCents: '',
@@ -361,6 +368,7 @@ describe('transaction store behavior coverage', () => {
             type: 'bad' as unknown as number,
             categoryIds: 1 as unknown as string,
             accountIds: 1 as unknown as string,
+            flowDirection: 'sideways',
             tagIds: 1 as unknown as string,
             tagFilterType: 'bad' as unknown as number,
             amountFilterCents: 1 as unknown as string,

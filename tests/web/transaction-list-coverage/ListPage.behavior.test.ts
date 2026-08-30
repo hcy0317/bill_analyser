@@ -691,6 +691,7 @@ describe('desktop transaction ListPage production behavior', () => {
         };
         bindings.queryAllFilterCategoryIds.value = { keep: true, drop: true, missing: true };
         bindings.query.value.categoryIds = 'keep,drop,missing';
+        bindings.query.value.flowDirection = 'inflow';
         bindings.changeTypeFilter(mockTransactionType.Income);
         bindings.changeTypeFilter(0);
 

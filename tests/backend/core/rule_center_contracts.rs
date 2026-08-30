@@ -4,8 +4,31 @@ use bill_analyser_core::{
         ACCOUNT_ROLE_INVESTMENT, ACCOUNT_ROLE_SOURCE, FIELD_DESCRIPTION, TRANSACTION_SCOPE_EXPENSE,
         TRANSACTION_SCOPE_INVESTMENT,
     },
-    category_rules::{compile_rule_expression, escape_rule_expression_term, match_rule_expression},
+    category_rules::{
+        canonicalize_or_only_rule_expression, compile_rule_expression, escape_rule_expression_term,
+        match_rule_expression,
+    },
 };
+
+#[test]
+fn legacy_account_recovery_or_chain_is_canonicalized_to_one_rule_clause() {
+    let legacy = r#"(OR={账户余额})|(OR={Alipay})|(OR={民生银行\(6226\)})"#;
+    let canonical = canonicalize_or_only_rule_expression(legacy, false);
+
+    assert_eq!(canonical, r#"OR={账户余额,Alipay,民生银行\(6226\)}"#);
+    for sample in ["账户余额", "ALIPAY", "民生银行(6226)"] {
+        assert_eq!(
+            match_rule_expression(sample, legacy, false),
+            match_rule_expression(sample, &canonical, false),
+        );
+    }
+
+    let structured = "OR={余额宝}+NOT={退款}";
+    assert_eq!(
+        canonicalize_or_only_rule_expression(structured, false),
+        structured
+    );
+}
 
 #[test]
 fn category_rule_expression_contract_locks_nested_regex_not_and_escape_semantics() {

@@ -43,6 +43,8 @@ export interface LLMProviderOption {
     modelPlaceholder: string;
     apiKeyPlaceholder: string;
     baseUrlPlaceholder: string;
+    defaultModel?: string;
+    defaultBaseUrl?: string;
     requiresBaseUrl?: boolean;
 }
 

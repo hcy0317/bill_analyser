@@ -904,7 +904,8 @@ export default {
         if (req) {
             const amountFilterCents = encodeURIComponent(req.amountFilterCents);
             const keyword = encodeURIComponent(req.keyword);
-            params = `max_time=${req.maxTime}&min_time=${req.minTime}&type=${req.type}&category_ids=${req.categoryIds}&account_ids=${req.accountIds}&tag_ids=${req.tagIds}&tag_filter_type=${req.tagFilterType}&amount_filter_cents=${amountFilterCents}&keyword=${keyword}`;
+            const flowDirection = req.flowDirection ? `&flow_direction=${req.flowDirection}` : '';
+            params = `max_time=${req.maxTime}&min_time=${req.minTime}&type=${req.type}&category_ids=${req.categoryIds}&account_ids=${req.accountIds}${flowDirection}&tag_ids=${req.tagIds}&tag_filter_type=${req.tagFilterType}&amount_filter_cents=${amountFilterCents}&keyword=${keyword}`;
         } else {
             params = 'max_time=0&min_time=0&type=0&category_ids=&account_ids=&tag_ids=&tag_filter_type=0&amount_filter_cents=&keyword=';
         }
@@ -1021,7 +1022,8 @@ export default {
     getAllTransactionsByMonth: (req: TransactionListInMonthByPageRequest): ApiResponsePromise<TransactionInfoPageWrapperResponse2> => {
         const amountFilterCents = encodeURIComponent(req.amountFilterCents);
         const keyword = encodeURIComponent(req.keyword);
-        return axios.get<ApiResponse<TransactionInfoPageWrapperResponse2>>(`bills/by-month?year=${req.year}&month=${req.month}&type=${req.type}&categoryIds=${req.categoryIds}&accountIds=${req.accountIds}&tagIds=${req.tagIds}&tagFilterType=${req.tagFilterType}&amountFilterCents=${amountFilterCents}&keyword=${keyword}`);
+        const flowDirection = req.flowDirection ? `&flowDirection=${encodeURIComponent(req.flowDirection)}` : '';
+        return axios.get<ApiResponse<TransactionInfoPageWrapperResponse2>>(`bills/by-month?year=${req.year}&month=${req.month}&type=${req.type}&categoryIds=${req.categoryIds}&accountIds=${req.accountIds}${flowDirection}&tagIds=${req.tagIds}&tagFilterType=${req.tagFilterType}&amountFilterCents=${amountFilterCents}&keyword=${keyword}`);
     },
     getReconciliationStatements: (req: TransactionReconciliationStatementRequest): ApiResponsePromise<TransactionReconciliationStatementResponse> => {
         // 修复：使用正确的后端API路径 /api/bills/reconciliation_statements

@@ -3,6 +3,7 @@ import { describe, expect, test } from '@jest/globals';
 import {
     buildAdvancedSettingsPayload,
     buildCredentialConfigPayload,
+    applyLLMProviderDefaults,
     createEmptyLLMConfigForm,
     createLLMProviderOptions,
     getLLMProviderLabel,
@@ -49,10 +50,45 @@ describe('LLM config helper contracts', () => {
         expect(options.find(option => option.value === 'qwen')).toMatchObject({
             modelPlaceholder: 'qwen-plus',
             baseUrlPlaceholder: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+            defaultModel: 'qwen-plus',
+            defaultBaseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
         });
         expect(getLLMProviderLabel('anthropic', options)).toBe('Claude (Anthropic)');
         expect(getLLMProviderLabel('openai-compatible', options)).toBe('OpenAI-compatible');
         expect(getLLMProviderLabel('unknown-provider', options)).toBe('unknown-provider');
+    });
+
+    test('starts new configurations with safe built-in prompts and usable provider defaults', () => {
+        const form = createEmptyLLMConfigForm();
+
+        expect(form.name).toBe('OpenAI');
+        expect(form.model).toBe('gpt-4o-mini');
+        expect(form.base_url).toBe('https://api.openai.com/v1');
+        expect(form.system_prompt).toContain('Bill Analyser');
+        expect(form.system_prompt).toContain('JSON');
+        expect(form.classification_prompt_template).toBe('{default_prompt}');
+        expect(form.rule_prompt_template).toBe('{default_prompt}');
+    });
+
+    test('applies provider presets without requiring users to copy model identifiers or base URLs', () => {
+        const form = createEmptyLLMConfigForm();
+        const deepSeek = createLLMProviderOptions(tt).find(option => option.value === 'deepseek')!;
+
+        applyLLMProviderDefaults(form, deepSeek);
+
+        expect(form.provider).toBe('deepseek');
+        expect(form.name).toBe('DeepSeek');
+        expect(form.model).toBe('deepseek-chat');
+        expect(form.base_url).toBe('https://api.deepseek.com/v1');
+
+        form.api_key = 'stale';
+        applyLLMProviderDefaults(form, createLLMProviderOptions(tt).find(option => option.value === 'ollama')!);
+        expect(form.api_key).toBe('');
+
+        applyLLMProviderDefaults(form, {
+            title: 'Custom', value: 'custom', modelPlaceholder: '', apiKeyPlaceholder: '', baseUrlPlaceholder: '',
+        });
+        expect(form).toMatchObject({ provider: 'custom', name: 'Custom', model: '', base_url: '' });
     });
 
     test('builds OAuth credential payload from one pasted JSON document', () => {

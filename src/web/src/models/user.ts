@@ -102,8 +102,11 @@ export class User {
         };
     }
 
-    public toProfileUpdateRequest(currentPassword?: string): UserProfileUpdateRequest {
-        return {
+    public toProfileUpdateRequest(
+        currentPassword?: string,
+        baseline?: User | UserBasicInfo | UserProfileResponse
+    ): UserProfileUpdateRequest {
+        const request: UserProfileUpdateRequest = {
             email: this.email,
             nickname: this.nickname,
             password: this.password,
@@ -136,6 +139,44 @@ export class User {
             investmentProductKeywords: this.investmentProductKeywords,
             investmentExcludeKeywords: this.investmentExcludeKeywords
         };
+
+        if (!baseline) {
+            return request;
+        }
+
+        const previous = User.of(normalizeUserBasicInfo(baseline));
+        const patch: Record<string, unknown> = {};
+        const scalarFields = [
+            'email', 'nickname', 'defaultAccountId', 'transactionEditScope', 'language',
+            'defaultCurrency', 'firstDayOfWeek', 'fiscalYearStart', 'calendarDisplayType',
+            'dateDisplayType', 'longDateFormat', 'shortDateFormat', 'longTimeFormat',
+            'shortTimeFormat', 'fiscalYearFormat', 'currencyDisplayType', 'numeralSystem',
+            'decimalSeparator', 'digitGroupingSymbol', 'digitGrouping', 'coordinateDisplayType',
+            'expenseAmountColor', 'incomeAmountColor', 'cashAccountId',
+            'cashTransferCategoryId', 'importLearningEnabled'
+        ] as const;
+        const arrayFields = [
+            'investmentPlatformKeywords', 'investmentProductKeywords', 'investmentExcludeKeywords'
+        ] as const;
+
+        for (const field of scalarFields) {
+            if (this[field] !== previous[field]) {
+                patch[field] = this[field];
+            }
+        }
+        for (const field of arrayFields) {
+            if (JSON.stringify(this[field]) !== JSON.stringify(previous[field])) {
+                patch[field] = [...this[field]];
+            }
+        }
+        if (this.password) {
+            patch['password'] = this.password;
+            if (currentPassword) {
+                patch['oldPassword'] = currentPassword;
+            }
+        }
+
+        return patch as UserProfileUpdateRequest;
     }
 
     public static of(userInfo: UserBasicInfo): User {

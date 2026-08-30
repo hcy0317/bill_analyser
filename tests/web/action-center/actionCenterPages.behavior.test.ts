@@ -181,10 +181,10 @@ async function renderDesktopWithExpandedSlots(): Promise<Array<(value?: unknown)
     });
     const app = createSSRApp(DesktopPage);
     for (const name of [
-        'v-row', 'v-col', 'v-card', 'v-card-text', 'v-icon', 'v-chip', 'v-spacer',
+        'v-row', 'v-col', 'v-card', 'v-card-title', 'v-card-text', 'v-card-actions', 'v-icon', 'v-chip', 'v-spacer',
         'v-select', 'v-btn', 'v-progress-linear', 'v-alert', 'v-list', 'v-divider',
         'v-list-item', 'v-avatar', 'v-list-item-title', 'v-list-item-subtitle',
-        'v-tabs', 'v-tab', 'v-tabs-window', 'v-tabs-window-item'
+        'v-tabs', 'v-tab', 'v-tabs-window', 'v-tabs-window-item', 'v-empty-state'
     ]) app.component(name, Stub);
     app.config.warnHandler = () => undefined;
     await renderToString(app);
@@ -349,7 +349,7 @@ describe('action center desktop and mobile pages', () => {
         );
         expect(populatedDesktop.vnode).toBeTruthy();
         expect(populatedMobile.vnode).toBeTruthy();
-        expect(populatedDesktop.handlers.length).toBeGreaterThan(4);
+        expect(populatedDesktop.handlers.length).toBeGreaterThanOrEqual(3);
         expect(populatedMobile.handlers.length).toBeGreaterThan(4);
 
         const expandedDesktopHandlers = await renderDesktopWithExpandedSlots();

@@ -18,6 +18,9 @@ export function buildTransactionListQuery(req: TransactionListByMaxTimeRequest):
     appendQueryParam(parts, 'type', req.type);
     appendQueryParam(parts, 'categoryIds', req.categoryIds);
     appendQueryParam(parts, 'accountIds', req.accountIds);
+    if (req.flowDirection) {
+        appendQueryParam(parts, 'flowDirection', req.flowDirection);
+    }
     appendQueryParam(parts, 'tagIds', req.tagIds);
     appendQueryParam(parts, 'tagFilterType', req.tagFilterType);
     appendQueryParam(parts, 'amountFilterCents', req.amountFilterCents);

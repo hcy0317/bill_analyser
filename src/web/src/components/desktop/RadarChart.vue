@@ -59,29 +59,31 @@ const radarData = computed<RadarChartData>(() => {
     if (props.items.length) {
         for (const item of props.items) {
             const value = item[props.valueField];
+            const magnitude = isNumber(value) ? Math.abs(value) : 0;
 
-            if (isNumber(value) && value > 0 && (!props.hiddenField || !item[props.hiddenField])) {
-                totalValidValue += value;
+            if (magnitude > 0 && (!props.hiddenField || !item[props.hiddenField])) {
+                totalValidValue += magnitude;
 
-                if (value > maxValue) {
-                    maxValue = value;
+                if (magnitude > maxValue) {
+                    maxValue = magnitude;
                 }
             }
         }
 
         for (const item of props.items) {
             const value = item[props.valueField];
+            const magnitude = isNumber(value) ? Math.abs(value) : 0;
             const percent = props.percentField ? item[props.percentField] : -1;
 
-            if (isNumber(value) && value > 0 &&
+            if (magnitude > 0 &&
                 (!props.hiddenField || !item[props.hiddenField]) &&
-                (!props.minValidPercent || value / totalValidValue > props.minValidPercent)) {
+                (!props.minValidPercent || magnitude / totalValidValue > props.minValidPercent)) {
                 const name = item[props.nameField] as string;
                 const color = getDisplayColor((props.colorField && item[props.colorField]) ? item[props.colorField] as ColorValue : DEFAULT_CHART_COLORS[indicators.length % DEFAULT_CHART_COLORS.length]);
 
-                const finalPercent = (isNumber(percent) && percent >= 0) ? percent : (value / totalValidValue * 100);
+                const finalPercent = (isNumber(percent) && percent >= 0) ? percent : (magnitude / totalValidValue * 100);
                 const displayPercent = formatPercentToLocalizedNumerals(finalPercent, 2, '&lt;0.01');
-                const displayValue = formatAmountToLocalizedNumeralsWithCurrency(value, props.defaultCurrency);
+                const displayValue = formatAmountToLocalizedNumeralsWithCurrency(magnitude, props.defaultCurrency);
 
                 indicators.push({
                     name: name,
@@ -89,7 +91,7 @@ const radarData = computed<RadarChartData>(() => {
                     color: chartTheme.value.text
                 });
 
-                values.push(value);
+                values.push(magnitude);
 
                 tooltip += '<div><span class="chart-pointer" style="background-color: ' + color + '"></span>';
                 tooltip += `<span>${name}</span>`;
@@ -128,6 +130,8 @@ const radarData = computed<RadarChartData>(() => {
 });
 
 const chartOptions = computed<object>(() => {
+    const hasEffectiveData = !props.skeleton && radarData.value.indicators.length > 0;
+
     return {
         tooltip: {
             trigger: 'item',
@@ -140,22 +144,22 @@ const chartOptions = computed<object>(() => {
         },
         radar: {
             radius: '75%',
-            splitNumber: (!props.skeleton && props.items.length) ? 5 : 1,
+            splitNumber: hasEffectiveData ? 5 : 1,
             splitLine: {
                 lineStyle: {
-                    color: (!props.skeleton && props.items.length) ? chartTheme.value.grid : chartTheme.value.inactive
+                    color: hasEffectiveData ? chartTheme.value.grid : chartTheme.value.inactive
                 }
             },
             splitArea: {
                 areaStyle: {
-                    color: (!props.skeleton && props.items.length)
+                    color: hasEffectiveData
                         ? [chartTheme.value.surface, chartTheme.value.grid]
                         : [chartTheme.value.inactive, chartTheme.value.inactive]
                 }
             },
             indicator: radarData.value.indicators
         },
-        series: (!props.skeleton && props.items.length) ? [
+        series: hasEffectiveData ? [
             {
                 type: 'radar',
                 data: [

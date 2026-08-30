@@ -233,7 +233,7 @@ describe('useLearningCenterLlmConfig state and computed contracts', () => {
         state.openAddConfigDialog();
         expect(state.addConfigDialog.value).toBe(true);
         expect(state.autofillFieldsLocked.value).toBe(true);
-        expect(state.newConfigForm.value.name).toBe('');
+        expect(state.newConfigForm.value.name).toBe('OpenAI');
         expect(state.newConfigForm.value.api_key).toBe('');
         expect(state.llmConfigFieldNames.value.name).not.toBe(initialFieldNames.name);
 
@@ -351,6 +351,8 @@ describe('useLearningCenterLlmConfig saved configuration actions', () => {
                 temperature: 0.2,
                 max_tokens: 1024,
                 system_prompt: 'safe system prompt',
+                classification_prompt_template: '{default_prompt}',
+                rule_prompt_template: '{default_prompt}',
             },
             is_active: true,
         });

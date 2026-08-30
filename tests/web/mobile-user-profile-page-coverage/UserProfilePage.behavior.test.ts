@@ -82,6 +82,7 @@ function createProfileBase(): any {
     const { ref } = jest.requireActual('vue') as any;
     return {
         newProfile: ref(createProfile()),
+        oldProfile: ref(createProfile()),
         emailVerified: ref(false),
         loading: ref(false),
         resending: ref(false),
@@ -324,7 +325,7 @@ describe('mobile UserProfilePage profile save', () => {
 
         bindings.currentPassword.value = 'current-password';
         bindings.save(true);
-        expect(mockToProfileUpdateRequest).toHaveBeenCalledWith('current-password');
+        expect(mockToProfileUpdateRequest).toHaveBeenCalledWith('current-password', expect.any(Object));
         expect(mockRootStore.updateUserProfile).toHaveBeenCalledWith({
             nickname: 'Synthetic User',
             currentPassword: 'current-password'

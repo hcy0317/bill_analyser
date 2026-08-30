@@ -41,6 +41,7 @@ const { showAlert, showToast, routeBackOnError } = useI18nUIComponents();
 
 const {
     newProfile,
+    oldProfile,
     emailVerified,
     loading,
     resending,
@@ -167,7 +168,7 @@ function save(confirm?: boolean): void {
     saving.value = true;
     showLoading(() => saving.value);
 
-    rootStore.updateUserProfile(newProfile.value.toProfileUpdateRequest(currentPassword.value)).then(response => {
+    rootStore.updateUserProfile(newProfile.value.toProfileUpdateRequest(currentPassword.value, oldProfile.value)).then(response => {
         saving.value = false;
         hideLoading();
         currentPassword.value = '';

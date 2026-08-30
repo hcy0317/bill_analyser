@@ -212,6 +212,22 @@ describe('statistics drilldown query behavior', () => {
     });
 
     test.each([
+        [ChartDataType.InflowsByAccount.type, 'inflow'],
+        [ChartDataType.OutflowsByAccount.type, 'outflow'],
+    ])('preserves account flow direction %s when drilling into transactions', (chartDataType, flowDirection) => {
+        const query = queryFrom(buildTransactionListPageParams({
+            filter: makeFilter({ chartDataType }),
+            accountsMap: accountMap,
+            categoriesMap: categoryMap,
+            analysisType: StatisticsAnalysisType.CategoricalAnalysis,
+            itemId: 'cash',
+        }));
+
+        expect(query.get('accountIds')).toBe('cash');
+        expect(query.get('flowDirection')).toBe(flowDirection);
+    });
+
+    test.each([
         ChartDataType.IncomeByPrimaryCategory.type,
         ChartDataType.IncomeBySecondaryCategory.type,
         ChartDataType.ExpenseByPrimaryCategory.type,

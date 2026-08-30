@@ -9,6 +9,16 @@
     margin-left: auto;
 }
 
+.budget-toolbar {
+    row-gap: 12px !important;
+    min-width: 0;
+}
+
+.budget-view-item {
+    min-height: 720px;
+    background-color: rgb(var(--v-theme-surface));
+}
+
 .budget-forecast-title-actions {
     flex: 0 0 auto;
 }
@@ -16,6 +26,28 @@
 .budget-period-toolbar {
     flex: 0 0 228px;
     width: 228px;
+}
+
+@media (max-width: 959px) {
+    .budget-period-toolbar,
+    .budget-forecast-title-actions,
+    .budget-right-tools,
+    .budget-keyword-filter {
+        flex: 1 1 100%;
+        width: 100%;
+        max-width: none;
+        margin-left: 0 !important;
+    }
+
+    .budget-forecast-title-actions {
+        flex-wrap: wrap;
+    }
+
+    .budget-forecast-title-button {
+        flex: 1 1 140px;
+        width: auto;
+        max-width: none;
+    }
 }
 
 .budget-period-toolbar :deep(.v-btn) {

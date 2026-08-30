@@ -4,9 +4,9 @@ use std::error::Error;
 
 use bill_analyser_core::{suggest_import_config, ImportConfigDraft, UserId};
 use bill_analyser_db::{
-    delete_postgres_import_config, list_postgres_import_configs, match_postgres_import_config,
-    postgres_migration_manifest, postgres_migrations_dir, save_postgres_import_config,
-    ImportConfigRepositoryError,
+    delete_postgres_import_config, list_postgres_import_configs, load_postgres_ocr_config_setting,
+    match_postgres_import_config, postgres_migration_manifest, postgres_migrations_dir,
+    save_postgres_import_config, store_postgres_ocr_config_setting, ImportConfigRepositoryError,
 };
 use postgres_test_support::isolated_postgres_database;
 use serde_json::json;
@@ -219,6 +219,54 @@ async fn postgres_import_configs_are_user_scoped_ordered_and_conflict_safe(
     assert!(type_rows
         .iter()
         .all(|row| row.get::<String, _>("data_type") == "jsonb"));
+
+    test_db.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn ocr_config_update_preserves_redacted_credentials_for_the_same_provider(
+) -> Result<(), Box<dyn Error>> {
+    let Some(test_db) = isolated_postgres_database("ocr_config_preserve_credential").await? else {
+        return Ok(());
+    };
+    let user = seed_user(&test_db.pool, "ocr-config-preserve").await?;
+    let user_id = i64::try_from(user.get())?;
+
+    store_postgres_ocr_config_setting(
+        &test_db.pool,
+        user_id,
+        Some(&json!({
+            "provider": "llm_vision",
+            "model": "vision-a",
+            "base_url": "https://api.openai.com/v1",
+            "credential_config": {
+                "credential_mode": "api_key",
+                "credential_json": {"api_key": "secret-a"}
+            }
+        })),
+    )
+    .await?;
+
+    let updated = store_postgres_ocr_config_setting(
+        &test_db.pool,
+        user_id,
+        Some(&json!({
+            "provider": "llm_vision",
+            "model": "vision-b",
+            "base_url": "https://api.openai.com/v1",
+            "credential_config": {
+                "credential_mode": "api_key",
+                "preserve_existing": true
+            }
+        })),
+    )
+    .await?;
+    assert_eq!(updated.model, "vision-b");
+    assert_eq!(updated.credential_config["access_token"], "secret-a");
+
+    let reloaded = load_postgres_ocr_config_setting(&test_db.pool, user_id).await?;
+    assert_eq!(reloaded.credential_config["access_token"], "secret-a");
 
     test_db.cleanup().await?;
     Ok(())

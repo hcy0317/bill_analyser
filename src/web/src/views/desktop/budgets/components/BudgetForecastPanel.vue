@@ -23,10 +23,7 @@
         <tbody v-if="!forecastLoading && (!currentForecast || currentForecast.forecasts.length === 0)">
         <tr>
             <td colspan="7">
-                <div class="d-flex flex-column align-center justify-center py-12">
-                    <v-icon :icon="mdiChartTimelineVariant" size="48" color="grey-lighten-1" class="mb-3"/>
-                    <span class="text-body-1 text-medium-emphasis">{{ tt('No forecast data') }}</span>
-                </div>
+                <v-empty-state :icon="mdiChartTimelineVariant" :headline="tt('No forecast data')" />
             </td>
         </tr>
         </tbody>

@@ -111,6 +111,7 @@ interface TransactionListProps {
     initType?: string,
     initCategoryIds?: string,
     initAccountIds?: string,
+    initFlowDirection?: string,
     initTagIds?: string,
     initTagFilterType?: string,
     initAmountFilterCents?: string,
@@ -505,6 +506,7 @@ function init(initProps: TransactionListProps): void { // 从路由 query 和用
         type: initProps.initType && parseInt(initProps.initType) > 0 ? parseInt(initProps.initType) : undefined,
         categoryIds: initProps.initCategoryIds,
         accountIds: initProps.initAccountIds,
+        flowDirection: initProps.initFlowDirection,
         tagIds: initProps.initTagIds,
         tagFilterType: initProps.initTagFilterType && parseInt(initProps.initTagFilterType) >= 0 ? parseInt(initProps.initTagFilterType) : undefined,
         amountFilterCents: initProps.initAmountFilterCents || '',
@@ -797,10 +799,8 @@ function shiftDateRange(startTime: number, endTime: number, scale: number): void
 
 function changeTypeFilter(type: number): void {
     let newCategoryFilter: string | undefined = undefined;
-
     if (type && query.value.categoryIds) {
         newCategoryFilter = '';
-
         for (const categoryId of keys(queryAllFilterCategoryIds.value)) {
             const category = allCategories.value[categoryId];
 
@@ -818,7 +818,6 @@ function changeTypeFilter(type: number): void {
         type: type,
         categoryIds: newCategoryFilter
     });
-
     updateUrlWhenChanged(changed);
 }
 
@@ -1192,6 +1191,7 @@ onBeforeRouteUpdate((to) => {
             initType: (to.query['type'] as string | null) || undefined,
             initCategoryIds: (to.query['categoryIds'] as string | null) || undefined,
             initAccountIds: (to.query['accountIds'] as string | null) || undefined,
+            initFlowDirection: (to.query['flowDirection'] as string | null) || undefined,
             initTagIds: (to.query['tagIds'] as string | null) || undefined,
             initTagFilterType: (to.query['tagFilterType'] as string | null) || undefined,
             initAmountFilterCents: (to.query['amountFilterCents'] as string | null) || undefined,

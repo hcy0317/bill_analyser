@@ -125,6 +125,12 @@ describe('OcrConfigPanel state and mapping', () => {
         expect(bindings.ocrProviderLabel('local_json_ocr')).toBe('Local JSON OCR');
         expect(bindings.ocrProviderLabel('llm_vision')).toBe('LLM Vision');
         expect(bindings.ocrProviderLabel('custom-provider')).toBe('custom-provider');
+        expect(bindings.ocrSetupOptions.value.map((item: any) => [item.value, item.kind])).toStrictEqual([
+            ['disabled', 'off'],
+            ['tesseract', 'built_in'],
+            ['local_json_ocr', 'local'],
+            ['llm_vision', 'cloud'],
+        ]);
 
         bindings.ocrConfig.value.available_providers = ['custom-provider'];
         expect(bindings.ocrProviderOptions.value).toStrictEqual([
@@ -163,6 +169,8 @@ describe('OcrConfigPanel state and mapping', () => {
             refresh_headers: '{\n  "x-client": "synthetic"\n}',
             refresh_body: '{\n  "grant_type": "refresh_token"\n}',
             refresh_params: '{\n  "tenant": "synthetic"\n}',
+            api_key: '',
+            advancedMode: false,
         });
 
         bindings.applyOCRConfig({
@@ -229,6 +237,26 @@ describe('OcrConfigPanel JSON and error contracts', () => {
             refresh_params: '',
         });
         expect(bindings.buildOcrCredentialConfig()).toStrictEqual({ credential_mode: 'api_key' });
+
+        bindings.ocrConfigForm.value.api_key = '  vision-secret  ';
+        expect(bindings.buildOcrCredentialConfig()).toStrictEqual({
+            credential_mode: 'api_key',
+            credential_json: { api_key: 'vision-secret' },
+        });
+
+        bindings.ocrConfigForm.value.api_key = '';
+        bindings.ocrConfig.value.credential_config = { access_token: '********' };
+        expect(bindings.buildOcrCredentialConfig()).toStrictEqual({
+            credential_mode: 'api_key',
+            preserve_existing: true,
+        });
+
+        bindings.ocrConfigForm.value.credential_mode = 'refresh_token';
+        bindings.ocrConfigForm.value.credential_json = '{"access_token":"********"}';
+        expect(bindings.buildOcrCredentialConfig()).toStrictEqual({
+            credential_mode: 'refresh_token',
+            preserve_existing: true,
+        });
 
         Object.assign(bindings.ocrConfigForm.value, {
             credential_mode: 'refresh_token',

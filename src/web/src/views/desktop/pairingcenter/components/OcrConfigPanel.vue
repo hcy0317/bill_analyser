@@ -17,6 +17,12 @@ interface SelectOption {
     value: string;
 }
 
+interface OCRSetupOption extends SelectOption {
+    kind: 'off' | 'built_in' | 'local' | 'cloud';
+    kindLabel: string;
+    description: string;
+}
+
 const props = defineProps<{
     hideSectionTitle?: boolean;
     headerActionsTarget?: string;
@@ -55,6 +61,8 @@ const ocrConfigForm = ref({
     refresh_headers: '',
     refresh_body: '',
     refresh_params: '',
+    api_key: '',
+    advancedMode: false,
 });
 const credentialModeOptions = [
     { title: tt('API Key'), value: 'api_key' },
@@ -75,6 +83,43 @@ const ocrProviderOptions = computed<SelectOption[]>(() => {
         value: provider,
     }));
 });
+
+const ocrSetupOptions = computed<OCRSetupOption[]>(() => [
+    {
+        title: tt('Disabled'),
+        value: 'disabled',
+        kind: 'off',
+        kindLabel: 'Off',
+        description: tt('Do not run OCR automatically.'),
+    },
+    {
+        title: 'Tesseract',
+        value: 'tesseract',
+        kind: 'built_in',
+        kindLabel: 'Built-in',
+        description: tt('Built into this Bill Analyser server. No endpoint or credential is required.'),
+    },
+    {
+        title: tt('Local JSON OCR'),
+        value: 'local_json_ocr',
+        kind: 'local',
+        kindLabel: 'Local',
+        description: tt('Use the local OCR command configured on this server. Images do not leave the machine.'),
+    },
+    {
+        title: tt('Cloud / Remote Vision'),
+        value: 'llm_vision',
+        kind: 'cloud',
+        kindLabel: 'Cloud',
+        description: tt('Send receipt images to an OpenAI-compatible vision endpoint. Provider charges may apply.'),
+    },
+]);
+const selectedOCRSetupOption = computed<OCRSetupOption>(() => (
+    ocrSetupOptions.value.find(option => option.value === ocrConfigForm.value.provider)
+        ?? ocrSetupOptions.value[0] as OCRSetupOption
+));
+const usesRemoteVision = computed(() => ocrConfigForm.value.provider === 'llm_vision');
+const supportsLanguage = computed(() => ocrConfigForm.value.provider === 'tesseract');
 
 function ocrProviderLabel(provider: string): string {
     const labels: Record<string, string> = {
@@ -116,6 +161,8 @@ function applyOCRConfig(config: OCRConfigResponse): void {
         refresh_headers: JSON.stringify(credentialConfig['refresh_headers'] || {}, null, 2),
         refresh_body: JSON.stringify(credentialConfig['refresh_body'] || {}, null, 2),
         refresh_params: JSON.stringify(credentialConfig['refresh_params'] || {}, null, 2),
+        api_key: '',
+        advancedMode: false,
     };
 }
 
@@ -141,7 +188,23 @@ function buildOcrCredentialConfig(): Record<string, unknown> {
     const credentialConfig: Record<string, unknown> = {
         credential_mode: ocrConfigForm.value.credential_mode,
     };
+    if (ocrConfigForm.value.credential_mode === 'api_key') {
+        const apiKey = ocrConfigForm.value.api_key.trim();
+        if (apiKey) {
+            credentialConfig['credential_json'] = { api_key: apiKey };
+            return credentialConfig;
+        }
+        if (containsRedactedSecret(ocrConfig.value.credential_config)) {
+            credentialConfig['preserve_existing'] = true;
+        }
+        return credentialConfig;
+    }
     const credentialJson = parseOptionalJsonObject(ocrConfigForm.value.credential_json, 'Credential JSON');
+    if (containsRedactedSecret(credentialJson)
+        || (Object.keys(credentialJson).length === 0 && containsRedactedSecret(ocrConfig.value.credential_config))) {
+        credentialConfig['preserve_existing'] = true;
+        return credentialConfig;
+    }
     if (Object.keys(credentialJson).length > 0) {
         credentialConfig['credential_json'] = credentialJson;
     }
@@ -159,6 +222,19 @@ function buildOcrCredentialConfig(): Record<string, unknown> {
         }
     }
     return credentialConfig;
+}
+
+function containsRedactedSecret(value: unknown): boolean {
+    if (value === '********') {
+        return true;
+    }
+    if (Array.isArray(value)) {
+        return value.some(containsRedactedSecret);
+    }
+    if (value && typeof value === 'object') {
+        return Object.values(value).some(containsRedactedSecret);
+    }
+    return false;
 }
 
 /**
@@ -262,6 +338,10 @@ useExternalTemplateBindings(
     ocrConfigLoading,
     credentialModeOptions,
     ocrProviderOptions,
+    ocrSetupOptions,
+    selectedOCRSetupOption,
+    usesRemoteVision,
+    supportsLanguage,
     saveOCRConfig,
 );
 

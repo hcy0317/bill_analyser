@@ -108,6 +108,7 @@ export const useTransactionsStore = defineStore('transactions', () => {
         type: 0,
         categoryIds: '',
         accountIds: '',
+        flowDirection: '',
         tagIds: '',
         tagFilterType: TransactionTagFilterType.Default.type,
         amountFilterCents: '',
@@ -582,6 +583,7 @@ export const useTransactionsStore = defineStore('transactions', () => {
         transactionsFilter.value.type = 0;
         transactionsFilter.value.categoryIds = '';
         transactionsFilter.value.accountIds = '';
+        transactionsFilter.value.flowDirection = '';
         transactionsFilter.value.tagIds = '';
         transactionsFilter.value.tagFilterType = TransactionTagFilterType.Default.type;
         transactionsFilter.value.amountFilterCents = '';
@@ -637,6 +639,12 @@ export const useTransactionsStore = defineStore('transactions', () => {
             transactionsFilter.value.accountIds = '';
         }
 
+        if (filter && isString(filter.flowDirection) && matchesTransactionFlowDirection(filter.flowDirection)) {
+            transactionsFilter.value.flowDirection = filter.flowDirection;
+        } else {
+            transactionsFilter.value.flowDirection = '';
+        }
+
         if (filter && isString(filter.tagIds)) {
             transactionsFilter.value.tagIds = filter.tagIds;
         } else {
@@ -680,9 +688,15 @@ export const useTransactionsStore = defineStore('transactions', () => {
             changed = true;
         }
 
-        if (filter && isNumber(filter.type) && transactionsFilter.value.type !== filter.type) {
-            transactionsFilter.value.type = filter.type;
-            changed = true;
+        if (filter && isNumber(filter.type)) {
+            if (transactionsFilter.value.type !== filter.type) {
+                transactionsFilter.value.type = filter.type;
+                changed = true;
+            }
+            if (!isString(filter.flowDirection) && transactionsFilter.value.flowDirection) {
+                transactionsFilter.value.flowDirection = '';
+                changed = true;
+            }
         }
 
         if (filter && isString(filter.categoryIds) && transactionsFilter.value.categoryIds !== filter.categoryIds) {
@@ -698,6 +712,14 @@ export const useTransactionsStore = defineStore('transactions', () => {
 
             transactionsFilter.value.accountIds = filter.accountIds;
             changed = true;
+        }
+
+        if (filter && isString(filter.flowDirection)) {
+            const nextFlowDirection = matchesTransactionFlowDirection(filter.flowDirection) ? filter.flowDirection : '';
+            if (transactionsFilter.value.flowDirection !== nextFlowDirection) {
+                transactionsFilter.value.flowDirection = nextFlowDirection;
+                changed = true;
+            }
         }
 
         if (filter && isString(filter.tagIds) && transactionsFilter.value.tagIds !== filter.tagIds) {
@@ -740,6 +762,10 @@ export const useTransactionsStore = defineStore('transactions', () => {
             querys.push('accountIds=' + transactionsFilter.value.accountIds);
         }
 
+        if (transactionsFilter.value.flowDirection) {
+            querys.push('flowDirection=' + transactionsFilter.value.flowDirection);
+        }
+
         if (transactionsFilter.value.categoryIds) {
             querys.push('categoryIds=' + transactionsFilter.value.categoryIds);
         }
@@ -771,7 +797,7 @@ export const useTransactionsStore = defineStore('transactions', () => {
     }
 
     function getExportTransactionDataRequestByTransactionFilter(): ExportTransactionDataRequest {
-        return {
+        const request: ExportTransactionDataRequest = {
             maxTime: transactionsFilter.value.maxTime,
             minTime: transactionsFilter.value.minTime,
             type: transactionsFilter.value.type,
@@ -782,6 +808,13 @@ export const useTransactionsStore = defineStore('transactions', () => {
             amountFilterCents: transactionsFilter.value.amountFilterCents,
             keyword: transactionsFilter.value.keyword
         };
+        return transactionsFilter.value.flowDirection
+            ? { ...request, flowDirection: transactionsFilter.value.flowDirection }
+            : request;
+    }
+
+    function matchesTransactionFlowDirection(value: string): boolean {
+        return value === 'inflow' || value === 'outflow';
     }
 
     function loadTransactions(options: LoadTransactionsOptions): Promise<TransactionPageWrapper> {

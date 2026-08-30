@@ -662,7 +662,14 @@ describe('mobile transaction ListPage production behavior', () => {
         bindings.changeTypeFilter(transactionTypes.Income);
         await flush();
         expect(transactionsStore.updateTransactionListFilter).toHaveBeenCalledWith({ type: transactionTypes.Income, categoryIds: 'income' });
+        bindings.query.value.type = transactionTypes.Expense;
+        bindings.query.value.flowDirection = 'inflow';
         bindings.changeTypeFilter(transactionTypes.Income);
+        expect(transactionsStore.updateTransactionListFilter).toHaveBeenLastCalledWith({
+            type: transactionTypes.Income,
+            categoryIds: 'income',
+            flowDirection: ''
+        });
 
         bindings.changeCategoryFilter('food');
         bindings.changeCategoryFilter('food');

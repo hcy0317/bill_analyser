@@ -4,6 +4,7 @@ export interface ExportTransactionDataRequest {
     readonly type: number;
     readonly categoryIds: string;
     readonly accountIds: string;
+    readonly flowDirection?: string;
     readonly tagIds: string;
     readonly tagFilterType: number;
     readonly amountFilterCents: string;

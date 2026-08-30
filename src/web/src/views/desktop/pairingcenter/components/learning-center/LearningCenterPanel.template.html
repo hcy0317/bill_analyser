@@ -632,6 +632,10 @@
                     <input class="llm-config-autofill-decoy" type="password" name="password"
                            autocomplete="current-password" tabindex="-1" aria-hidden="true" />
 
+                    <v-alert type="info" variant="tonal" density="comfortable" class="mb-4">
+                        {{ tt('Choose a provider, paste its credential, and save. Recommended model, endpoint, and prompt defaults are filled automatically.') }}
+                    </v-alert>
+
                     <v-row>
                         <v-col cols="12">
                             <v-text-field v-model="newConfigForm.name" :label="tt('Name')"
@@ -644,7 +648,8 @@
                             <v-select v-model="newConfigForm.provider" :label="tt('Provider')"
                                       :items="llmProviderOptions" item-title="title" item-value="value"
                                       :name="llmConfigFieldNames.provider" autocomplete="off"
-                                      density="comfortable" variant="outlined" hide-details />
+                                      density="comfortable" variant="outlined" hide-details
+                                      @update:model-value="selectLLMProvider" />
                         </v-col>
                         <v-col cols="12" md="6">
                             <v-text-field v-model="newConfigForm.model" :label="tt('Model')"
@@ -705,6 +710,15 @@
                               color="primary" density="compact" hide-details class="my-2" />
                     <v-expand-transition>
                         <v-row v-if="newConfigForm.advancedMode">
+                            <v-col cols="12" class="d-flex align-center ga-2">
+                                <span class="text-body-2 text-medium-emphasis">
+                                    {{ tt('The recommended prompts preserve Bill Analyser JSON, category ID, account ID, and rule-expression contracts.') }}
+                                </span>
+                                <v-spacer />
+                                <v-btn variant="text" color="primary" @click="restoreRecommendedPrompts">
+                                    {{ tt('Restore recommended prompts') }}
+                                </v-btn>
+                            </v-col>
                             <v-col cols="12">
                                 <v-select v-model="newConfigForm.reasoning_depth"
                                           :label="tt('Reasoning Depth')" :items="llmReasoningDepthOptions"

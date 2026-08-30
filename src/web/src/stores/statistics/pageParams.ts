@@ -125,6 +125,12 @@ export function buildTransactionListPageParams({
         querys.push('type=3');
     }
 
+    if (filter.chartDataType === ChartDataType.InflowsByAccount.type) {
+        querys.push('flowDirection=inflow');
+    } else if (filter.chartDataType === ChartDataType.OutflowsByAccount.type) {
+        querys.push('flowDirection=outflow');
+    }
+
     if (itemId && filter.chartDataType === ChartDataType.Overview.type) {
         const items = itemId.split('-');
         const sourceItems = (items[0] || '').split(':');

@@ -139,6 +139,36 @@ describe('User model helpers', () => {
         });
     });
 
+    test('builds a minimal profile patch so unrelated stale references cannot block settings saves', () => {
+        const baseline = User.of({
+            ...SAMPLE_USER,
+            defaultAccountId: '101',
+            cashAccountId: '202',
+            cashTransferCategoryId: '303',
+        });
+        const changed = User.of({
+            ...SAMPLE_USER,
+            defaultAccountId: '101',
+            cashAccountId: '202',
+            cashTransferCategoryId: '303',
+        });
+        changed.defaultAccountId = '404';
+
+        expect(changed.toProfileUpdateRequest(undefined, baseline)).toStrictEqual({
+            defaultAccountId: '404',
+        });
+
+        changed.defaultAccountId = baseline.defaultAccountId;
+        changed.password = 'new-secret';
+        changed.investmentProductKeywords = ['指数基金', '债券基金'];
+        expect(changed.toProfileUpdateRequest('old-secret', baseline)).toStrictEqual({
+            investmentProductKeywords: ['指数基金', '债券基金'],
+            password: 'new-secret',
+            oldPassword: 'old-secret',
+        });
+        expect(changed.toProfileUpdateRequest(undefined, baseline)).not.toHaveProperty('oldPassword');
+    });
+
     test('User.createNewUser seeds the requested locale defaults', () => {
         const user = User.createNewUser('ja-JP', 'JPY', 1);
 
