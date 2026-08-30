@@ -48,7 +48,10 @@ input[type=number] {
 /** Custom class **/
 :root {
     --default-icon-color: rgb(var(--v-theme-on-surface));
-    --ebk-primary-color: 198, 126, 72;
+    --ebk-primary-color: var(--v-theme-primary);
+    --ebk-transaction-tag-chip-bg-color: rgba(var(--v-theme-primary), 0.12);
+    --ebk-transaction-tag-chip-text-color: rgb(var(--v-theme-on-surface));
+    --ebk-transaction-tag-chip-border-color: rgba(var(--v-theme-primary), 0.32);
     --v-expand-panel-title-bg: rgba(var(--v-theme-on-surface), var(--v-hover-opacity));
     --v-card-title-bg: rgba(var(--v-theme-on-surface), var(--v-hover-opacity));
 }
@@ -419,11 +422,41 @@ body .v-btn-group {
 
 /** Replacing the default style of @vuepic/vue-datepicker **/
 .dp__theme_light {
-    --dp-primary-color: #c67e48;
+    --dp-primary-color: rgb(var(--v-theme-primary));
+}
+
+.transaction-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    min-width: 0;
+    max-width: 100%;
+}
+
+.v-chip.transaction-tag {
+    min-width: 0;
+    max-inline-size: min(100%, 18rem);
+    border: 1px solid var(--ebk-transaction-tag-chip-border-color);
+}
+
+.v-chip.transaction-tag:not(.text-error):not(.bg-error) {
+    color: var(--ebk-transaction-tag-chip-text-color);
+    background-color: var(--ebk-transaction-tag-chip-bg-color);
+}
+
+.v-chip.transaction-tag > .v-chip__content,
+.transaction-tag-option-label,
+.transaction-tag-name {
+    display: block;
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .dp__theme_dark {
-    --dp-primary-color: #c67e48;
+    --dp-primary-color: rgb(var(--v-theme-primary));
 }
 
 /** Fix @vuepic/vue-datepicker style issue **/

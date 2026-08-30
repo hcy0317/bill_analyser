@@ -13,7 +13,19 @@ const mockEchartsInit = jest.fn((container: unknown) => {
     return instance;
 });
 let mockThemeName = 'light';
+let mockMobileDark = false;
 let mockPieItems: any[] = [];
+
+const lightChartPalette = {
+    primaryRgb: '25, 118, 210', onPrimary: '#fff', surface: '#fff', text: '#333', muted: '#666',
+    grid: '#e1e6f2', border: '#ddd', tooltipBackground: '#fff', tooltipText: '#333',
+    tooltipBorder: '#fff', inactive: '#aaa'
+};
+const darkChartPalette = {
+    primaryRgb: '144, 202, 249', onPrimary: '#111', surface: '#222', text: '#eee', muted: '#888',
+    grid: '#4f4f4f', border: '#555', tooltipBackground: '#333', tooltipText: '#eee',
+    tooltipBorder: '#333', inactive: '#555'
+};
 
 jest.mock('echarts', () => ({ init: (container: unknown) => mockEchartsInit(container) }));
 jest.mock('vuetify', () => ({ useTheme: () => ({ global: { name: { get value() { return mockThemeName; } } } }) }));
@@ -25,6 +37,21 @@ jest.mock('@/locales/helpers.ts', () => ({
     })
 }));
 jest.mock('@/core/theme.ts', () => ({ isDarkApplicationTheme: (name: string) => name === 'dark' }));
+jest.mock('@/stores/environment.ts', () => ({
+    useEnvironmentsStore: () => ({ get framework7DarkMode() { return mockMobileDark; } })
+}));
+jest.mock('@/lib/settings.ts', () => ({ getTheme: () => 'auto' }));
+jest.mock('@/lib/chartTheme.ts', () => ({
+    getChartThemePalette: () => mockThemeName === 'dark' ? darkChartPalette : lightChartPalette,
+    resolveMobileChartThemePalette: (_theme: string, darkMode: boolean) => darkMode ? darkChartPalette : lightChartPalette,
+    truncateChartLabel: (value: string, maxLength: number) => value.length > maxLength ? value.slice(0, maxLength) + '…' : value,
+    createScrollableLegendTheme: (palette: typeof lightChartPalette, options: { mobile?: boolean; fontSize?: number } = {}) => ({
+        type: 'scroll', left: 4, right: 4, tooltip: { show: true },
+        textStyle: { color: palette.text, fontSize: options.fontSize ?? (options.mobile ? 11 : 12) },
+        pageIconColor: palette.muted, pageIconInactiveColor: palette.inactive,
+        pageTextStyle: { color: palette.text }
+    })
+}));
 jest.mock('@/consts/color.ts', () => ({ DEFAULT_CHART_COLORS: ['fallback-red', 'fallback-blue'] }));
 jest.mock('@/lib/common.ts', () => ({
     isNumber: (value: unknown) => typeof value === 'number' && Number.isFinite(value)
@@ -67,6 +94,7 @@ beforeEach(() => {
     jest.clearAllMocks();
     mockChartInstances.length = 0;
     mockThemeName = 'light';
+    mockMobileDark = false;
     mockPieItems = [];
     Object.defineProperty(globalThis, 'document', {
         configurable: true,
@@ -288,13 +316,13 @@ describe('RadarChart values, thresholds, display modes and themes', () => {
     test('renders six empty skeleton axes and dark chart colors', () => {
         mockThemeName = 'dark';
         const mounted = setup(RadarChart, props({ skeleton: true, items: [] }));
-        expect(mounted.bindings.isDarkMode.value).toBe(true);
+        expect(mounted.bindings.chartTheme.value.tooltipBackground).toBe('#333');
         expect(mounted.bindings.radarData.value.indicators).toHaveLength(6);
         expect(mounted.bindings.radarData.value.values).toEqual([0, 0, 0, 0, 0, 0]);
         const option = mounted.bindings.chartOptions.value as any;
         expect(option.tooltip.backgroundColor).toBe('#333');
         expect(option.radar.splitNumber).toBe(1);
-        expect(option.radar.splitArea.areaStyle.color).toEqual(['#d3d3d3', '#d3d3d3']);
+        expect(option.radar.splitArea.areaStyle.color).toEqual(['#555', '#555']);
         expect(option.series).toEqual([]);
     });
 });
@@ -370,7 +398,7 @@ describe('mobile EChartsPieChart tooltip, labels and click boundary', () => {
             { value: 1, actualPercent: 0.01, color: 'gray', displayName: 'Tiny', displayValue: '', displayPercent: '', sourceItem: { id: 'tiny' } }
         ];
         const mounted = setup(EChartsPieChart, props());
-        expect(mounted.bindings.isDarkMode.value).toBe(false);
+        expect(mounted.bindings.chartTheme.value.tooltipBackground).toBe('#fff');
         expect(mounted.bindings.seriesData.value[0]).toEqual(expect.objectContaining({
             itemStyle: { color: 'red' }, selected: true
         }));
@@ -378,6 +406,8 @@ describe('mobile EChartsPieChart tooltip, labels and click boundary', () => {
         expect(option.tooltip.backgroundColor).toBe('#fff');
         expect(option.tooltip.formatter({ data: mounted.bindings.seriesData.value[0], value: 60, percent: 60 })).toBe('Food\nUSD:60 (60%)');
         expect(option.tooltip.formatter({ data: mounted.bindings.seriesData.value[1], value: 1, percent: 1 })).toBe('Tiny\nCNY:1 (1%)');
+        expect(option.legend.formatter('Food')).toBe('Food');
+        expect(option.legend.tooltip.formatter({ name: 'Food' })).toBe('Food');
         expect(option.series[0].label.formatter({ data: mounted.bindings.seriesData.value[0] })).toBe('Food');
         expect(option.series[0].label.formatter({ data: mounted.bindings.seriesData.value[1] })).toBe('');
         expect(option.series[0].label.formatter({ data: null })).toBe('');
@@ -394,7 +424,8 @@ describe('mobile EChartsPieChart tooltip, labels and click boundary', () => {
         expect(formatter({ data: null, value: 9, percent: 9 })).toBe(expected);
     });
 
-    test('uses dark document theme and emits only valid pie-series source items', () => {
+    test('uses active mobile dark theme and emits only valid pie-series source items', () => {
+        mockMobileDark = true;
         Object.defineProperty(globalThis, 'document', {
             configurable: true,
             value: {
@@ -404,7 +435,7 @@ describe('mobile EChartsPieChart tooltip, labels and click boundary', () => {
         });
         mockPieItems = [{ value: 10, actualPercent: 1, color: 'red', displayName: 'One', sourceItem: { id: 'one' } }];
         const mounted = setup(EChartsPieChart, props({ skeleton: true }));
-        expect(mounted.bindings.isDarkMode.value).toBe(true);
+        expect(mounted.bindings.chartTheme.value.tooltipBackground).toBe('#333');
         expect(mounted.bindings.chartOptions.value.tooltip.backgroundColor).toBe('#333');
         expect(mounted.bindings.chartOptions.value.series[0].animation).toBe(false);
 

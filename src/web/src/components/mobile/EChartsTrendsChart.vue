@@ -18,6 +18,7 @@ import {
     useTrendsChartBase
 } from '@/components/base/TrendsChartBase.ts';
 
+import { useEnvironmentsStore } from '@/stores/environment.ts';
 import { useUserStore } from '@/stores/user.ts';
 
 import { itemAndIndex } from '@/core/base.ts';
@@ -49,6 +50,12 @@ import {
 import {
     getDisplayColor
 } from '@/lib/color.ts';
+import { getTheme } from '@/lib/settings.ts';
+import {
+    createScrollableLegendTheme,
+    resolveMobileChartThemePalette,
+    truncateChartLabel
+} from '@/lib/chartTheme.ts';
 
 interface MobileEChartsTrendsChartProps<T extends TrendsChartDateType> extends CommonTrendsChartProps<T> {
     skeleton?: boolean;
@@ -86,16 +93,15 @@ const {
 
 const { allDateRanges, getItemName } = useTrendsChartBase(props);
 
+const environmentsStore = useEnvironmentsStore();
 const userStore = useUserStore();
 
 const selectedLegends = ref<Record<string, boolean>>({});
 
-const isDarkMode = computed<boolean>(() => {
-    if (typeof document !== 'undefined') {
-        return document.documentElement.classList.contains('theme-dark') || document.body.classList.contains('theme-dark');
-    }
-    return false;
-});
+const chartTheme = computed(() => resolveMobileChartThemePalette(
+    getTheme(),
+    environmentsStore.framework7DarkMode || false
+));
 
 const itemsMap = computed<Record<string, Record<string, unknown>>>(() => {
     const map: Record<string, Record<string, unknown>> = {};
@@ -116,6 +122,14 @@ const itemsMap = computed<Record<string, Record<string, unknown>>>(() => {
 
     return map;
 });
+
+function getLegendDisplayName(id: string): string {
+    const item = itemsMap.value[id];
+    if (item && props.nameField && item[props.nameField]) {
+        return getItemName(item[props.nameField] as string);
+    }
+    return id;
+}
 
 const allDisplayDateRanges = computed<string[]>(() => {
     const result: string[] = [];
@@ -301,10 +315,10 @@ const chartOptions = computed<object>(() => {
             trigger: 'axis',
             confine: true,
             renderMode: 'richText',
-            backgroundColor: isDarkMode.value ? '#333' : '#fff',
-            borderColor: isDarkMode.value ? '#333' : '#fff',
+            backgroundColor: chartTheme.value.tooltipBackground,
+            borderColor: chartTheme.value.tooltipBorder,
             textStyle: {
-                color: isDarkMode.value ? '#eee' : '#333',
+                color: chartTheme.value.tooltipText,
                 fontSize: 11
             },
             formatter: (params: CallbackDataParams | CallbackDataParams[]) => {
@@ -328,7 +342,7 @@ const chartOptions = computed<object>(() => {
 
                     if (amount !== 0) {
                         const value = formatAmountToLocalizedNumeralsWithCurrency(amount, props.defaultCurrency);
-                        tooltipLines.push(`${String(param.seriesName || '')}  ${value}`);
+                        tooltipLines.push(`${getLegendDisplayName(String(param.seriesName || ''))}  ${value}`);
                     }
                 }
 
@@ -337,18 +351,14 @@ const chartOptions = computed<object>(() => {
         },
         legend: {
             orient: 'horizontal',
-            type: 'scroll',
+            ...createScrollableLegendTheme(chartTheme.value, { mobile: true, fontSize: 10 }),
             top: 0,
             data: allSeries.value.map(item => item.name),
             selected: selectedLegends.value,
-            textStyle: {
-                color: isDarkMode.value ? '#eee' : '#333',
-                fontSize: 10
-            },
-            pageIconColor: isDarkMode.value ? '#888' : '#666',
-            pageTextStyle: {
-                color: isDarkMode.value ? '#eee' : '#333',
-                fontSize: 10
+            formatter: (id: string) => truncateChartLabel(getLegendDisplayName(id), 18),
+            tooltip: {
+                show: true,
+                formatter: (params: { name?: string }) => getLegendDisplayName(params.name || '')
             }
         },
         grid: {
@@ -363,7 +373,7 @@ const chartOptions = computed<object>(() => {
                 type: 'category',
                 data: allDisplayDateRanges.value,
                 axisLabel: {
-                    color: isDarkMode.value ? '#888' : '#666',
+                    color: chartTheme.value.muted,
                     fontSize: 9,
                     interval: 'auto',
                     rotate: allDisplayDateRanges.value.length > 8 ? 30 : 0
@@ -374,7 +384,7 @@ const chartOptions = computed<object>(() => {
             {
                 type: 'value',
                 axisLabel: {
-                    color: isDarkMode.value ? '#888' : '#666',
+                    color: chartTheme.value.muted,
                     fontSize: 9,
                     formatter: (value: number) => {
                         if (Math.abs(value) >= 10000) {
@@ -388,7 +398,7 @@ const chartOptions = computed<object>(() => {
                 },
                 splitLine: {
                     lineStyle: {
-                        color: isDarkMode.value ? '#4f4f4f' : '#e1e6f2',
+                        color: chartTheme.value.grid,
                     }
                 }
             }

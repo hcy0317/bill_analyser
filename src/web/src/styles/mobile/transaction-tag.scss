@@ -1,0 +1,33 @@
+.transaction-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    min-width: 0;
+    max-width: 100%;
+}
+
+.chip.transaction-tag,
+.chip.transaction-edit-tag {
+    --f7-chip-text-color: var(--ebk-transaction-tag-chip-text-color);
+    --f7-chip-bg-color: var(--ebk-transaction-tag-chip-bg-color);
+    min-width: 0;
+    max-width: 100%;
+    flex-shrink: 1;
+    box-sizing: border-box;
+    overflow: hidden;
+    color: var(--ebk-transaction-tag-chip-text-color);
+    border-width: 1px;
+    border-style: solid;
+    border-color: var(--ebk-transaction-tag-chip-border-color);
+}
+
+.chip.transaction-tag .chip-label,
+.chip.transaction-edit-tag .chip-label,
+.transaction-tag-option-label {
+    display: block;
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}

@@ -32,8 +32,23 @@ const mockUserStore = reactive({
     currentUserIncomeAmountColor: 'green',
 });
 let mockTextDirection = 'ltr';
+let mockThemeName = 'light';
+
+const lightChartPalette = {
+    primaryRgb: '25, 118, 210', onPrimary: '#fff', surface: '#fff', text: '#333', muted: '#666',
+    grid: '#e1e6f2', border: '#ddd', tooltipBackground: '#fff', tooltipText: '#333',
+    tooltipBorder: '#fff', inactive: '#aaa'
+};
+const darkChartPalette = {
+    primaryRgb: '144, 202, 249', onPrimary: '#111', surface: '#222', text: '#eee', muted: '#888',
+    grid: '#4f4f4f', border: '#555', tooltipBackground: '#333', tooltipText: '#eee',
+    tooltipBorder: '#333', inactive: '#555'
+};
 
 jest.mock('vue', () => ({ ...actualVue }));
+jest.mock('vuetify', () => ({
+    useTheme: () => ({ global: { name: { get value() { return mockThemeName; } } } })
+}));
 jest.mock('@/locales/helpers.ts', () => ({
     useI18n: () => ({
         tt: (key: string, params?: Record<string, unknown>) => params ? `${key}:${JSON.stringify(params)}` : `tt:${key}`,
@@ -80,6 +95,16 @@ jest.mock('@/consts/numeral.ts', () => ({
 jest.mock('@/lib/ui/common.ts', () => ({
     getExpenseAndIncomeAmountColor: (expense: string, income: string, dark?: boolean) => mockGetColors(expense, income, dark),
 }));
+jest.mock('@/lib/chartTheme.ts', () => ({
+    getChartThemePalette: () => mockThemeName === 'dark' ? darkChartPalette : lightChartPalette,
+    truncateChartLabel: (value: string, maxLength: number) => value.length > maxLength ? value.slice(0, maxLength) + '…' : value,
+    createScrollableLegendTheme: (palette: typeof lightChartPalette) => ({
+        type: 'scroll', left: 4, right: 4, tooltip: { show: true },
+        textStyle: { color: palette.text, fontSize: 12 },
+        pageIconColor: palette.muted, pageIconInactiveColor: palette.inactive,
+        pageTextStyle: { color: palette.text }
+    })
+}));
 
 const AmountFilterPage = require('@/views/mobile/transactions/AmountFilterPage.vue').default as any;
 const MonthlyIncomeAndExpenseCard = require('@/views/desktop/overview/cards/MonthlyIncomeAndExpenseCard.vue').default as any;
@@ -125,6 +150,7 @@ beforeEach(() => {
     mockUpdateTransactionFilter.mockReturnValue(true);
     mockSettingsStore.appSettings.showAmountInHomePage = true;
     mockTextDirection = 'ltr';
+    mockThemeName = 'light';
 });
 
 describe('AmountFilterPage production behavior', () => {
@@ -254,6 +280,8 @@ describe('MonthlyIncomeAndExpenseCard production behavior', () => {
         expect(options.yAxis[0].max).toBe(12_000);
         expect(options.series[0].data).toEqual([10_000, -2_000]);
         expect(options.series[1].data).toEqual([-4_000, 12_000]);
+        expect(options.legend.formatter('tt:Income')).toBe('tt:Income');
+        expect(options.legend.tooltip.formatter({ name: 'tt:Income' })).toBe('tt:Income');
         expect(options.series[0].itemStyle.color).toBe('#00aa00');
         expect(options.series[1].itemStyle.color).toBe('#cc0000');
         expect(mockGetColors).toHaveBeenCalledWith('red', 'green', false);
@@ -262,6 +290,7 @@ describe('MonthlyIncomeAndExpenseCard production behavior', () => {
 
     test('builds dark RTL tooltip and formats visible, hidden, and incomplete amounts', () => {
         mockTextDirection = 'rtl';
+        mockThemeName = 'dark';
         const data = [monthlyData({
             monthStartTime: 3,
             incomeAmountCents: 500,

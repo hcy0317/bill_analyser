@@ -464,7 +464,10 @@
                                     >
                                         <template #chip="{ props, item }">
                                             <v-chip
+                                                class="transaction-tag"
                                                 :prepend-icon="mdiPound"
+                                                :title="item.title || transaction.tags?.find(t => String(t.id) === String(item.value))?.name || allTagsMap[item.value]?.name || `#${item.value}`"
+                                                :aria-label="item.title || transaction.tags?.find(t => String(t.id) === String(item.value))?.name || allTagsMap[item.value]?.name || `#${item.value}`"
                                                 :text="(() => {
                                                     const name = item.title || transaction.tags?.find(t => String(t.id) === String(item.value))?.name || allTagsMap[item.value]?.name || `#${item.value}`;
                                                     logger.debug(`[chip渲染] item.value=${item.value}, item.title=${item.title}, 最终name=${name}`);

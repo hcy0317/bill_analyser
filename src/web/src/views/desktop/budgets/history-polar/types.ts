@@ -1,3 +1,5 @@
+import type { ApplicationThemeSemanticColors } from '@/core/theme.ts';
+
 export interface HistoricalCategoryChartPoint {
     category: string;
     primaryCategory: string;
@@ -76,6 +78,7 @@ export interface HistoricalPolarChartModel {
 
 export interface HistoricalPolarChartOptionArgs {
     isDarkMode: boolean;
+    themePalette?: Pick<ApplicationThemeSemanticColors, 'surface' | 'chartText' | 'chartMutedText' | 'chartGrid' | 'tooltipBackground' | 'tooltipText' | 'tooltipBorder'>;
     accentColor: string;
     budgetAmountLabel: string;
     spentAmountLabel: string;

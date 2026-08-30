@@ -168,7 +168,9 @@
                                                         v-model="newRule.targetId"
                                                         v-if="newRule.dataType == 'tag'">
                                             <template #chip="{ props, item }">
-                                                <v-chip :prepend-icon="mdiPound" :text="item.title" v-bind="props" v-if="newRule.targetId"/>
+                                                <v-chip class="transaction-tag" :prepend-icon="mdiPound" :text="item.title"
+                                                        :title="item.title" :aria-label="item.title"
+                                                        v-bind="props" v-if="newRule.targetId"/>
                                             </template>
 
                                             <template #item="{ props, item }">

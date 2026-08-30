@@ -98,6 +98,8 @@
                                         <div class="transaction-tags" v-if="showTags && transaction.tagIds && transaction.tagIds.length">
                                             <f7-chip media-text-color="var(--f7-chip-text-color)" class="transaction-tag"
                                                      :text="allTransactionTags[tagId]?.name"
+                                                     :title="allTransactionTags[tagId]?.name || ''"
+                                                     :aria-label="allTransactionTags[tagId]?.name || ''"
                                                      :key="tagId"
                                                      v-for="tagId in transaction.tagIds">
                                                 <template #media>

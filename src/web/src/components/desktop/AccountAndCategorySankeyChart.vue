@@ -25,6 +25,7 @@ import { isDarkApplicationTheme } from '@/core/theme.ts';
 
 import { isNumber } from '@/lib/common.ts';
 import { getExpenseAndIncomeAmountColor } from '@/lib/ui/common.ts';
+import { getChartThemePalette, truncateChartLabel } from '@/lib/chartTheme.ts';
 
 enum SankeyChartDepth {
     PrimaryIncomeCategory = 0,
@@ -116,6 +117,7 @@ const overviewDataItemTypeSankeyChartNodeItemDepthMap: Record<TransactionCategor
 };
 
 const isDarkMode = computed<boolean>(() => isDarkApplicationTheme(theme.global.name.value));
+const chartTheme = computed(() => getChartThemePalette(theme.global.name.value));
 
 const sankeyData = computed<SankeyChartData>(() => {
     const nodes: SankeyChartNodeItem[] = [];
@@ -150,7 +152,7 @@ const sankeyData = computed<SankeyChartData>(() => {
 
         if (!isNumber(nodeItem.percent) && nodeItem.dateItemType === TransactionCategoricalOverviewAnalysisDataItemType.IncomeByAccount) {
             nodeItem.itemStyle = {
-                color: '#aaa',
+                color: chartTheme.value.inactive,
                 opacity: 0.5
             };
         }
@@ -230,10 +232,10 @@ const chartOptions = computed<object>(() => {
     return {
         tooltip: {
             trigger: 'item',
-            backgroundColor: isDarkMode.value ? '#333' : '#fff',
-            borderColor: isDarkMode.value ? '#333' : '#fff',
+            backgroundColor: chartTheme.value.tooltipBackground,
+            borderColor: chartTheme.value.tooltipBorder,
             textStyle: {
-                color: isDarkMode.value ? '#eee' : '#333'
+                color: chartTheme.value.tooltipText
             },
             formatter: (params: CallbackDataParams) => {
                 if (params.dataType === 'node') {
@@ -300,8 +302,12 @@ const chartOptions = computed<object>(() => {
                 label: {
                     formatter: (params: CallbackDataParams) => {
                         const dataItem = params.data as SankeyChartNodeItem;
-                        return dataItem.displayName;
+                        return truncateChartLabel(dataItem.displayName, 18);
                     },
+                    color: chartTheme.value.text,
+                    width: 144,
+                    overflow: 'truncate',
+                    ellipsis: '…',
                     textBorderWidth: 0
                 },
                 levels: [
@@ -330,7 +336,7 @@ const chartOptions = computed<object>(() => {
                     {
                         depth: SankeyChartDepth.AccountForIncome,
                         itemStyle: {
-                            color: '#c07d43',
+                            color: `rgb(${chartTheme.value.primaryRgb})`,
                             opacity: 0.5
                         },
                         lineStyle: {
@@ -341,7 +347,7 @@ const chartOptions = computed<object>(() => {
                     {
                         depth: SankeyChartDepth.AccountForExpense,
                         itemStyle: {
-                            color: '#c07d43',
+                            color: `rgb(${chartTheme.value.primaryRgb})`,
                             opacity: 0.5
                         },
                         lineStyle: {

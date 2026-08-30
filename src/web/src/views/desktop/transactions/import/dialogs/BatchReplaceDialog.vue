@@ -173,7 +173,8 @@
                             v-model="targetItem"
                         >
                             <template #chip="{ props, item }">
-                                <v-chip :prepend-icon="mdiPound" :text="item.title" v-bind="props"/>
+                                <v-chip class="transaction-tag" :prepend-icon="mdiPound" :text="item.title"
+                                        :title="item.title" :aria-label="item.title" v-bind="props"/>
                             </template>
 
                             <template #item="{ props, item }">

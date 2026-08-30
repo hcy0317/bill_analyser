@@ -9,6 +9,8 @@
                     'is-partial': group.state === 'partial'
                 }"
                 :aria-pressed="group.state !== 'none'"
+                :aria-label="group.primaryLabel"
+                :title="group.primaryLabel"
                 @click="$emit('togglePrimary', group.primaryKey)"
             >
                 <span class="budget-history-legend-swatch" :style="{ backgroundColor: group.color }"></span>
@@ -26,6 +28,8 @@
                     class="budget-history-legend-item budget-history-legend-item--secondary"
                     :class="{ 'is-inactive': !item.selected }"
                     :aria-pressed="item.selected"
+                    :aria-label="item.label"
+                    :title="item.label"
                     @click="$emit('toggleSecondary', item.key)"
                 >
                     <span class="budget-history-legend-swatch" :style="{ backgroundColor: item.color }"></span>
@@ -73,6 +77,8 @@ defineEmits<{
     align-items: center;
     flex-wrap: wrap;
     gap: 3px;
+    min-width: 0;
+    max-width: 100%;
 }
 
 .budget-history-legend-item {
@@ -88,6 +94,8 @@ defineEmits<{
     font-size: 0.78rem;
     line-height: 1.1;
     transition: all 0.18s ease;
+    min-width: 0;
+    max-width: min(100%, 18rem);
 }
 
 .budget-history-legend-item:hover {
@@ -123,6 +131,11 @@ defineEmits<{
 }
 
 .budget-history-legend-label {
+    min-width: 0;
+    max-width: 14rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     line-height: 1.2;
 }
 

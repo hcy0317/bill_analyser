@@ -57,6 +57,15 @@ export function buildHistoricalPolarChartOption(
     args: HistoricalPolarChartOptionArgs
 ): Record<string, unknown> {
     const formatAmountCents = (amountCents: number): string => args.formatAmount(amountCents / 100);
+    const themePalette = args.themePalette ?? {
+        surface: args.isDarkMode ? '#121212' : '#ffffff',
+        chartText: args.isDarkMode ? '#e6e6e6' : '#3f3f46',
+        chartMutedText: args.isDarkMode ? AMOUNT_AXIS_LABEL_DARK_COLOR : AMOUNT_AXIS_LABEL_LIGHT_COLOR,
+        chartGrid: args.isDarkMode ? AMOUNT_AXIS_SPLIT_LINE_DARK_COLOR : AMOUNT_AXIS_SPLIT_LINE_LIGHT_COLOR,
+        tooltipBackground: args.isDarkMode ? '#333333' : '#ffffff',
+        tooltipText: args.isDarkMode ? '#eeeeee' : '#333333',
+        tooltipBorder: args.isDarkMode ? '#333333' : '#ffffff'
+    };
 
     if (!model.slots.length || !model.primaryBands.length) {
         return {
@@ -99,7 +108,7 @@ export function buildHistoricalPolarChartOption(
             axisTick: { show: false },
             axisLabel: {
                 show: false,
-                color: args.isDarkMode ? AMOUNT_AXIS_LABEL_DARK_COLOR : AMOUNT_AXIS_LABEL_LIGHT_COLOR,
+                color: themePalette.chartMutedText,
                 margin: 10,
                 fontSize: 10,
                 fontWeight: 700,
@@ -113,13 +122,8 @@ export function buildHistoricalPolarChartOption(
         }
     ];
 
-    const amountGridLineColor = args.isDarkMode
-        ? AMOUNT_AXIS_SPLIT_LINE_DARK_COLOR
-        : AMOUNT_AXIS_SPLIT_LINE_LIGHT_COLOR;
-
-    const amountAxisLabelColor = args.isDarkMode
-        ? AMOUNT_AXIS_LABEL_DARK_COLOR
-        : AMOUNT_AXIS_LABEL_LIGHT_COLOR;
+    const amountGridLineColor = themePalette.chartGrid;
+    const amountAxisLabelColor = themePalette.chartMutedText;
     const amountGridLineValues = getHistoricalAmountGridLineValues(model.amountAxisMax);
     const categoryAnimationScope = normalizeHistoricalAnimationScope(args.categoryAnimationScope);
     const amountAxisRenderScope = buildHistoricalAmountAxisRenderScope(
@@ -223,7 +227,7 @@ export function buildHistoricalPolarChartOption(
                         outerRadiusRatio: 1,
                         color: band.color,
                         opacity: primaryRingOpacity,
-                        borderColor: args.isDarkMode ? '#121212' : '#ffffff',
+                        borderColor: themePalette.surface,
                         borderWidth: args.showPrimaryRing ? 1.5 : 0,
                         collapseMode: 'angle'
                     };
@@ -406,7 +410,7 @@ export function buildHistoricalPolarChartOption(
                     radiusRatio: model.amountAxisMax > 0 ? getSecondaryLabelValue(slot, model) / model.amountAxisMax : 0,
                     polarAngleValue: getPolarAngleAxisValue(slot.angle),
                     rotate: getTangentialTextRotation(slot.angle),
-                    color: args.isDarkMode ? '#e6e6e6' : '#3f3f46',
+                    color: themePalette.chartText,
                     fontSize: 10,
                     fontWeight: 600
                 })),
@@ -425,9 +429,9 @@ export function buildHistoricalPolarChartOption(
         animationEasingUpdate: 'cubicInOut',
         tooltip: {
             trigger: 'item',
-            backgroundColor: args.isDarkMode ? '#333' : '#fff',
-            borderColor: args.isDarkMode ? '#333' : '#fff',
-            textStyle: { color: args.isDarkMode ? '#eee' : '#333' },
+            backgroundColor: themePalette.tooltipBackground,
+            borderColor: themePalette.tooltipBorder,
+            textStyle: { color: themePalette.tooltipText },
             formatter: (params: { dataIndex?: number }) => {
                 const dataIndex = Number.isInteger(params.dataIndex) ? params.dataIndex! : -1;
                 const slot = model.slots[dataIndex];
@@ -482,7 +486,7 @@ export function buildHistoricalPolarChartOption(
                         },
                         style: {
                             text: args.executionRateLabel,
-                            fill: args.isDarkMode ? '#bdbdbd' : '#666',
+                            fill: themePalette.chartMutedText,
                             fontSize: 10,
                             fontWeight: 600,
                             textAlign: 'center',

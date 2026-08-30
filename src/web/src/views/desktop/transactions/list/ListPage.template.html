@@ -628,10 +628,14 @@
                                                 <td class="transaction-table-column-tags" v-if="showTagInTransactionListPage">
                                                     <v-chip class="transaction-tag" size="small" :prepend-icon="mdiPound"
                                                             :text="allTransactionTags[tagId]?.name"
+                                                            :title="allTransactionTags[tagId]?.name || ''"
+                                                            :aria-label="allTransactionTags[tagId]?.name || ''"
                                                             :key="tagId"
                                                             v-for="tagId in transaction.tagIds"/>
                                                     <v-chip class="transaction-tag" size="small"
                                                             :text="tt('None')"
+                                                            :title="tt('None')"
+                                                            :aria-label="tt('None')"
                                                             v-if="!transaction.tagIds || !transaction.tagIds.length"/>
                                                 </td>
                                                 <td class="transaction-table-column-description text-truncate">

@@ -14,7 +14,16 @@ import type { CallbackDataParams } from 'echarts/types/dist/shared';
 import { useI18n } from '@/locales/helpers.ts';
 import { type CommonPieChartDataItem, type CommonPieChartProps, usePieChartBase } from '@/components/base/PieChartBase.ts';
 
+import { useEnvironmentsStore } from '@/stores/environment.ts';
+
 import type { ColorStyleValue } from '@/core/color.ts';
+
+import { getTheme } from '@/lib/settings.ts';
+import {
+    createScrollableLegendTheme,
+    resolveMobileChartThemePalette,
+    truncateChartLabel
+} from '@/lib/chartTheme.ts';
 
 interface MobileEChartsPieChartDataItem extends CommonPieChartDataItem {
     itemStyle: {
@@ -31,13 +40,12 @@ const emit = defineEmits<{
 
 const { formatAmountToLocalizedNumeralsWithCurrency } = useI18n();
 const { validItems } = usePieChartBase(props);
+const environmentsStore = useEnvironmentsStore();
 
-const isDarkMode = computed<boolean>(() => {
-    if (typeof document !== 'undefined') {
-        return document.documentElement.classList.contains('theme-dark') || document.body.classList.contains('theme-dark');
-    }
-    return false;
-});
+const chartTheme = computed(() => resolveMobileChartThemePalette(
+    getTheme(),
+    environmentsStore.framework7DarkMode || false
+));
 
 const seriesData = computed<MobileEChartsPieChartDataItem[]>(() => {
     const ret: MobileEChartsPieChartDataItem[] = [];
@@ -61,10 +69,10 @@ const chartOptions = computed<object>(() => {
             trigger: 'item',
             confine: true,
             renderMode: 'richText',
-            backgroundColor: isDarkMode.value ? '#333' : '#fff',
-            borderColor: isDarkMode.value ? '#333' : '#fff',
+            backgroundColor: chartTheme.value.tooltipBackground,
+            borderColor: chartTheme.value.tooltipBorder,
             textStyle: {
-                color: isDarkMode.value ? '#eee' : '#333',
+                color: chartTheme.value.tooltipText,
                 fontSize: 12
             },
             formatter: (params: CallbackDataParams) => {
@@ -92,17 +100,14 @@ const chartOptions = computed<object>(() => {
         },
         legend: {
             orient: 'horizontal',
-            type: 'scroll',
+            ...createScrollableLegendTheme(chartTheme.value, { mobile: true }),
             top: 0,
-            textStyle: {
-                color: isDarkMode.value ? '#eee' : '#333',
-                fontSize: 11
+            data: seriesData.value.map(item => item.displayName),
+            formatter: (name: string) => truncateChartLabel(name, 18),
+            tooltip: {
+                show: true,
+                formatter: (params: { name?: string }) => params.name || ''
             },
-            pageIconColor: isDarkMode.value ? '#888' : '#666',
-            pageTextStyle: {
-                color: isDarkMode.value ? '#eee' : '#333',
-                fontSize: 11
-            }
         },
         series: [
             {
@@ -127,7 +132,7 @@ const chartOptions = computed<object>(() => {
                 },
                 label: {
                     show: true,
-                    color: isDarkMode.value ? '#eee' : '#333',
+                    color: chartTheme.value.text,
                     fontSize: 10,
                     formatter: (params: CallbackDataParams) => {
                         const dataItem = params.data as MobileEChartsPieChartDataItem;
@@ -137,7 +142,7 @@ const chartOptions = computed<object>(() => {
                         if (dataItem.actualPercent < 0.05) {
                             return '';
                         }
-                        return dataItem.displayName;
+                        return truncateChartLabel(dataItem.displayName, 14);
                     }
                 },
                 labelLine: {

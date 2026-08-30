@@ -39,6 +39,11 @@
 
 .transaction-tags-table .transaction-tag-name {
     font-size: 0.875rem;
+    min-width: 0;
+    max-width: min(60vw, 720px);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .transaction-tags-table tr .v-text-field .v-field__input {

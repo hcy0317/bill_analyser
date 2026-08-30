@@ -28,6 +28,7 @@
             <f7-list dividers class="no-margin-top no-margin-bottom tag-selection-list" v-else-if="(allTags && allTags.length && !noAvailableTag) || newTag">
                 <f7-list-item checkbox
                               :class="isChecked(tag.id) ? 'list-item-selected' : ''"
+                              :aria-label="tag.name"
                               :value="tag.id"
                               :checked="isChecked(tag.id)"
                               :key="tag.id"
@@ -37,7 +38,8 @@
                         <f7-block class="no-padding no-margin">
                             <div class="display-flex">
                                 <f7-icon class="transaction-tag-icon" f7="number"></f7-icon>
-                                <div class="tag-selection-list-item list-item-valign-middle padding-inline-start-half">
+                                <div class="tag-selection-list-item list-item-valign-middle padding-inline-start-half"
+                                     :title="tag.name">
                                     {{ tag.name }}
                                 </div>
                             </div>
@@ -265,7 +267,9 @@ function onSheetClosed(): void {
 }
 
 .tag-selection-list-item {
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
+    white-space: nowrap;
 }
 </style>

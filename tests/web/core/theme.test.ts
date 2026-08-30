@@ -187,9 +187,29 @@ describe('application theme registry', () => {
 
     test('vuetify theme adapter emits complete token sets', () => {
         const vuetifyThemes = getVuetifyThemes();
+        const requiredSemanticTokens = [
+            'primaryRgb',
+            'onPrimary',
+            'surface',
+            'onSurface',
+            'mutedText',
+            'border',
+            'chartText',
+            'chartMutedText',
+            'chartGrid',
+            'tooltipBackground',
+            'tooltipText',
+            'tooltipBorder',
+            'tagBackground',
+            'tagText',
+            'tagBorder',
+            'legendInactive',
+            'progressTrack'
+        ] as const;
 
         for (const themeName of APPLICATION_THEME_ORDER) {
             const vuetifyTheme = vuetifyThemes[themeName];
+            const definition = APPLICATION_THEMES[themeName];
 
             for (const token of requiredColorTokens) {
                 expect(vuetifyTheme.colors[token]).toEqual(expect.any(String));
@@ -199,9 +219,23 @@ describe('application theme registry', () => {
                 expect(vuetifyTheme.variables[token]).toBeDefined();
             }
 
-            expect(APPLICATION_THEMES[themeName].mobile.primary).toBe(vuetifyTheme.colors['primary']);
-            expect(APPLICATION_THEMES[themeName].mobile.cssVariables['--f7-theme-color']).toBe(vuetifyTheme.colors['primary']);
+            for (const token of requiredSemanticTokens) {
+                expect(definition.semantic[token]).toEqual(expect.any(String));
+            }
+
+            expect(definition.mobile.primary).toBe(vuetifyTheme.colors['primary']);
+            expect(definition.mobile.cssVariables['--f7-theme-color']).toBe(vuetifyTheme.colors['primary']);
+            expect(definition.mobile.cssVariables['--ebk-primary-color']).toBe(definition.semantic.primaryRgb);
+            expect(definition.mobile.cssVariables['--ebk-chart-text-color']).toBe(definition.semantic.chartText);
+            expect(definition.mobile.cssVariables['--ebk-chart-muted-color']).toBe(definition.semantic.chartMutedText);
+            expect(definition.mobile.cssVariables['--ebk-tooltip-bg-color']).toBe(definition.semantic.tooltipBackground);
+            expect(definition.mobile.cssVariables['--ebk-transaction-tag-chip-bg-color']).toBe(definition.semantic.tagBackground);
+            expect(definition.mobile.cssVariables['--ebk-transaction-tag-chip-text-color']).toBe(definition.semantic.tagText);
+            expect(definition.mobile.cssVariables['--ebk-progress-track-color']).toBe(definition.semantic.progressTrack);
         }
+
+        expect(APPLICATION_THEMES[ThemeType.ForestLight].semantic.primaryRgb).toBe('21, 128, 61');
+        expect(APPLICATION_THEMES[ThemeType.DraculaDark].semantic.tagBackground).toContain('189, 147, 249');
     });
 
     test('light and dark keep existing brand-aligned anchor colors', () => {

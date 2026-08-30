@@ -26,6 +26,7 @@ import { DEFAULT_CHART_COLORS } from '@/consts/color.ts';
 import { isArray } from '@/lib/common.ts';
 import logger from '@/lib/logger.ts';
 import { getExpenseAndIncomeAmountColor } from '@/lib/ui/common.ts';
+import { getChartThemePalette } from '@/lib/chartTheme.ts';
 
 interface DesktopAccountBalanceTrendsChartProps extends CommonAccountBalanceTrendsChartProps {
     legendName: string;
@@ -60,6 +61,7 @@ const userStore = useUserStore();
 
 const textDirection = computed<TextDirection>(() => getCurrentLanguageTextDirection());
 const isDarkMode = computed<boolean>(() => isDarkApplicationTheme(theme.global.name.value));
+const chartTheme = computed(() => getChartThemePalette(theme.global.name.value));
 
 const allSeries = computed<AccountBalanceTrendsChartDataItem[]>(() => {
     logger.debug(`[AccountBalanceTrendsChart] allSeries计算开始 - type=${props.type}, dataItems数量=${allDataItems.value?.length || 0}`);
@@ -175,14 +177,14 @@ const chartOptions = computed<object>(() => {
             axisPointer: {
                 type: 'cross',
                 label: {
-                    backgroundColor: isDarkMode.value ? '#333' : '#fff',
-                    color: isDarkMode.value ? '#eee' : '#333'
+                    backgroundColor: chartTheme.value.tooltipBackground,
+                    color: chartTheme.value.tooltipText
                 },
             },
-            backgroundColor: isDarkMode.value ? '#333' : '#fff',
-            borderColor: isDarkMode.value ? '#333' : '#fff',
+            backgroundColor: chartTheme.value.tooltipBackground,
+            borderColor: chartTheme.value.tooltipBorder,
             textStyle: {
-                color: isDarkMode.value ? '#eee' : '#333'
+                color: chartTheme.value.tooltipText
             },
             formatter: (params: CallbackDataParams[]) => {
                 if (props.type === AccountBalanceTrendChartType.Candlestick.type) {
@@ -247,7 +249,7 @@ const chartOptions = computed<object>(() => {
                 data: allDisplayDateRanges.value,
                 inverse: textDirection.value === TextDirection.RTL,
                 axisLabel: {
-                    color: isDarkMode.value ? '#888' : '#666'
+                    color: chartTheme.value.muted
                 }
             }
         ],
@@ -256,7 +258,7 @@ const chartOptions = computed<object>(() => {
                 type: 'value',
                 scale: true,
                 axisLabel: {
-                    color: isDarkMode.value ? '#888' : '#666',
+                    color: chartTheme.value.muted,
                     formatter: (value: string) => {
                         return formatAmountToLocalizedNumeralsWithCurrency(parseInt(value), props.account.currency);
                     }
@@ -270,7 +272,7 @@ const chartOptions = computed<object>(() => {
                 },
                 splitLine: {
                     lineStyle: {
-                        color: isDarkMode.value ? '#4f4f4f' : '#e1e6f2',
+                        color: chartTheme.value.grid,
                     }
                 }
             }

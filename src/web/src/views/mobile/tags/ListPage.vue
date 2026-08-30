@@ -47,6 +47,7 @@
                 <template #title>
                     <div class="display-flex">
                         <div class="transaction-tag-list-item-content list-item-valign-middle padding-inline-start-half"
+                             :title="tag.name"
                              v-if="editingTag.id !== tag.id">
                             {{ tag.name }}
                         </div>
@@ -423,7 +424,9 @@ init();
 }
 
 .transaction-tag-list-item-content {
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
+    white-space: nowrap;
 }
 </style>

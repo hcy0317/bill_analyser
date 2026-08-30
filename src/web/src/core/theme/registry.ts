@@ -6,6 +6,7 @@ import {
 } from './types.ts';
 import type {
     ApplicationMobileThemeConfig,
+    ApplicationThemeSemanticColors,
     ApplicationThemeDefinition,
     ApplicationThemeMode,
     ApplicationThemeName,
@@ -38,7 +39,62 @@ function mergeVuetifyTheme(baseTheme: ApplicationVuetifyThemeDefinition, overrid
 /**
  * 中文说明：把 Vuetify 主题 token 投影到 Framework7/mobile CSS variables，保持桌面和移动端配色同步。
  */
-function createMobileThemeConfig(vuetifyTheme: ApplicationVuetifyThemeDefinition, override?: Partial<ApplicationMobileThemeConfig>): ApplicationMobileThemeConfig {
+function getRgbChannels(color: string): string {
+    const value = color.trim().replace(/^#/u, '');
+    const normalized = value.length === 3
+        ? value.split('').map(character => character + character).join('')
+        : value;
+
+    if (!/^[0-9a-f]{6}$/iu.test(normalized)) {
+        throw new Error(`Unsupported theme color: ${color}`);
+    }
+
+    return [0, 2, 4]
+        .map(offset => Number.parseInt(normalized.slice(offset, offset + 2), 16))
+        .join(', ');
+}
+
+function withAlpha(color: string, opacity: number): string {
+    return `rgba(${getRgbChannels(color)}, ${opacity})`;
+}
+
+function getThemeVariableNumber(theme: ApplicationVuetifyThemeDefinition, name: string, fallback: number): number {
+    const value = Number(theme.variables[name]);
+    return Number.isFinite(value) ? value : fallback;
+}
+
+function createSemanticThemeColors(vuetifyTheme: ApplicationVuetifyThemeDefinition): ApplicationThemeSemanticColors {
+    const primary = vuetifyTheme.colors['primary']!;
+    const onPrimary = vuetifyTheme.colors['on-primary']!;
+    const surface = vuetifyTheme.colors['surface']!;
+    const onSurface = vuetifyTheme.colors['on-surface']!;
+    const borderSource = String(vuetifyTheme.variables['border-color'] || onSurface);
+    const borderOpacity = getThemeVariableNumber(vuetifyTheme, 'border-opacity', 0.14);
+    const mutedOpacity = getThemeVariableNumber(vuetifyTheme, 'medium-emphasis-opacity', 0.7);
+    const disabledOpacity = getThemeVariableNumber(vuetifyTheme, 'disabled-opacity', 0.4);
+
+    return {
+        primaryRgb: getRgbChannels(primary),
+        onPrimary,
+        surface,
+        onSurface,
+        mutedText: withAlpha(onSurface, mutedOpacity),
+        border: withAlpha(borderSource, borderOpacity),
+        chartText: onSurface,
+        chartMutedText: withAlpha(onSurface, Math.max(0.62, mutedOpacity)),
+        chartGrid: withAlpha(onSurface, vuetifyTheme.dark ? 0.2 : 0.12),
+        tooltipBackground: String(vuetifyTheme.variables['tooltip-background'] || surface),
+        tooltipText: String(vuetifyTheme.variables['tooltip-color'] || onSurface),
+        tooltipBorder: withAlpha(onSurface, vuetifyTheme.dark ? 0.24 : 0.14),
+        tagBackground: withAlpha(primary, vuetifyTheme.dark ? 0.22 : 0.12),
+        tagText: onSurface,
+        tagBorder: withAlpha(primary, vuetifyTheme.dark ? 0.42 : 0.26),
+        legendInactive: withAlpha(onSurface, disabledOpacity),
+        progressTrack: withAlpha(onSurface, vuetifyTheme.dark ? 0.2 : 0.12)
+    };
+}
+
+function createMobileThemeConfig(vuetifyTheme: ApplicationVuetifyThemeDefinition, semantic: ApplicationThemeSemanticColors, override?: Partial<ApplicationMobileThemeConfig>): ApplicationMobileThemeConfig {
     const primary = override?.primary ?? vuetifyTheme.colors['primary']!;
     const background = vuetifyTheme.colors['background']!;
     const surface = vuetifyTheme.colors['surface']!;
@@ -57,7 +113,23 @@ function createMobileThemeConfig(vuetifyTheme: ApplicationVuetifyThemeDefinition
             '--f7-block-strong-bg-color': surface,
             '--f7-card-bg-color': surface,
             '--f7-input-bg-color': surface,
-            '--f7-border-color': vuetifyTheme.dark ? 'rgba(255, 255, 255, 0.14)' : 'rgba(65, 57, 53, 0.14)',
+            '--f7-border-color': semantic.border,
+            '--f7-chip-bg-color': semantic.tagBackground,
+            '--f7-chip-text-color': semantic.tagText,
+            '--f7-list-item-footer-text-color': semantic.mutedText,
+            '--ebk-primary-color': semantic.primaryRgb,
+            '--ebk-on-primary-color': semantic.onPrimary,
+            '--ebk-chart-text-color': semantic.chartText,
+            '--ebk-chart-muted-color': semantic.chartMutedText,
+            '--ebk-chart-grid-color': semantic.chartGrid,
+            '--ebk-tooltip-bg-color': semantic.tooltipBackground,
+            '--ebk-tooltip-text-color': semantic.tooltipText,
+            '--ebk-tooltip-border-color': semantic.tooltipBorder,
+            '--ebk-transaction-tag-chip-bg-color': semantic.tagBackground,
+            '--ebk-transaction-tag-chip-text-color': semantic.tagText,
+            '--ebk-transaction-tag-chip-border-color': semantic.tagBorder,
+            '--ebk-legend-inactive-color': semantic.legendInactive,
+            '--ebk-progress-track-color': semantic.progressTrack,
             ...override?.cssVariables
         },
         metaThemeColor: {
@@ -75,6 +147,7 @@ function createMobileThemeConfig(vuetifyTheme: ApplicationVuetifyThemeDefinition
 function createThemeDefinition(variant: ApplicationThemeVariant): ApplicationThemeDefinition {
     const baseTheme = variant.mode === 'dark' ? darkVuetifyTheme : lightVuetifyTheme;
     const vuetify = mergeVuetifyTheme(baseTheme, variant.override);
+    const semantic = createSemanticThemeColors(vuetify);
     const pairedMode: ApplicationThemeMode = variant.mode === 'dark' ? 'light' : 'dark';
 
     return {
@@ -85,7 +158,8 @@ function createThemeDefinition(variant: ApplicationThemeVariant): ApplicationThe
         mode: variant.mode,
         pairedTheme: themePairByFamily[variant.family][pairedMode],
         vuetify,
-        mobile: createMobileThemeConfig(vuetify)
+        semantic,
+        mobile: createMobileThemeConfig(vuetify, semantic)
     };
 }
 

@@ -153,7 +153,16 @@ jest.mock('@/lib/datetime.ts', () => {
 });
 
 jest.mock('@/core/theme.ts', () => ({
-    isDarkApplicationTheme: (name: string) => name === 'dark'
+    isDarkApplicationTheme: (name: string) => name === 'dark',
+    getApplicationThemeDefinition: () => ({ semantic: {
+        surface: '#ffffff',
+        chartText: '#413935',
+        chartMutedText: 'rgba(65, 57, 53, 0.7)',
+        chartGrid: 'rgba(65, 57, 53, 0.12)',
+        tooltipBackground: '#ffffff',
+        tooltipText: '#413935',
+        tooltipBorder: 'rgba(65, 57, 53, 0.14)'
+    } })
 }));
 
 jest.mock('@/lib/logger.ts', () => ({

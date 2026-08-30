@@ -27,7 +27,6 @@ import {
     DateRangeScene
 } from '@/core/datetime.ts';
 import type { ColorStyleValue } from '@/core/color.ts';
-import { isDarkApplicationTheme } from '@/core/theme.ts';
 import {
     ChartDataAggregationType,
     TrendChartType,
@@ -55,6 +54,7 @@ import {
 import {
     sortStatisticsItems
 } from '@/lib/statistics.ts';
+import { createScrollableLegendTheme, getChartThemePalette, truncateChartLabel } from '@/lib/chartTheme.ts';
 
 interface DesktopTrendsChartProps<T extends TrendsChartDateType> extends CommonTrendsChartProps<T> {
     skeleton?: boolean;
@@ -115,8 +115,7 @@ const userStore = useUserStore();
 const selectedLegends = ref<Record<string, boolean>>({});
 
 const textDirection = computed<TextDirection>(() => getCurrentLanguageTextDirection());
-const isDarkMode = computed<boolean>(() => isDarkApplicationTheme(theme.global.name.value));
-
+const chartTheme = computed(() => getChartThemePalette(theme.global.name.value));
 const itemsMap = computed<Record<string, Record<string, unknown>>>(() => {
     const map: Record<string, Record<string, unknown>> = {};
 
@@ -150,6 +149,8 @@ const itemsMap = computed<Record<string, Record<string, unknown>>>(() => {
 
     return map;
 });
+
+function getLegendDisplayName(id: string): string { return itemsMap.value[id] && props.nameField && itemsMap.value[id][props.nameField] ? getItemName(itemsMap.value[id][props.nameField] as string) : id; }
 
 const allDisplayDateRanges = computed<string[]>(() => {
     const allDisplayDateRanges: string[] = [];
@@ -395,14 +396,14 @@ const chartOptions = computed<object>(() => {
             axisPointer: {
                 type: 'cross',
                 label: {
-                    backgroundColor: isDarkMode.value ? '#333' : '#fff',
-                    color: isDarkMode.value ? '#eee' : '#333'
+                    backgroundColor: chartTheme.value.tooltipBackground,
+                    color: chartTheme.value.tooltipText
                 },
             },
-            backgroundColor: isDarkMode.value ? '#333' : '#fff',
-            borderColor: isDarkMode.value ? '#333' : '#fff',
+            backgroundColor: chartTheme.value.tooltipBackground,
+            borderColor: chartTheme.value.tooltipBorder,
             textStyle: {
-                color: isDarkMode.value ? '#eee' : '#333'
+                color: chartTheme.value.tooltipText
             },
             formatter: (params: CallbackDataParams[]) => {
                 let tooltip = '';
@@ -452,8 +453,8 @@ const chartOptions = computed<object>(() => {
 
                 if (props.showTotalAmountInTooltip) {
                     const displayTotalAmount = formatAmountToLocalizedNumeralsWithCurrency(totalAmountCents, props.defaultCurrency);
-                    tooltip = (actualDisplayItemCount > 0 ? '<div style="border-bottom: ' + (isDarkMode.value ? '#eee' : '#333') + ' dashed 1px">' : '<div></div>')
-                        + '<span class="chart-pointer" style="background-color: ' + (isDarkMode.value ? '#eee' : '#333') + '"></span>'
+                    tooltip = (actualDisplayItemCount > 0 ? '<div style="border-bottom: ' + chartTheme.value.text + ' dashed 1px">' : '<div></div>')
+                        + '<span class="chart-pointer" style="background-color: ' + chartTheme.value.text + '"></span>'
                         + `<span>${tt('Total Amount')}</span><span class="ms-5" style="float: inline-end">${displayTotalAmount}</span><br/>`
                         + '</div>' + tooltip;
                 }
@@ -467,15 +468,14 @@ const chartOptions = computed<object>(() => {
         },
         legend: {
             orient: 'horizontal',
-            type: 'scroll',
+            ...createScrollableLegendTheme(chartTheme.value, { maxTextWidth: 180 }),
             top: 0,
             data: allSeries.value.map(item => item.name),
             selected: selectedLegends.value,
-            textStyle: {
-                color: isDarkMode.value ? '#eee' : '#333'
-            },
-            formatter: (id: string) => {
-                return itemsMap.value[id] && props.nameField && itemsMap.value[id][props.nameField] ? getItemName(itemsMap.value[id][props.nameField] as string) : id;
+            formatter: (id: string) => truncateChartLabel(getLegendDisplayName(id), 24),
+            tooltip: {
+                show: true,
+                formatter: (params: { name?: string }) => getLegendDisplayName(params.name || '')
             }
         },
         grid: {
@@ -489,7 +489,7 @@ const chartOptions = computed<object>(() => {
                 data: allDisplayDateRanges.value,
                 inverse: textDirection.value === TextDirection.RTL,
                 axisLabel: {
-                    color: isDarkMode.value ? '#888' : '#666'
+                    color: chartTheme.value.muted
                 }
             }
         ],
@@ -497,7 +497,7 @@ const chartOptions = computed<object>(() => {
             {
                 type: 'value',
                 axisLabel: {
-                    color: isDarkMode.value ? '#888' : '#666',
+                    color: chartTheme.value.muted,
                     formatter: (value: string) => {
                         return formatAmountToLocalizedNumeralsWithCurrency(parseInt(value), props.defaultCurrency);
                     }
@@ -511,7 +511,7 @@ const chartOptions = computed<object>(() => {
                 },
                 splitLine: {
                     lineStyle: {
-                        color: isDarkMode.value ? '#4f4f4f' : '#e1e6f2',
+                        color: chartTheme.value.grid,
                     }
                 }
             }

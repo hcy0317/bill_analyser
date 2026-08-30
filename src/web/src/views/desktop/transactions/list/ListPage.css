@@ -98,8 +98,10 @@
 }
 
 .transaction-table .transaction-table-column-tags {
-    width: 90px;
-    max-width: 300px;
+    width: clamp(140px, 16vw, 260px);
+    min-width: 140px;
+    max-width: 260px;
+    white-space: normal;
 }
 
 .transaction-table-column-description {
@@ -124,9 +126,11 @@
 
 .transaction-table .transaction-table-column-tags .v-chip.transaction-tag > .v-chip__content {
     display: block;
+    min-width: 0;
     max-width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .transaction-time-menu .item-icon,

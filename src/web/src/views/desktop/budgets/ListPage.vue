@@ -96,7 +96,7 @@ import { DateRange, DateRangeScene } from '@/core/datetime.ts';
 import { FiscalYearStart } from '@/core/fiscalyear.ts';
 import { TransactionCategory } from '@/models/transaction_category.ts';
 import { AmountFilterType } from '@/core/numeral.ts';
-import { isDarkApplicationTheme } from '@/core/theme.ts';
+import { getApplicationThemeDefinition, isDarkApplicationTheme } from '@/core/theme.ts';
 import {
     getCurrentUnixTime,
     getTodayFirstUnixTime,
@@ -1375,7 +1375,7 @@ const historicalChartOptions = computed(() => {
     const accentColor = activeBudgetType.value === BudgetType.Investment ? '#ffb300' : '#5c6bc0';
     const animationScope = `${activeBudgetType.value}-${historicalBudgetLevel.value}`;
     return buildHistoricalPolarChartOption(historicalChartModel.value, {
-        isDarkMode: isDarkMode.value,
+        isDarkMode: isDarkMode.value, themePalette: getApplicationThemeDefinition(theme.global.name.value).semantic,
         accentColor,
         budgetAmountLabel: tt('Budget Amount'),
         spentAmountLabel: tt('Spent Amount'),

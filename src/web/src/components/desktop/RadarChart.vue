@@ -9,11 +9,11 @@ import { useTheme } from 'vuetify';
 import { useI18n } from '@/locales/helpers.ts';
 
 import type { ColorValue } from '@/core/color.ts';
-import { isDarkApplicationTheme } from '@/core/theme.ts';
 import { DEFAULT_CHART_COLORS } from '@/consts/color.ts';
 
 import { isNumber } from '@/lib/common.ts';
 import { getDisplayColor } from '@/lib/color.ts';
+import { getChartThemePalette } from '@/lib/chartTheme.ts';
 
 interface RadarChartData {
     totalValidValue: number;
@@ -47,7 +47,7 @@ const theme = useTheme();
 
 const { formatAmountToLocalizedNumeralsWithCurrency, formatPercentToLocalizedNumerals } = useI18n();
 
-const isDarkMode = computed<boolean>(() => isDarkApplicationTheme(theme.global.name.value));
+const chartTheme = computed(() => getChartThemePalette(theme.global.name.value));
 
 const radarData = computed<RadarChartData>(() => {
     let totalValidValue = 0;
@@ -86,7 +86,7 @@ const radarData = computed<RadarChartData>(() => {
                 indicators.push({
                     name: name,
                     max: maxValue,
-                    color: isDarkMode.value ? '#ccc' : '#333'
+                    color: chartTheme.value.text
                 });
 
                 values.push(value);
@@ -110,7 +110,7 @@ const radarData = computed<RadarChartData>(() => {
             indicators.push({
                 name: '',
                 max: 0,
-                color: isDarkMode.value ? '#ccc' : '#333'
+                color: chartTheme.value.text
             });
             values.push(0);
         }
@@ -131,10 +131,10 @@ const chartOptions = computed<object>(() => {
     return {
         tooltip: {
             trigger: 'item',
-            backgroundColor: isDarkMode.value ? '#333' : '#fff',
-            borderColor: isDarkMode.value ? '#333' : '#fff',
+            backgroundColor: chartTheme.value.tooltipBackground,
+            borderColor: chartTheme.value.tooltipBorder,
             textStyle: {
-                color: isDarkMode.value ? '#eee' : '#333'
+                color: chartTheme.value.tooltipText
             },
             formatter: () => radarData.value.tooltip
         },
@@ -143,12 +143,14 @@ const chartOptions = computed<object>(() => {
             splitNumber: (!props.skeleton && props.items.length) ? 5 : 1,
             splitLine: {
                 lineStyle: {
-                    color: (!props.skeleton && props.items.length) ? '#e8e8e7' : '#d3d3d3'
+                    color: (!props.skeleton && props.items.length) ? chartTheme.value.grid : chartTheme.value.inactive
                 }
             },
             splitArea: {
                 areaStyle: {
-                    color: (!props.skeleton && props.items.length) ? (isDarkMode.value ? ['#363534', '#1a1a1a'] : ['#faf8f4', '#fff']) : ['#d3d3d3', '#d3d3d3']
+                    color: (!props.skeleton && props.items.length)
+                        ? [chartTheme.value.surface, chartTheme.value.grid]
+                        : [chartTheme.value.inactive, chartTheme.value.inactive]
                 }
             },
             indicator: radarData.value.indicators
@@ -160,13 +162,13 @@ const chartOptions = computed<object>(() => {
                     {
                         value: radarData.value.values,
                         itemStyle: {
-                            color: '#c07d43'
+                            color: `rgb(${chartTheme.value.primaryRgb})`
                         },
                         lineStyle: {
-                            color: '#c07d43'
+                            color: `rgb(${chartTheme.value.primaryRgb})`
                         },
                         areaStyle: {
-                            color: isDarkMode.value ? '#c07d4380' : '#c07d4340'
+                            color: `rgba(${chartTheme.value.primaryRgb}, 0.32)`
                         }
                     }
                 ],

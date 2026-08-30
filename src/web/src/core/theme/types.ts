@@ -76,6 +76,26 @@ export interface ApplicationMobileThemeConfig {
     };
 }
 
+export interface ApplicationThemeSemanticColors {
+    readonly primaryRgb: string;
+    readonly onPrimary: string;
+    readonly surface: string;
+    readonly onSurface: string;
+    readonly mutedText: string;
+    readonly border: string;
+    readonly chartText: string;
+    readonly chartMutedText: string;
+    readonly chartGrid: string;
+    readonly tooltipBackground: string;
+    readonly tooltipText: string;
+    readonly tooltipBorder: string;
+    readonly tagBackground: string;
+    readonly tagText: string;
+    readonly tagBorder: string;
+    readonly legendInactive: string;
+    readonly progressTrack: string;
+}
+
 export interface ApplicationThemeDefinition {
     readonly name: ApplicationThemeName;
     readonly displayKey: string;
@@ -84,6 +104,7 @@ export interface ApplicationThemeDefinition {
     readonly mode: ApplicationThemeMode;
     readonly pairedTheme: ApplicationThemeName;
     readonly vuetify: ApplicationVuetifyThemeDefinition;
+    readonly semantic: ApplicationThemeSemanticColors;
     readonly mobile: ApplicationMobileThemeConfig;
 }
 

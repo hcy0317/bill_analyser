@@ -279,11 +279,11 @@
                         :class="{ 'font-italic': !tagId || tagId === '0' || !allTagsMap[tagId] }"
                         :prepend-icon="tagId && tagId !== '0' && allTagsMap[tagId] ? mdiPound : mdiAlertOutline"
                         :color="tagId && tagId !== '0' && allTagsMap[tagId] ? 'default' : 'error'"
-                        :text="tagId && tagId !== '0' && allTagsMap[tagId] ? allTagsMap[tagId].name : item.originalTagNames[index]"
+                        :text="tagId && tagId !== '0' && allTagsMap[tagId] ? allTagsMap[tagId].name : item.originalTagNames[index]" :title="tagId && tagId !== '0' && allTagsMap[tagId] ? allTagsMap[tagId].name : item.originalTagNames[index]" :aria-label="tagId && tagId !== '0' && allTagsMap[tagId] ? allTagsMap[tagId].name : item.originalTagNames[index]"
                         :key="tagId"
                         v-for="(tagId, index) in item.tagIds"/>
                 <v-chip class="transaction-tag" size="small"
-                        :text="tt('None')"
+                        :text="tt('None')" :title="tt('None')" :aria-label="tt('None')"
                         v-if="!item.tagIds || !item.tagIds.length"/>
             </div>
             <!-- 编辑状态：标签选择器 -->
@@ -304,9 +304,9 @@
                     v-model="editingTags" @update:model-value="cacheEditingTagsDraft(item)"
                 >
                     <template #chip="{ props, index }">
-                        <v-chip :class="{ 'font-italic': !isTagValid(editingTags, index) }"
+                        <v-chip class="transaction-tag" :class="{ 'font-italic': !isTagValid(editingTags, index) }"
                                 :prepend-icon="isTagValid(editingTags, index) ? mdiPound : mdiAlertOutline"
-                                :color="isTagValid(editingTags, index) ? 'default' : 'error'" :text="isTagValid(editingTags, index) ? allTagsMap[editingTags[index] as string]?.name : item.originalTagNames[index]"
+                                :color="isTagValid(editingTags, index) ? 'default' : 'error'" :text="isTagValid(editingTags, index) ? allTagsMap[editingTags[index] as string]?.name : item.originalTagNames[index]" :title="isTagValid(editingTags, index) ? allTagsMap[editingTags[index] as string]?.name : item.originalTagNames[index]" :aria-label="isTagValid(editingTags, index) ? allTagsMap[editingTags[index] as string]?.name : item.originalTagNames[index]"
                                 v-bind="props"/>
                     </template>
                     <template #item="{ props, item }">

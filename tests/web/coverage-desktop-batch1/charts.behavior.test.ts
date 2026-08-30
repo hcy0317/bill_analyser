@@ -24,6 +24,17 @@ let mockPieSelectedIndex: any;
 let mockMeasureWidth = 70;
 let mockCanvasAvailable = true;
 
+const lightChartPalette = {
+    primaryRgb: '25, 118, 210', onPrimary: '#fff', surface: '#fff', text: '#333', muted: '#666',
+    grid: '#e1e6f2', border: '#ddd', tooltipBackground: '#fff', tooltipText: '#333',
+    tooltipBorder: '#fff', inactive: '#aaa'
+};
+const darkChartPalette = {
+    primaryRgb: '144, 202, 249', onPrimary: '#111', surface: '#222', text: '#eee', muted: '#888',
+    grid: '#4f4f4f', border: '#555', tooltipBackground: '#333', tooltipText: '#eee',
+    tooltipBorder: '#333', inactive: '#555'
+};
+
 jest.mock('vuetify', () => ({
     useTheme: () => ({ global: { name: { value: mockThemeName } } })
 }));
@@ -64,6 +75,16 @@ jest.mock('@/lib/ui/common.ts', () => ({
     })
 }));
 jest.mock('@/lib/logger.ts', () => ({ __esModule: true, default: { debug: jest.fn() } }));
+jest.mock('@/lib/chartTheme.ts', () => ({
+    getChartThemePalette: () => mockThemeName === 'dark' ? darkChartPalette : lightChartPalette,
+    truncateChartLabel: (value: string, maxLength: number) => value.length > maxLength ? value.slice(0, maxLength) + '…' : value,
+    createScrollableLegendTheme: (palette: typeof lightChartPalette, options: { fontSize?: number } = {}) => ({
+        type: 'scroll', left: 4, right: 4, tooltip: { show: true },
+        textStyle: { color: palette.text, fontSize: options.fontSize ?? 12 },
+        pageIconColor: palette.muted, pageIconInactiveColor: palette.inactive,
+        pageTextStyle: { color: palette.text }
+    })
+}));
 jest.mock('@/components/base/AccountBalanceTrendsChartBase.ts', () => {
     const { computed } = jest.requireActual('vue') as any;
     return {
@@ -333,6 +354,7 @@ describe('PieChart production-loaded behavior', () => {
         expect(options.series[0].animation).toBe(false);
         expect(options.legend.formatter('food')).toBe('Food');
         expect(options.legend.formatter('missing')).toBe('missing');
+        expect(options.legend.tooltip.formatter({ name: 'food' })).toBe('Food');
         expect(options.series[0].label.formatter({ data: mockPieValidItems.value[0] })).toBe('Food');
         expect(options.series[0].label.formatter({ data: null })).toBe('');
     });

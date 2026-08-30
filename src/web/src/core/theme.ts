@@ -6,6 +6,7 @@ export {
 } from './theme/types.ts';
 export type {
     ApplicationMobileThemeConfig,
+    ApplicationThemeSemanticColors,
     ApplicationThemeDefinition,
     ApplicationThemeFamily,
     ApplicationThemeMode,

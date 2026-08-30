@@ -91,7 +91,7 @@
                                                 <v-icon size="20" start :icon="mdiPound"/>
                                             </v-badge>
                                             <v-icon size="20" start :icon="mdiPound" v-else-if="!element.hidden"/>
-                                            <span class="transaction-tag-name">{{ element.name }}</span>
+                                            <span class="transaction-tag-name" :title="element.name">{{ element.name }}</span>
                                         </div>
 
                                         <v-text-field class="w-100 me-2" type="text"

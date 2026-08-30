@@ -15,9 +15,13 @@ import { type CommonPieChartDataItem, type CommonPieChartProps, usePieChartBase 
 
 import { itemAndIndex } from '@/core/base.ts';
 import type { ColorStyleValue } from '@/core/color.ts';
-import { isDarkApplicationTheme } from '@/core/theme.ts';
 
 import { getObjectOwnFieldCount } from '@/lib/common.ts';
+import {
+    createScrollableLegendTheme,
+    getChartThemePalette,
+    truncateChartLabel
+} from '@/lib/chartTheme.ts';
 
 interface DesktopPieChartDataItem extends CommonPieChartDataItem {
     itemStyle: {
@@ -39,7 +43,7 @@ const { selectedIndex, validItems } = usePieChartBase(props);
 
 const selectedLegends = ref<Record<string, boolean>>({});
 
-const isDarkMode = computed<boolean>(() => isDarkApplicationTheme(theme.global.name.value));
+const chartTheme = computed(() => getChartThemePalette(theme.global.name.value));
 
 const itemsMap = computed<Record<string, Record<string, unknown>>>(() => {
     const map: Record<string, Record<string, unknown>> = {};
@@ -58,6 +62,11 @@ const itemsMap = computed<Record<string, Record<string, unknown>>>(() => {
 
     return map;
 });
+
+function getLegendDisplayName(id: string): string {
+    const item = itemsMap.value[id];
+    return item && props.nameField && item[props.nameField] ? item[props.nameField] as string : id;
+}
 
 const seriesData = computed<DesktopPieChartDataItem[]>(() => {
     const ret: DesktopPieChartDataItem[] = [];
@@ -121,10 +130,10 @@ const chartOptions = computed<object>(() => {
     return {
         tooltip: {
             trigger: 'item',
-            backgroundColor: isDarkMode.value ? '#333' : '#fff',
-            borderColor: isDarkMode.value ? '#333' : '#fff',
+            backgroundColor: chartTheme.value.tooltipBackground,
+            borderColor: chartTheme.value.tooltipBorder,
             textStyle: {
-                color: isDarkMode.value ? '#eee' : '#333'
+                color: chartTheme.value.tooltipText
             },
             formatter: (params: CallbackDataParams) => {
                 const dataItem = params.data as DesktopPieChartDataItem;
@@ -157,17 +166,15 @@ const chartOptions = computed<object>(() => {
         },
         legend: {
             orient: 'horizontal',
-            type: 'scroll',
+            ...createScrollableLegendTheme(chartTheme.value, { maxTextWidth: 180 }),
             top: 0,
             data: validItems.value.map(item => item.name),
             selected: selectedLegends.value,
-            textStyle: {
-                color: isDarkMode.value ? '#eee' : '#333'
+            formatter: (id: string) => truncateChartLabel(getLegendDisplayName(id), 24),
+            tooltip: {
+                show: true,
+                formatter: (params: { name?: string }) => getLegendDisplayName(params.name || '')
             },
-            formatter: (id: string) => {
-                const item = itemsMap.value[id];
-                return item && props.nameField && item[props.nameField] ? item[props.nameField] as string : id;
-            }
         },
         series: [
             {
@@ -184,10 +191,10 @@ const chartOptions = computed<object>(() => {
                     }
                 },
                 label: {
-                    color: isDarkMode.value ? '#eee' : '#333',
+                    color: chartTheme.value.text,
                     formatter: (params: CallbackDataParams) => {
                         const dataItem = params.data as DesktopPieChartDataItem;
-                        return dataItem ? dataItem.displayName : '';
+                        return dataItem ? truncateChartLabel(dataItem.displayName, 24) : '';
                     }
                 },
                 animation: !props.skeleton

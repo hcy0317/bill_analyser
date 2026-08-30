@@ -1,3 +1,4 @@
+@use './transaction-tag.scss';
 /** Global style **/
 html, body {
     position: fixed;
@@ -142,10 +143,13 @@ i.icon.la, i.icon.las, i.icon.lab {
     --default-icon-color: var(--f7-text-color);
     --ebk-primary-color: 198, 126, 72;
     --ebk-transaction-tag-chip-bg-color: rgba(0, 0, 0, 0.04);
-}
-
-:root.dark {
-    --ebk-transaction-tag-chip-bg-color: rgba(255, 255, 255, 0.04);
+    --ebk-transaction-tag-chip-text-color: var(--f7-text-color);
+    --ebk-transaction-tag-chip-border-color: var(--f7-border-color);
+    --ebk-chart-text-color: var(--f7-text-color); --ebk-chart-muted-color: var(--f7-list-item-footer-text-color);
+    --ebk-chart-grid-color: var(--f7-border-color);
+    --ebk-tooltip-bg-color: var(--f7-card-bg-color); --ebk-tooltip-text-color: var(--f7-text-color); --ebk-tooltip-border-color: var(--f7-border-color);
+    --ebk-legend-inactive-color: var(--f7-list-item-footer-text-color);
+    --ebk-progress-track-color: var(--f7-border-color);
 }
 
 .pin-codes-input {
@@ -276,11 +280,11 @@ html[dir="rtl"] i.icon.icon-with-direction {
 
 /** Replacing the default style of @vuepic/vue-datepicker **/
 .dp__theme_light {
-    --dp-primary-color: #c67e48;
+    --dp-primary-color: var(--f7-theme-color);
 }
 
 .dp__theme_dark {
-    --dp-primary-color: #c67e48;
+    --dp-primary-color: var(--f7-theme-color);
 }
 
 /** Common class for replacing the default style of framework7 **/
@@ -801,11 +805,7 @@ html[dir="rtl"] .dp__main .dp__btn.dp--arrow-btn-nav {
 
 .statistics-percent-line .progressbar {
     height: 4px;
-    --f7-progressbar-bg-color: #f8f8f8;
-}
-
-.dark .statistics-percent-line .progressbar {
-    --f7-progressbar-bg-color: #444444;
+    --f7-progressbar-bg-color: var(--ebk-progress-track-color);
 }
 
 .statistics-multi-percent-line > div > .progressbar {

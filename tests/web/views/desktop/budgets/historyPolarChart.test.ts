@@ -1980,6 +1980,42 @@ describe('historyPolarChart helpers', () => {
         expect(option.tooltip.formatter({ dataIndex: 99 })).toBe('');
     });
 
+    test('buildHistoricalPolarChartOption uses the active application theme palette', () => {
+        const model = buildHistoricalPolarChartModel(SAMPLE_POINTS, buildSelection());
+        const option = buildHistoricalPolarChartOption(model, {
+            isDarkMode: true,
+            accentColor: '#5c6bc0',
+            budgetAmountLabel: '预算金额',
+            spentAmountLabel: '已花费',
+            executionRateLabel: '执行度',
+            formatAmount: (amount: number) => `¥${amount.toFixed(2)}`,
+            showPrimaryRing: true,
+            themePalette: {
+                surface: '#343746',
+                chartText: '#f8f8f2',
+                chartMutedText: 'rgba(248, 248, 242, 0.66)',
+                chartGrid: 'rgba(248, 248, 242, 0.2)',
+                tooltipBackground: '#343746',
+                tooltipText: '#f8f8f2',
+                tooltipBorder: 'rgba(248, 248, 242, 0.24)'
+            }
+        }) as {
+            radiusAxis: Array<{ axisLabel?: { color?: string } }>;
+            series: Array<{ name?: string; data?: Array<{ itemStyle?: { borderColor?: string } }> }>;
+            tooltip: { backgroundColor?: string; borderColor?: string; textStyle?: { color?: string } };
+            graphic: Array<{ children?: Array<{ style?: { fill?: string } }> }>;
+        };
+
+        expect(option.radiusAxis[0]?.axisLabel?.color).toBe('rgba(248, 248, 242, 0.66)');
+        expect(option.tooltip).toMatchObject({
+            backgroundColor: '#343746',
+            borderColor: 'rgba(248, 248, 242, 0.24)',
+            textStyle: { color: '#f8f8f2' }
+        });
+        expect(option.graphic[0]?.children?.[0]?.style?.fill).toBe('rgba(248, 248, 242, 0.66)');
+        expect(option.series.find(item => item.name === 'primary-ring')?.data?.[0]?.itemStyle?.borderColor).toBe('#343746');
+    });
+
     test('buildHistoricalPolarChartOption falls back to rgba when the source color is invalid', () => {
         const model = buildHistoricalPolarChartModel([
             {

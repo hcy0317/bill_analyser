@@ -26,6 +26,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue';
+import { useTheme } from 'vuetify';
 import type { ECElementEvent } from 'echarts/core';
 import type { CallbackDataParams } from 'echarts/types/dist/shared';
 
@@ -42,6 +43,11 @@ import { DISPLAY_HIDDEN_AMOUNT, INCOMPLETE_AMOUNT_SUFFIX } from '@/consts/numera
 import { type TransactionMonthlyIncomeAndExpenseData } from '@/models/transaction.ts';
 
 import { getExpenseAndIncomeAmountColor } from '@/lib/ui/common.ts';
+import {
+    createScrollableLegendTheme,
+    getChartThemePalette,
+    truncateChartLabel
+} from '@/lib/chartTheme.ts';
 
 export interface MonthlyIncomeAndExpenseCardClickEvent {
     transactionType: TransactionType;
@@ -67,10 +73,12 @@ const {
     formatAmountToLocalizedNumeralsWithCurrency
 } = useI18n();
 
+const theme = useTheme();
 const settingsStore = useSettingsStore();
 const userStore = useUserStore();
 
 const textDirection = computed<TextDirection>(() => getCurrentLanguageTextDirection());
+const chartTheme = computed(() => getChartThemePalette(theme.global.name.value));
 const showAmountInHomePage = computed<boolean>(() => settingsStore.appSettings.showAmountInHomePage);
 const defaultCurrency = computed<string>(() => userStore.currentUserDefaultCurrency);
 const hasAnyData = computed<boolean>(() => {
@@ -130,13 +138,13 @@ const chartOptions = computed<object>(() => {
             axisPointer: {
                 type: 'shadow',
                 shadowStyle: {
-                    color: props.isDarkMode ? 'rgba(210, 210, 210, 0.05)' : 'rgba(120, 120, 120, 0.05)'
+                    color: `rgba(${chartTheme.value.primaryRgb}, 0.08)`
                 }
             },
-            backgroundColor: props.isDarkMode ? '#333' : '#fff',
-            borderColor: props.isDarkMode ? '#333' : '#fff',
+            backgroundColor: chartTheme.value.tooltipBackground,
+            borderColor: chartTheme.value.tooltipBorder,
             textStyle: {
-                color: props.isDarkMode ? '#eee' : '#333'
+                color: chartTheme.value.tooltipText
             },
             formatter: (params: CallbackDataParams[]) => {
                 let incomeText: string | null = null;
@@ -179,14 +187,17 @@ const chartOptions = computed<object>(() => {
             }
         },
         legend: {
+            ...createScrollableLegendTheme(chartTheme.value, { maxTextWidth: 140 }),
             bottom: 20,
             itemWidth: 14,
             itemHeight: 14,
-            textStyle: {
-                color: props.isDarkMode ? '#eee' : '#333'
-            },
             icon: 'circle',
-            data: [ tt('Income'), tt('Expense') ]
+            data: [ tt('Income'), tt('Expense') ],
+            formatter: (name: string) => truncateChartLabel(name, 16),
+            tooltip: {
+                show: true,
+                formatter: (params: { name?: string }) => params.name || ''
+            }
         },
         grid: {
             left: '20px',
@@ -206,6 +217,7 @@ const chartOptions = computed<object>(() => {
                     show: false
                 },
                 axisLabel: {
+                    color: chartTheme.value.muted,
                     padding: [ 20, 0, 0, 0 ]
                 }
             }

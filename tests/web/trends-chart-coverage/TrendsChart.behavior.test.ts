@@ -26,6 +26,17 @@ let mockThemeName = 'light';
 let mockMeasureWidth = 70;
 let mockCanvasContextAvailable = true;
 
+const lightChartPalette = {
+    primaryRgb: '25, 118, 210', onPrimary: '#fff', surface: '#fff', text: '#333', muted: '#666',
+    grid: '#e1e6f2', border: '#ddd', tooltipBackground: '#fff', tooltipText: '#333',
+    tooltipBorder: '#fff', inactive: '#aaa'
+};
+const darkChartPalette = {
+    primaryRgb: '144, 202, 249', onPrimary: '#111', surface: '#222', text: '#eee', muted: '#888',
+    grid: '#4f4f4f', border: '#555', tooltipBackground: '#333', tooltipText: '#eee',
+    tooltipBorder: '#333', inactive: '#555'
+};
+
 const mockGetYearMonthFirstUnixTime = jest.fn<(...args: any[]) => number>(() => 130);
 const mockGetYearMonthLastUnixTime = jest.fn<(...args: any[]) => number>(() => 170);
 const mockGetDateTypeByDateRange = jest.fn<(...args: any[]) => number>(() => 77);
@@ -98,6 +109,16 @@ jest.mock('@/lib/statistics.ts', () => ({
         expect(sortingType).toBeGreaterThanOrEqual(0);
         mockSortStatisticsItems(items);
     }
+}));
+jest.mock('@/lib/chartTheme.ts', () => ({
+    getChartThemePalette: () => mockThemeName === 'dark' ? darkChartPalette : lightChartPalette,
+    truncateChartLabel: (value: string, maxLength: number) => value.length > maxLength ? value.slice(0, maxLength) + '…' : value,
+    createScrollableLegendTheme: (palette: typeof lightChartPalette, options: { fontSize?: number } = {}) => ({
+        type: 'scroll', left: 4, right: 4, tooltip: { show: true },
+        textStyle: { color: palette.text, fontSize: options.fontSize ?? 12 },
+        pageIconColor: palette.muted, pageIconInactiveColor: palette.inactive,
+        pageTextStyle: { color: palette.text }
+    })
 }));
 
 const TrendsChart = require('@/components/desktop/TrendsChart.vue').default as any;
@@ -236,6 +257,7 @@ describe('desktop TrendsChart production-loaded aggregations', () => {
         expect(options.xAxis[0]).toEqual(expect.objectContaining({ data: ['year:100'], inverse: false }));
         expect(options.legend.formatter('food')).toBe('translated:Food');
         expect(options.legend.formatter('missing')).toBe('missing');
+        expect(options.legend.tooltip.formatter({ name: 'food' })).toBe('translated:Food');
         expect(options.yAxis[0].axisLabel.formatter('123')).toBe('CNY:123');
         expect(options.yAxis[0].axisPointer.label.formatter({ value: 12.9 })).toBe('CNY:12');
 

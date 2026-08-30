@@ -109,6 +109,7 @@
                                 <v-list-item v-if="showHidden || !transactionTag.hidden">
                                     <template #prepend>
                                         <v-checkbox :model-value="!filterTagIds[transactionTag.id]"
+                                                    :aria-label="transactionTag.name"
                                                     @update:model-value="updateTransactionTagSelected(transactionTag, $event)">
                                             <template #label>
                                                 <v-badge class="right-bottom-icon" color="secondary"
@@ -117,7 +118,7 @@
                                                     <v-icon size="24" :icon="mdiPound"/>
                                                 </v-badge>
                                                 <v-icon size="24" :icon="mdiPound" v-else-if="!transactionTag.hidden"/>
-                                                <span class="ms-3">{{ transactionTag.name }}</span>
+                                                <span class="transaction-tag-option-label ms-3" :title="transactionTag.name">{{ transactionTag.name }}</span>
                                             </template>
                                         </v-checkbox>
                                     </template>

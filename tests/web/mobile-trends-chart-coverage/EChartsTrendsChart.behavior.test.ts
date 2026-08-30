@@ -36,6 +36,9 @@ jest.mock('@/components/base/TrendsChartBase.ts', () => {
 jest.mock('@/stores/user.ts', () => ({
     useUserStore: () => ({ currentUserFirstDayOfWeek: 1, currentUserFiscalYearStart: 4 })
 }));
+jest.mock('@/stores/environment.ts', () => ({
+    useEnvironmentsStore: () => ({ get framework7DarkMode() { return mockDark; } })
+}));
 jest.mock('@/core/base.ts', () => ({ itemAndIndex: (items: any[]) => items.map((item, index) => [item, index]) }));
 jest.mock('@/core/datetime.ts', () => ({ DateRangeScene: { Normal: 'normal' } }));
 jest.mock('@/core/statistics.ts', () => ({
@@ -56,6 +59,25 @@ jest.mock('@/lib/datetime.ts', () => ({
     getFiscalYearFromUnixTime: (...args: any[]) => mockFiscal(...args)
 }));
 jest.mock('@/lib/color.ts', () => ({ getDisplayColor: (value: string) => `display:${value}` }));
+jest.mock('@/lib/settings.ts', () => ({ getTheme: () => 'auto' }));
+jest.mock('@/lib/chartTheme.ts', () => ({
+    resolveMobileChartThemePalette: (_theme: string, darkMode: boolean) => darkMode ? {
+        primaryRgb: '1, 2, 3', onPrimary: '#000', surface: '#222', text: '#eee', muted: '#888',
+        grid: '#4f4f4f', border: '#555', tooltipBackground: '#333', tooltipText: '#eee',
+        tooltipBorder: '#333', inactive: '#555'
+    } : {
+        primaryRgb: '4, 5, 6', onPrimary: '#fff', surface: '#fff', text: '#333', muted: '#666',
+        grid: '#e1e6f2', border: '#ddd', tooltipBackground: '#fff', tooltipText: '#333',
+        tooltipBorder: '#fff', inactive: '#aaa'
+    },
+    truncateChartLabel: (value: string, maxLength: number) => value.length > maxLength ? value.slice(0, maxLength) + '…' : value,
+    createScrollableLegendTheme: (palette: any, options: any = {}) => ({
+        type: 'scroll', left: 4, right: 4, tooltip: { show: true },
+        textStyle: { color: palette.text, fontSize: options.fontSize ?? 11 },
+        pageIconColor: palette.muted, pageIconInactiveColor: palette.inactive,
+        pageTextStyle: { color: palette.text }
+    })
+}));
 
 const EChartsTrendsChart = require('@/components/mobile/EChartsTrendsChart.vue').default as any;
 
@@ -151,6 +173,8 @@ describe('mobile EChartsTrendsChart production-loaded behavior', () => {
             { seriesName: 'Candle', data: [90, 200], name: '2024' },
             { seriesName: 'Zero', data: 0, name: '2024' }
         ])).toContain('Candle  CNY:200');
+        expect(options.legend.formatter('food')).toBe('translated:Food');
+        expect(options.legend.tooltip.formatter({ name: 'food' })).toBe('translated:Food');
 
         bindings.clickItem({ componentType: 'series', seriesId: 'food', dataIndex: 0 });
         expect(emit).toHaveBeenCalledWith('click', {
@@ -220,21 +244,20 @@ describe('mobile EChartsTrendsChart production-loaded behavior', () => {
         expect(candle.data).toEqual([[90, 150, 90, 200], null]);
     });
 
-    test('covers dark and document-free options, dense dates, click guards, and monthly clamp variants', () => {
+    test('covers dark and light mobile themes, dense dates, click guards, and monthly clamp variants', () => {
         mockDark = true;
         mockRanges = Array.from({ length: 9 }, (_, index) => ({ year: 2020 + index, minUnixTime: index, maxUnixTime: index + 1 }));
         const dark = setupChart(props({ items: [] })).bindings;
-        expect(dark.isDarkMode.value).toBe(true);
+        expect(dark.chartTheme.value.tooltipBackground).toBe('#333');
         expect(dark.chartOptions.value).toEqual(expect.objectContaining({
             tooltip: expect.objectContaining({ backgroundColor: '#333' })
         }));
         expect(dark.chartOptions.value.xAxis[0].axisLabel.rotate).toBe(30);
         expect(dark.chartOptions.value.tooltip.formatter([])).toBe('');
 
-        Reflect.deleteProperty(globalThis, 'document');
-        const noDocument = setupChart(props()).bindings;
-        expect(noDocument.isDarkMode.value).toBe(false);
-        installDocument();
+        mockDark = false;
+        const light = setupChart(props()).bindings;
+        expect(light.chartTheme.value.tooltipBackground).toBe('#fff');
 
         const disabled = setupChart(props({ enableClickItem: false }));
         disabled.bindings.clickItem({ componentType: 'series', seriesId: 'food', dataIndex: 0 });
