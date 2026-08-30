@@ -166,12 +166,6 @@ async function flushWatchers(): Promise<void> {
     await Promise.resolve();
 }
 
-function setValidExpense(bindings: any): void {
-    bindings.transaction.value.type = TransactionType.Expense;
-    bindings.transaction.value.expenseCategoryId = 'expense-food';
-    bindings.transaction.value.sourceAccountId = 'cash';
-}
-
 beforeEach(() => {
     jest.clearAllMocks();
     mockSettingsStore.appSettings.timeZone = 'Asia/Shanghai';
@@ -425,7 +419,7 @@ describe('TransactionEditPageBase production-loaded labels and cents display', (
 });
 
 describe('TransactionEditPageBase production-loaded validation and mutations', () => {
-    test('reports each required expense, income, and transfer field', () => {
+    test('reports required fields for every transaction type and accepts complete transactions', () => {
         const bindings = setupBase();
         expect(bindings.inputEmptyProblemMessage.value).toBe('Transaction category cannot be blank');
         expect(bindings.inputIsEmpty.value).toBe(true);
@@ -453,12 +447,25 @@ describe('TransactionEditPageBase production-loaded validation and mutations', (
 
         bindings.transaction.value.type = TransactionType.Investment;
         bindings.transaction.value.sourceAccountId = '';
+        bindings.transaction.value.destinationAccountId = '';
+        expect(bindings.inputEmptyProblemMessage.value).toBe('Transaction category cannot be blank');
+        bindings.transaction.value.investmentCategoryId = 'investment-fund';
+        expect(bindings.inputEmptyProblemMessage.value).toBe('Source account cannot be blank');
+        bindings.transaction.value.sourceAccountId = 'cash';
+        expect(bindings.inputEmptyProblemMessage.value).toBe('Destination account cannot be blank');
+        bindings.transaction.value.destinationAccountId = 'investment';
+        expect(bindings.inputEmptyProblemMessage.value).toBe('Investment amount cannot be blank');
+        bindings.transaction.value.destinationAmountCents = 12_345;
         expect(bindings.inputEmptyProblemMessage.value).toBeNull();
+        expect(bindings.inputIsEmpty.value).toBe(false);
     });
 
-    test('requires names only for transaction-template instances', () => {
+    test('validates transaction fields before requiring a transaction-template name', () => {
         const bindings = setupBase(TransactionEditPageType.Template);
-        setValidExpense(bindings);
+        expect(bindings.inputEmptyProblemMessage.value).toBe('Transaction category cannot be blank');
+        bindings.transaction.value.expenseCategoryId = 'expense-food';
+        expect(bindings.inputEmptyProblemMessage.value).toBe('Transaction account cannot be blank');
+        bindings.transaction.value.sourceAccountId = 'cash';
         expect(bindings.inputEmptyProblemMessage.value).toBe('Template name cannot be blank');
         bindings.transaction.value.name = 'Monthly food';
         expect(bindings.inputEmptyProblemMessage.value).toBeNull();

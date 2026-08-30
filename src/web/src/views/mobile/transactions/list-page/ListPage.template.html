@@ -16,7 +16,8 @@
                 </f7-link>
             </f7-nav-title>
             <f7-nav-right class="navbar-compact-icons">
-                <f7-link data-testid="mobile.transactions.action.add" icon-f7="plus" :class="{ 'disabled': !canAddTransaction }" @click="add"></f7-link>
+                <f7-link data-testid="mobile.transactions.action.add" icon-f7="plus"
+                         :aria-label="tt(canAddTransaction ? 'Add' : 'Select Account')" @click="add"></f7-link>
             </f7-nav-right>
 
             <f7-subnavbar :inner="false">

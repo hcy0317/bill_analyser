@@ -1953,6 +1953,7 @@
     "Transaction account cannot be blank": "取引口座は空欄にできません",
     "Source account cannot be blank": "元口座は空欄にできません",
     "Destination account cannot be blank": "宛先口座は空欄にできません",
+    "Investment amount cannot be blank": "投資金額は空にできません",
     "Are you sure you want to save this transaction with a zero amount?": "この取引を0で保存しますか？",
     "You have set this time range to prevent editing transactions. Would you like to change the editable transaction range to All?": "取引の編集を防ぐためにこの時間範囲を設定しました。編集可能な取引の範囲をすべてに変更しますか？",
     "Unable to retrieve transaction": "取引を取得できません",

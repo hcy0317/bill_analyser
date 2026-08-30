@@ -773,6 +773,14 @@ describe('mobile transaction ListPage production behavior', () => {
         bindings.edit({ id: 'transaction-2', type: transactionTypes.Investment });
         expect(router.navigate).toHaveBeenCalledWith('/transaction/add?id=transaction-1&type=4');
         expect(router.navigate).toHaveBeenCalledWith('/transaction/edit?id=transaction-2&type=5');
+
+        router.navigate.mockClear();
+        lastBase.canAddTransaction.value = false;
+        bindings.showAccountPopover.value = false;
+        bindings.add();
+        expect(showToast).toHaveBeenLastCalledWith('Select Account');
+        expect(bindings.showAccountPopover.value).toBe(true);
+        expect(router.navigate).not.toHaveBeenCalled();
     });
 
     test('confirms deletion, waits for swipeout removal, and handles delete errors', async () => {
@@ -894,5 +902,19 @@ describe('mobile transaction ListPage production behavior', () => {
             else callback();
         }
         await flush(12);
+    });
+
+    test('exposes enabled accessible names for add and account-recovery actions', async () => {
+        const { bindings, router } = setup();
+        await flush();
+        lastBase.canAddTransaction.value = false;
+        bindings.add();
+        expect(bindings.showAccountPopover.value).toBe(true);
+        expect(router.navigate).not.toHaveBeenCalled();
+
+        const { readFileSync } = jest.requireActual('node:fs') as typeof import('node:fs');
+        const template = readFileSync('src/views/mobile/transactions/list-page/ListPage.template.html', 'utf8');
+        expect(template).toContain(":aria-label=\"tt(canAddTransaction ? 'Add' : 'Select Account')\"");
+        expect(template).not.toContain(':aria-disabled="!canAddTransaction"');
     });
 });

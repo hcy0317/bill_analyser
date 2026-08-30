@@ -1953,6 +1953,7 @@
     "Transaction account cannot be blank": "La cuenta de transacciones no puede estar en blanco",
     "Source account cannot be blank": "La cuenta de origen no puede estar en blanco",
     "Destination account cannot be blank": "La cuenta de destino no puede estar en blanco",
+    "Investment amount cannot be blank": "El importe de la inversión no puede estar vacío",
     "Are you sure you want to save this transaction with a zero amount?": "¿Está seguro de que desea guardar esta transacción con importe cero?",
     "You have set this time range to prevent editing transactions. Would you like to change the editable transaction range to All?": "Ha establecido este rango de tiempo para evitar la edición de transacciones. ¿Le gustaría cambiar el rango de transacciones editables a Todos?",
     "Unable to retrieve transaction": "No se puede recuperar la transacción",

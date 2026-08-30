@@ -317,6 +317,22 @@ export function useTransactionEditPageBase(type: TransactionEditPageType, initMo
             if (!transaction.value.destinationAccountId || transaction.value.destinationAccountId === '') {
                 return 'Destination account cannot be blank';
             }
+        } else if (transaction.value.type === TransactionType.Investment) {
+            if (!transaction.value.investmentCategoryId || transaction.value.investmentCategoryId === '') {
+                return 'Transaction category cannot be blank';
+            }
+
+            if (!transaction.value.sourceAccountId || transaction.value.sourceAccountId === '') {
+                return 'Source account cannot be blank';
+            }
+
+            if (!transaction.value.destinationAccountId || transaction.value.destinationAccountId === '') {
+                return 'Destination account cannot be blank';
+            }
+
+            if (!Number.isInteger(transaction.value.destinationAmountCents) || transaction.value.destinationAmountCents === 0) {
+                return 'Investment amount cannot be blank';
+            }
         }
 
         if (type === 'template' && transaction.value instanceof TransactionTemplate) {

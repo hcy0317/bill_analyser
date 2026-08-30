@@ -40,6 +40,11 @@
 import { TransactionEditPageMode } from '@/views/base/transactions/TransactionEditPageBase.ts';
 import type { TransactionPictureInfoBasicResponse } from '@/models/transaction_picture_info.ts';
 
+// Framework7's List classifies direct slot children by component name before
+// placing list-item wrappers inside its <ul>. This panel renders an f7-list-item,
+// so expose that contract explicitly instead of leaving the script-setup type anonymous.
+defineOptions({ name: 'f7-list-item-mobile-transaction-pictures-panel' });
+
 defineProps<{
     show: boolean;
     pictures: TransactionPictureInfoBasicResponse[];

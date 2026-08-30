@@ -1,27 +1,33 @@
-    <f7-page with-subnavbar @page:afterin="onPageAfterIn" @page:beforeout="onPageBeforeOut">
+    <f7-page class="mobile-transaction-editor" with-subnavbar
+             data-testid="mobile.transactions.edit.page"
+             @page:afterin="onPageAfterIn" @page:beforeout="onPageBeforeOut">
         <f7-navbar>
             <f7-nav-left :back-link="tt('Back')"></f7-nav-left>
             <f7-nav-title :title="tt(title)"></f7-nav-title>
             <f7-nav-right v-if="mode !== TransactionEditPageMode.View || transaction.type !== TransactionType.ModifyBalance">
-                <f7-link icon-f7="ellipsis" @click="showMoreActionSheet = true"></f7-link>
-                <f7-link :class="{ 'disabled': inputIsEmpty || submitting }" :text="tt(saveButtonTitle)" @click="save" v-if="mode !== TransactionEditPageMode.View"></f7-link>
+                <f7-link data-testid="mobile.transactions.edit.action.more" icon-f7="ellipsis"
+                         :aria-label="tt('More')" @click="showMoreActionSheet = true"></f7-link>
             </f7-nav-right>
 
             <f7-subnavbar>
-                <f7-segmented strong :class="{ 'transaction-type-segmented-readonly': mode === TransactionEditPageMode.View }">
+                <f7-segmented strong class="transaction-type-selector" :class="{ 'transaction-type-segmented-readonly': mode === TransactionEditPageMode.View }">
                     <f7-button :text="tt('Expense')" :active="transaction.type === TransactionType.Expense"
+                               :aria-label="tt('Expense')"
                                v-if="transaction.type !== TransactionType.ModifyBalance"
                                :disabled="mode === TransactionEditPageMode.View"
                                @click="transaction.type = TransactionType.Expense"></f7-button>
                     <f7-button :text="tt('Income')" :active="transaction.type === TransactionType.Income"
+                               :aria-label="tt('Income')"
                                v-if="transaction.type !== TransactionType.ModifyBalance"
                                :disabled="mode === TransactionEditPageMode.View"
                                @click="transaction.type = TransactionType.Income"></f7-button>
                     <f7-button :text="tt('Transfer')" :active="transaction.type === TransactionType.Transfer"
+                               :aria-label="tt('Transfer')"
                                v-if="transaction.type !== TransactionType.ModifyBalance"
                                :disabled="mode === TransactionEditPageMode.View"
                                @click="transaction.type = TransactionType.Transfer"></f7-button>
                     <f7-button :text="tt('Investment')" :active="transaction.type === TransactionType.Investment"
+                               :aria-label="tt('Investment')"
                                v-if="transaction.type !== TransactionType.ModifyBalance"
                                :disabled="mode === TransactionEditPageMode.View"
                                @click="transaction.type = TransactionType.Investment"></f7-button>
@@ -31,6 +37,26 @@
                 </f7-segmented>
             </f7-subnavbar>
         </f7-navbar>
+
+        <f7-block id="mobile-transaction-validation"
+                  class="transaction-composer-validation"
+                  data-testid="mobile.transactions.edit.validation"
+                  role="status" aria-live="polite"
+                  v-if="!loading && mode !== TransactionEditPageMode.View && inputEmptyProblemMessage">
+            <f7-icon f7="exclamationmark_circle_fill" aria-hidden="true"></f7-icon>
+            <span>{{ tt(inputEmptyProblemMessage) }}</span>
+        </f7-block>
+
+        <f7-block class="transaction-composer-empty-account"
+                  data-testid="mobile.transactions.edit.account-empty"
+                  v-if="!loading && mode !== TransactionEditPageMode.View && !allVisibleAccounts.length">
+            <div>
+                <strong>{{ tt('No available account') }}</strong>
+            </div>
+            <f7-button small fill href="/account/add"
+                       data-testid="mobile.transactions.edit.action.add-account"
+                       :aria-label="tt('Add Account')">{{ tt('Add Account') }}</f7-button>
+        </f7-block>
 
         <f7-list strong inset dividers class="margin-vertical skeleton-text" v-if="loading">
             <f7-list-input label="Template Name" placeholder="Template Name" v-if="pageTypeAndMode?.type === TransactionEditPageType.Template"></f7-list-input>
@@ -54,7 +80,7 @@
             <f7-list-input type="textarea" label="Description" placeholder="Your transaction description (optional)"></f7-list-input>
         </f7-list>
 
-        <f7-list form strong inset dividers class="margin-vertical" v-else-if="!loading">
+        <f7-list form strong inset dividers class="margin-vertical transaction-composer-surface" v-else-if="!loading">
             <f7-list-input
                 type="text"
                 clear-button
@@ -79,9 +105,11 @@
 
             <f7-list-item
                 class="transaction-edit-amount"
+                data-testid="mobile.transactions.edit.source-amount"
                 link="#" no-chevron
                 :class="sourceAmountClass"
                 :header="sourceAmountTitle"
+                :aria-label="sourceAmountTitle"
                 :title="getDisplayAmount(transaction.sourceAmountCents, transaction.hideAmount, sourceAccountCurrency)"
                 @click="showSourceAmountSheet = true"
             >
@@ -129,10 +157,12 @@
 
             <f7-list-item
                 class="list-item-with-header-and-title list-item-title-hide-overflow"
+                data-testid="mobile.transactions.edit.category"
                 key="expenseCategorySelection"
                 link="#" no-chevron
                 :class="{ 'readonly': mode === TransactionEditPageMode.View }"
                 :header="tt('Category')"
+                :aria-label="tt('Category')"
                 @click="handleCategoryItemClick"
                 v-if="transaction.type === TransactionType.Expense"
             >
@@ -161,10 +191,12 @@
 
             <f7-list-item
                 class="list-item-with-header-and-title list-item-title-hide-overflow"
+                data-testid="mobile.transactions.edit.category"
                 key="incomeCategorySelection"
                 link="#" no-chevron
                 :class="{ 'readonly': mode === TransactionEditPageMode.View }"
                 :header="tt('Category')"
+                :aria-label="tt('Category')"
                 @click="handleCategoryItemClick"
                 v-if="transaction.type === TransactionType.Income"
             >
@@ -193,10 +225,12 @@
 
             <f7-list-item
                 class="list-item-with-header-and-title list-item-title-hide-overflow"
+                data-testid="mobile.transactions.edit.category"
                 key="transferCategorySelection"
                 link="#" no-chevron
                 :class="{ 'readonly': mode === TransactionEditPageMode.View }"
                 :header="tt('Category')"
+                :aria-label="tt('Category')"
                 @click="handleCategoryItemClick"
                 v-if="transaction.type === TransactionType.Transfer"
             >
@@ -225,10 +259,12 @@
 
             <f7-list-item
                 class="list-item-with-header-and-title list-item-title-hide-overflow"
+                data-testid="mobile.transactions.edit.category"
                 key="investmentCategorySelection"
                 link="#" no-chevron
                 :class="{ 'readonly': mode === TransactionEditPageMode.View }"
                 :header="tt('Category')"
+                :aria-label="tt('Category')"
                 @click="handleCategoryItemClick"
                 v-if="transaction.type === TransactionType.Investment"
             >
@@ -257,10 +293,12 @@
 
             <f7-list-item
                 class="list-item-with-header-and-title"
+                data-testid="mobile.transactions.edit.source-account"
                 link="#" no-chevron
                 :class="{ 'disabled': !allVisibleAccounts.length || (mode === TransactionEditPageMode.Edit && transaction.type === TransactionType.ModifyBalance), 'readonly': mode === TransactionEditPageMode.View }"
                 :header="tt(sourceAccountTitle)"
                 :title="sourceAccountName"
+                :aria-label="tt(sourceAccountTitle)"
                 @click="showSourceAccountSheet = true"
             >
                 <two-column-list-item-selection-sheet primary-key-field="id" primary-value-field="category"
@@ -486,6 +524,8 @@
 
             <f7-list-input
                 type="textarea"
+                input-id="mobile-transaction-comment"
+                name="transaction-comment"
                 class="transaction-edit-comment"
                 style="height: auto"
                 :class="{ 'readonly': mode === TransactionEditPageMode.View }"
@@ -530,10 +570,15 @@
             </f7-actions-group>
         </f7-actions>
 
-        <f7-toolbar tabbar bottom v-if="mode !== TransactionEditPageMode.View">
-            <f7-link :class="{ 'disabled': inputIsEmpty || submitting }" @click="save">
-                <span class="tabbar-primary-link">{{ tt(saveButtonTitle) }}</span>
-            </f7-link>
+        <f7-toolbar class="transaction-save-toolbar" bottom v-if="mode !== TransactionEditPageMode.View">
+            <f7-button class="transaction-save-button" large fill
+                       data-testid="mobile.transactions.edit.action.save"
+                       :disabled="inputIsEmpty || submitting"
+                       :aria-label="tt(saveButtonTitle)"
+                       :aria-describedby="inputIsEmpty ? 'mobile-transaction-validation' : undefined"
+                       @click="save">
+                {{ tt(saveButtonTitle) }}
+            </f7-button>
         </f7-toolbar>
 
         <f7-photo-browser ref="pictureBrowser" type="popup" navbar-of-text="/"

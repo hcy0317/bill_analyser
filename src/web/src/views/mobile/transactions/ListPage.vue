@@ -17,6 +17,7 @@ import {
 import { TransactionListPageType, useTransactionListPageBase } from '@/views/base/transactions/TransactionListPageBase.ts';
 import MobileTransactionMonthBlock from './components/MobileTransactionMonthBlock.vue';
 import { useMobileTransactionMonthList } from './useMobileTransactionMonthList.ts';
+import { buildMobileTransactionAddPath } from './list-page/addRoute.ts';
 import { getCategoryListItemCheckedClass } from './list-page/filterDisplay.ts';
 
 import { useEnvironmentsStore } from '@/stores/environment.ts';
@@ -663,44 +664,18 @@ function changeAmountFilter(filterType: string): void { // 应用移动端金额
 }
 
 function add(): void { // 进入移动端新增交易页，并把当前筛选上下文作为默认草稿来源。
-    const currentUnixTime = getCurrentUnixTime();
-
-    let setTransactionTime = false;
-    let newTransactionTime: number | undefined = undefined;
-
-    if (query.value.maxTime && query.value.minTime) {
-        if (query.value.maxTime < currentUnixTime) {
-            setTransactionTime = true;
-            newTransactionTime = query.value.maxTime;
-        } else if (currentUnixTime < query.value.minTime) {
-            setTransactionTime = true;
-            newTransactionTime = query.value.minTime;
-        }
+    if (!canAddTransaction.value) {
+        showToast('Select Account');
+        showAccountPopover.value = true;
+        return;
     }
 
-    const params: string[] = [];
-
-    if (setTransactionTime) {
-        params.push(`time=${newTransactionTime}`);
-    }
-
-    if (query.value.type !== TransactionType.ModifyBalance) {
-        params.push(`type=${query.value.type}`);
-    }
-
-    if (queryAllFilterCategoryIdsCount.value === 1) {
-        params.push(`categoryId=${query.value.categoryIds}`);
-    }
-
-    if (queryAllFilterAccountIdsCount.value === 1) {
-        params.push(`accountId=${query.value.accountIds}`);
-    }
-
-    if (query.value.tagIds) {
-        params.push(`tagIds=${query.value.tagIds}`);
-    }
-
-    props.f7router.navigate(`/transaction/add?${params.join('&')}`);
+    props.f7router.navigate(buildMobileTransactionAddPath(
+        query.value,
+        queryAllFilterCategoryIdsCount.value,
+        queryAllFilterAccountIdsCount.value,
+        getCurrentUnixTime()
+    ));
 }
 
 function duplicate(transaction: Transaction): void { // 以当前交易为模板进入移动端复制页面。
@@ -805,7 +780,7 @@ watch(currentCalendarDate, (newDate, oldDate) => {
 });
 
 init();
-useExternalTemplateBindings(accountsStore, add, allAccounts, allAccountsMap, allAvailableAccountsCount, allAvailableCategoriesCount, allAvailableTagsCount, allCategories, allDateRanges, allPrimaryCategories, allTransactionTagFilterTypes, allTransactionTags, AmountFilterType, canAddTransaction, categoryTypeToTransactionType, changeAccountFilter, changeAmountFilter, changeCategoryFilter, changeCustomDateFilter, changeCustomMonthDateFilter, changeDateFilter, changeKeywordFilter, changePageType, changeTagFilter, changeTagFilterType, changeTypeFilter, collapseTransactionMonthList, computed, currentCalendarDate, currentMonthTransactionData, currentTimezoneOffsetMinutes, customMaxDatetime, customMinDatetime, DateRange, DateRangeScene, defaultCurrency, displayPageTypeName, duplicate, edit, environmentsStore, filterMultipleAccounts, filterMultipleCategories, filterMultipleTags, firstDayOfWeek, fiscalYearStart, getActualUnixTimeForStore, getAllTransactionTagFilterTypes, getBrowserTimezoneOffsetMinutes, getCategoryListItemCheckedClass, getCurrentLanguageTextDirection, getCurrentUnixTime, getDateRangeByBillingCycleDateType, getDateRangeByDateType, getDateTypeByBillingCycleDateRange, getDateTypeByDateRange, getDayFirstUnixTimeBySpecifiedUnixTime, getDisplayAmount, getDisplayLongYearMonth, getDisplayMonthTotalAmount, getDisplayTime, getDisplayTimezone, getFullMonthDateRange, getShiftedDateRangeAndDateType, getShiftedDateRangeAndDateTypeForBillingCycle, getTransactionDateStyle, getTransactionDomId, getTransactionMonthListDomId, getTransactionMonthListHeight, getTransactionMonthTitleDomId, getTransactionTypeName, getValidMonthDayOrCurrentDayShortDate, getYearMonthFirstUnixTime, getYearMonthLastUnixTime, hasMoreTransaction, hideLoading, init, isDarkMode, isTransactionMonthListInvisible, keys, loading, loadingError, loadingMore, loadMore, logger, MobileTransactionMonthBlock, noTransaction, onInfiniteScrolling, onMounted, onPageAfterIn, onPopoverOpen, onResize, onScroll, onSwipeoutDeleted, onTransactionMonthListCollapseStateChanged, onUnmounted, pageType, parseDateTimeFromUnixTime, props, query, queryAccountName, queryAllFilterAccountIds, queryAllFilterAccountIdsCount, queryAllFilterCategoryIds, queryAllFilterCategoryIdsCount, queryAllFilterTagIds, queryAllFilterTagIdsCount, queryAmount, queryCategoryName, queryDateRangeName, queryMaxTime, queryMinTime, queryMonth, queryMonthlyData, ref, reload, remove, resetTransactionMonthListState, routeBackOnError, scrollToSelectedItem, setTransactionInvisibleYearMonthList, setTransactionMonthListHeights, shiftDateRange, showAccountPopover, showAlert, showCategoryPopover, showCustomDateRangeSheet, showCustomMonthSheet, showDatePopover, showDeleteActionSheet, showLoading, showMorePopover, showTagInTransactionListPage, showToast, showTotalAmountInTransactionListPage, showTransactionListPageTypePopover, textDirection, TextDirection, transactionCalendarMaxDate, transactionCalendarMinDate, transactionCategoriesStore, transactionInvisibleYearMonths, TransactionListPageType, transactions, transactionsStore, transactionTagsStore, transactionToDelete, TransactionType, transactionTypeToCategoryType, tt, useAccountsStore, useEnvironmentsStore, useI18n, useI18nUIComponents, useMobileTransactionMonthList, useTransactionCategoriesStore, useTransactionListPageBase, useTransactionsStore, useTransactionTagsStore, watch);
+useExternalTemplateBindings(accountsStore, add, allAccounts, allAccountsMap, allAvailableAccountsCount, allAvailableCategoriesCount, allAvailableTagsCount, allCategories, allDateRanges, allPrimaryCategories, allTransactionTagFilterTypes, allTransactionTags, AmountFilterType, buildMobileTransactionAddPath, canAddTransaction, categoryTypeToTransactionType, changeAccountFilter, changeAmountFilter, changeCategoryFilter, changeCustomDateFilter, changeCustomMonthDateFilter, changeDateFilter, changeKeywordFilter, changePageType, changeTagFilter, changeTagFilterType, changeTypeFilter, collapseTransactionMonthList, computed, currentCalendarDate, currentMonthTransactionData, currentTimezoneOffsetMinutes, customMaxDatetime, customMinDatetime, DateRange, DateRangeScene, defaultCurrency, displayPageTypeName, duplicate, edit, environmentsStore, filterMultipleAccounts, filterMultipleCategories, filterMultipleTags, firstDayOfWeek, fiscalYearStart, getActualUnixTimeForStore, getAllTransactionTagFilterTypes, getBrowserTimezoneOffsetMinutes, getCategoryListItemCheckedClass, getCurrentLanguageTextDirection, getCurrentUnixTime, getDateRangeByBillingCycleDateType, getDateRangeByDateType, getDateTypeByBillingCycleDateRange, getDateTypeByDateRange, getDayFirstUnixTimeBySpecifiedUnixTime, getDisplayAmount, getDisplayLongYearMonth, getDisplayMonthTotalAmount, getDisplayTime, getDisplayTimezone, getFullMonthDateRange, getShiftedDateRangeAndDateType, getShiftedDateRangeAndDateTypeForBillingCycle, getTransactionDateStyle, getTransactionDomId, getTransactionMonthListDomId, getTransactionMonthListHeight, getTransactionMonthTitleDomId, getTransactionTypeName, getValidMonthDayOrCurrentDayShortDate, getYearMonthFirstUnixTime, getYearMonthLastUnixTime, hasMoreTransaction, hideLoading, init, isDarkMode, isTransactionMonthListInvisible, keys, loading, loadingError, loadingMore, loadMore, logger, MobileTransactionMonthBlock, noTransaction, onInfiniteScrolling, onMounted, onPageAfterIn, onPopoverOpen, onResize, onScroll, onSwipeoutDeleted, onTransactionMonthListCollapseStateChanged, onUnmounted, pageType, parseDateTimeFromUnixTime, props, query, queryAccountName, queryAllFilterAccountIds, queryAllFilterAccountIdsCount, queryAllFilterCategoryIds, queryAllFilterCategoryIdsCount, queryAllFilterTagIds, queryAllFilterTagIdsCount, queryAmount, queryCategoryName, queryDateRangeName, queryMaxTime, queryMinTime, queryMonth, queryMonthlyData, ref, reload, remove, resetTransactionMonthListState, routeBackOnError, scrollToSelectedItem, setTransactionInvisibleYearMonthList, setTransactionMonthListHeights, shiftDateRange, showAccountPopover, showAlert, showCategoryPopover, showCustomDateRangeSheet, showCustomMonthSheet, showDatePopover, showDeleteActionSheet, showLoading, showMorePopover, showTagInTransactionListPage, showToast, showTotalAmountInTransactionListPage, showTransactionListPageTypePopover, textDirection, TextDirection, transactionCalendarMaxDate, transactionCalendarMinDate, transactionCategoriesStore, transactionInvisibleYearMonths, TransactionListPageType, transactions, transactionsStore, transactionTagsStore, transactionToDelete, TransactionType, transactionTypeToCategoryType, tt, useAccountsStore, useEnvironmentsStore, useI18n, useI18nUIComponents, useMobileTransactionMonthList, useTransactionCategoriesStore, useTransactionListPageBase, useTransactionsStore, useTransactionTagsStore, watch);
 </script>
 
 <style src="./list-page/ListPage.css"></style>

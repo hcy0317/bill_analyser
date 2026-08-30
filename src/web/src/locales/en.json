@@ -2148,6 +2148,7 @@
     "Transaction account cannot be blank": "Transaction account cannot be blank",
     "Source account cannot be blank": "Source account cannot be blank",
     "Destination account cannot be blank": "Destination account cannot be blank",
+    "Investment amount cannot be blank": "Investment amount cannot be blank",
     "Are you sure you want to save this transaction with a zero amount?": "Are you sure you want to save this transaction with a zero amount?",
     "You have set this time range to prevent editing transactions. Would you like to change the editable transaction range to All?": "You have set this time range to prevent editing transactions. Would you like to change the editable transaction range to All?",
     "Unable to retrieve transaction": "Unable to retrieve transaction",

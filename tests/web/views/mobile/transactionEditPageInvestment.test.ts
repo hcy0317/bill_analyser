@@ -80,4 +80,16 @@ describe('mobile EditPage.vue Investment branch parity (S2)', () => {
         expect(source).toContain('TransactionType.ModifyBalance');
         expect(source).toContain('transaction.type === TransactionType.Transfer');
     });
+
+    test('uses the modern mobile transaction composer visual contract', () => {
+        const source = readSource();
+        expect(source).toContain('transaction-composer-surface');
+        expect(source).toContain('transaction-composer-validation');
+        expect(source).toContain('transaction-save-button');
+        expect(source).toContain('font-variant-numeric: tabular-nums');
+        expect(source).toContain('data-testid="mobile.transactions.edit.account-empty"');
+        expect(source).toContain('data-testid="mobile.transactions.edit.action.add-account"');
+        expect(source).toContain(':disabled="inputIsEmpty || submitting"');
+        expect(source.match(/data-testid="mobile\.transactions\.edit\.action\.save"/gu)).toHaveLength(1);
+    });
 });

@@ -1953,6 +1953,7 @@
     "Transaction account cannot be blank": "Transactierekening mag niet leeg zijn",
     "Source account cannot be blank": "Bronrekening mag niet leeg zijn",
     "Destination account cannot be blank": "Bestemmingsrekening mag niet leeg zijn",
+    "Investment amount cannot be blank": "Het investeringsbedrag mag niet leeg zijn",
     "Are you sure you want to save this transaction with a zero amount?": "Weet je zeker dat je deze transactie met bedrag nul wilt opslaan?",
     "You have set this time range to prevent editing transactions. Would you like to change the editable transaction range to All?": "Je hebt dit tijdsbereik ingesteld om bewerken te voorkomen. Wil je het bewerkbare bereik wijzigen naar ‘Alles’?",
     "Unable to retrieve transaction": "Kan transactie niet ophalen",

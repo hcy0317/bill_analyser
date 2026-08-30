@@ -1953,6 +1953,7 @@
     "Transaction account cannot be blank": "บัญชีรายการต้องไม่ว่าง",
     "Source account cannot be blank": "บัญชีต้นทางต้องไม่ว่าง",
     "Destination account cannot be blank": "บัญชีปลายทางต้องไม่ว่าง",
+    "Investment amount cannot be blank": "จำนวนเงินลงทุนต้องไม่เว้นว่าง",
     "Are you sure you want to save this transaction with a zero amount?": "คุณแน่ใจหรือว่าต้องการบันทึกรายการนี้โดยมีจำนวนเงินเป็นศูนย์?",
     "You have set this time range to prevent editing transactions. Would you like to change the editable transaction range to All?": "คุณได้ตั้งช่วงเวลานี้เพื่อป้องกันการแก้ไขรายการ คุณต้องการเปลี่ยนช่วงเวลาที่สามารถแก้ไขได้เป็นทั้งหมดไหม?",
     "Unable to retrieve transaction": "ไม่สามารถดึงข้อมูลรายการได้",

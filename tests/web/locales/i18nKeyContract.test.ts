@@ -120,6 +120,9 @@ function hasLocaleKey(messages: Record<string, unknown>, key: string): boolean {
 
 describe('i18n key contract for reported warning surfaces', () => {
     const activeLocales = ['en', 'zh_Hans', 'zh_Hant'];
+    const localeFiles = [
+        'de', 'en', 'es', 'fr', 'it', 'ja', 'ko', 'nl', 'pt_BR', 'ru', 'th', 'uk', 'vi', 'zh_Hans', 'zh_Hant'
+    ];
     const staticTranslationKeys = Array.from(new Set(
         listSourceFiles('src').flatMap(file => extractStaticTranslationKeysFromSource(file))
     )).sort();
@@ -138,6 +141,15 @@ describe('i18n key contract for reported warning surfaces', () => {
                 expect(messages).toHaveProperty(key);
             }
         }
+    });
+
+    test('investment amount validation is translated in every shipped locale', () => {
+        for (const locale of localeFiles) {
+            expect(readLocale(locale)).toHaveProperty('Investment amount cannot be blank');
+        }
+
+        expect(readLocale('zh_Hans')).toHaveProperty('Investment amount cannot be blank', '投资金额不能为空');
+        expect(readLocale('zh_Hant')).toHaveProperty('Investment amount cannot be blank', '投資金額不能為空');
     });
 
     test('account matching rule builder title exists in active locales', () => {

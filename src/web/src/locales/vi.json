@@ -1953,6 +1953,7 @@
     "Transaction account cannot be blank": "Tài khoản giao dịch không được để trống",
     "Source account cannot be blank": "Tài khoản nguồn không được để trống",
     "Destination account cannot be blank": "Tài khoản đích không được để trống",
+    "Investment amount cannot be blank": "Số tiền đầu tư không được để trống",
     "Are you sure you want to save this transaction with a zero amount?": "Bạn có chắc chắn muốn lưu giao dịch này với số tiền bằng không?",
     "You have set this time range to prevent editing transactions. Would you like to change the editable transaction range to All?": "Bạn đã đặt phạm vi thời gian này để ngăn chặn việc chỉnh sửa giao dịch. Bạn có muốn thay đổi phạm vi giao dịch có thể chỉnh sửa thành Tất cả không?",
     "Unable to retrieve transaction": "Không thể lấy giao dịch",

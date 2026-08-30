@@ -1953,6 +1953,7 @@
     "Transaction account cannot be blank": "거래 계좌는 비워둘 수 없습니다",
     "Source account cannot be blank": "원본 계좌는 비워둘 수 없습니다",
     "Destination account cannot be blank": "대상 계좌는 비워둘 수 없습니다",
+    "Investment amount cannot be blank": "투자 금액은 비워 둘 수 없습니다",
     "Are you sure you want to save this transaction with a zero amount?": "이 거래를 0원으로 저장하시겠습니까?",
     "You have set this time range to prevent editing transactions. Would you like to change the editable transaction range to All?": "이 시간 범위를 설정하여 거래 편집을 방지했습니다. 편집 가능한 거래 범위를 모두로 변경하시겠습니까?",
     "Unable to retrieve transaction": "거래를 검색할 수 없습니다",

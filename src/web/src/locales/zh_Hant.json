@@ -2096,6 +2096,7 @@
     "Transaction account cannot be blank": "交易帳戶不能為空",
     "Source account cannot be blank": "來源帳戶不能為空",
     "Destination account cannot be blank": "目標帳戶不能為空",
+    "Investment amount cannot be blank": "投資金額不能為空",
     "Are you sure you want to save this transaction with a zero amount?": "您確定要儲存這個金額為0的交易？",
     "You have set this time range to prevent editing transactions. Would you like to change the editable transaction range to All?": "您已經設定不允許修改這個時間範圍的交易，是否要將可編輯交易範圍設定為全部？",
     "Unable to retrieve transaction": "無法取得交易",
