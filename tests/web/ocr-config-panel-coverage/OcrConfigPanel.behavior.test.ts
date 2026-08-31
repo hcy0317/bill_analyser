@@ -70,6 +70,15 @@ function fullConfig(overrides: Record<string, unknown> = {}): any {
         },
         available_providers: ['llm_vision', 'custom-provider'],
         configured: true,
+        server_setup: {
+            local_model: {
+                provider: 'local_json_ocr',
+                configured: true,
+                bundled: true,
+                display_name: 'RapidOCR',
+                model: 'PP-OCRv6 small (ONNX)',
+            },
+        },
         ...overrides,
     };
 }
@@ -125,11 +134,21 @@ describe('OcrConfigPanel state and mapping', () => {
         expect(bindings.ocrProviderLabel('local_json_ocr')).toBe('Local JSON OCR');
         expect(bindings.ocrProviderLabel('llm_vision')).toBe('LLM Vision');
         expect(bindings.ocrProviderLabel('custom-provider')).toBe('custom-provider');
+        bindings.applyOCRConfig(fullConfig());
         expect(bindings.ocrSetupOptions.value.map((item: any) => [item.value, item.kind])).toStrictEqual([
-            ['disabled', 'off'],
-            ['tesseract', 'built_in'],
             ['local_json_ocr', 'local'],
+            ['tesseract', 'built_in'],
             ['llm_vision', 'cloud'],
+            ['disabled', 'off'],
+        ]);
+        expect(bindings.ocrSetupOptions.value[0]).toMatchObject({
+            title: 'tt:Smart built-in recognition',
+            kindLabel: 'Recommended',
+        });
+        expect(bindings.ocrLanguageOptions).toStrictEqual([
+            { title: 'tt:Chinese and English (recommended)', value: 'chi_sim+eng' },
+            { title: 'tt:Simplified Chinese', value: 'chi_sim' },
+            { title: 'tt:English', value: 'eng' },
         ]);
 
         bindings.ocrConfig.value.available_providers = ['custom-provider'];
@@ -172,6 +191,15 @@ describe('OcrConfigPanel state and mapping', () => {
             api_key: '',
             advancedMode: false,
         });
+        expect(bindings.serverLocalModel.value).toMatchObject({
+            configured: true,
+            bundled: true,
+            display_name: 'RapidOCR',
+            model: 'PP-OCRv6 small (ONNX)',
+        });
+        expect(bindings.serverQuickSetupAvailable.value).toBe(true);
+        expect(bindings.savedOCRSetupOption.value.value).toBe('llm_vision');
+        expect(bindings.ocrHasUnsavedChanges.value).toBe(false);
 
         bindings.applyOCRConfig({
             provider: '',
@@ -201,9 +229,46 @@ describe('OcrConfigPanel state and mapping', () => {
             refresh_body: '{}',
             refresh_params: '{}',
         });
+        expect(bindings.savedOCRSetupOption.value.value).toBe('disabled');
+        expect(bindings.ocrHasUnsavedChanges.value).toBe(false);
 
         bindings.applyOCRConfig(fullConfig({ available_providers: 'invalid' }));
         expect(bindings.ocrConfig.value.available_providers).toHaveLength(5);
+    });
+
+    test('applies safe mode defaults and explains the pending save action', () => {
+        const bindings = setup();
+        bindings.applyOCRConfig(fullConfig({
+            provider: 'disabled',
+            configured: false,
+            model: '',
+            base_url: '',
+            credential_config: {},
+        }));
+
+        expect(bindings.ocrSaveActionLabel.value).toBe('tt:Save and turn off OCR');
+        bindings.ocrConfig.value.provider = 'custom-provider';
+        expect(bindings.savedOCRSetupOption.value.value).toBe('disabled');
+        bindings.ocrConfigForm.value.lang = '';
+        bindings.selectOCRSetup('tesseract');
+        expect(bindings.ocrConfigForm.value).toMatchObject({
+            provider: 'tesseract',
+            lang: 'chi_sim+eng',
+        });
+        expect(bindings.ocrHasUnsavedChanges.value).toBe(true);
+        expect(bindings.ocrSaveActionLabel.value).toBe(
+            'tt:Save and enable tt:Basic built-in recognition',
+        );
+
+        bindings.ocrConfigForm.value.model = '';
+        bindings.ocrConfigForm.value.base_url = '';
+        bindings.selectOCRSetup('llm_vision');
+        expect(bindings.ocrConfigForm.value).toMatchObject({
+            provider: 'llm_vision',
+            model: 'gpt-4o-mini',
+            base_url: 'https://api.openai.com/v1',
+            credential_mode: 'api_key',
+        });
     });
 });
 
@@ -400,8 +465,52 @@ describe('OcrConfigPanel loading and saving', () => {
         expect(bindings.ocrConfigSaving.value).toBe(false);
     });
 
+    test('does not carry cloud credentials into built-in or disabled modes', async () => {
+        const bindings = setup();
+        Object.assign(bindings.ocrConfigForm.value, {
+            provider: 'tesseract',
+            model: 'stale-cloud-model',
+            base_url: 'https://stale.example.invalid/v1',
+            credential_mode: 'api_key',
+            api_key: 'stale-cloud-secret',
+            parameters: '{}',
+        });
+
+        await bindings.saveOCRConfig();
+
+        expect(mockServices.updateOCRConfig).toHaveBeenCalledWith(expect.objectContaining({
+            provider: 'tesseract',
+            model: '',
+            base_url: '',
+            credential_config: {},
+        }));
+        expect(JSON.stringify(mockServices.updateOCRConfig.mock.calls[0]?.[0])).not.toContain(
+            'stale-cloud-secret',
+        );
+    });
+
+    test('one-click server setup enables the bundled local model without cloud fields', async () => {
+        const bindings = setup();
+        bindings.applyOCRConfig(fullConfig({ provider: 'disabled', configured: false }));
+        mockServices.updateOCRConfig.mockResolvedValueOnce(response(fullConfig({
+            provider: 'local_json_ocr',
+            configured: true,
+        })));
+
+        await bindings.enableServerQuickSetup();
+
+        expect(mockServices.updateOCRConfig).toHaveBeenCalledWith(expect.objectContaining({
+            provider: 'local_json_ocr',
+            model: '',
+            base_url: '',
+            credential_config: {},
+        }));
+        expect(bindings.ocrConfig.value.provider).toBe('local_json_ocr');
+    });
+
     test('maps validation, Axios, Error, and opaque save failures without leaking payloads', async () => {
         const bindings = setup();
+        bindings.ocrConfigForm.value.provider = 'tesseract';
         bindings.ocrConfigForm.value.parameters = '[]';
         await bindings.saveOCRConfig();
         expect(bindings.error.value).toBe('Parameters JSON must be a JSON object');

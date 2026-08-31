@@ -31,9 +31,9 @@
                     </v-navigation-drawer>
 
                     <v-main>
-                        <v-card variant="flat" min-height="760">
+                        <v-card variant="flat" class="rule-center-content-card">
                             <template #title>
-                                <div class="title-and-toolbar d-flex align-center text-no-wrap">
+                                <div class="title-and-toolbar rule-center-title-toolbar d-flex align-center">
                                     <v-btn class="me-3 d-md-none"
                                            density="compact"
                                            color="default"
@@ -643,59 +643,4 @@ watch(
 );
 </script>
 
-<style scoped>
-.rule-center-layout {
-    min-height: 760px;
-}
-
-.rule-center-navigation {
-    border-inline-end: 1px solid rgba(var(--v-theme-on-surface), 0.12);
-}
-
-.rule-center-nav-buttons {
-    width: 100%;
-}
-
-.rule-center-nav-buttons:deep(.v-btn) {
-    width: 100%;
-}
-
-.tab-text-truncate {
-    justify-content: flex-start;
-    padding-inline: 12px;
-}
-
-.tab-text-truncate .text-truncate {
-    width: 100%;
-    text-align: left;
-}
-
-.embedded-rule-panel :deep(> .v-row) {
-    margin: 0;
-}
-
-.embedded-rule-panel :deep(> .v-row > .v-col) {
-    padding: 0;
-}
-
-.rule-center-pair-count-chip {
-    cursor: default;
-    user-select: none;
-}
-
-.rule-center-title-actions {
-    display: flex;
-    min-width: 0;
-    align-items: center;
-}
-
-.rule-center-title-actions--compact {
-    flex: 0 0 auto;
-    justify-content: flex-start;
-}
-
-.rule-center-title-actions--wide {
-    flex: 1 1 auto;
-    justify-content: stretch;
-}
-</style>
+<style scoped src="./ListPage.scss"></style>

@@ -13,9 +13,9 @@ export function applyLLMProviderDefaults(form: LLMConfigForm, option: LLMProvide
     form.name = option.title;
     form.model = option.defaultModel || '';
     form.base_url = option.defaultBaseUrl || '';
-    if (option.value === 'ollama') {
-        form.api_key = '';
-    }
+    form.api_key = '';
+    form.credential_mode = 'api_key';
+    form.credential_json = '';
 }
 
 /**
@@ -26,6 +26,10 @@ export function createLLMProviderOptions(tt: Translate): LLMProviderOption[] {
         {
             title: 'OpenAI',
             value: 'openai',
+            description: tt('Official OpenAI cloud service.'),
+            location: 'cloud',
+            recommended: true,
+            apiKeyRequired: true,
             modelPlaceholder: 'gpt-4o-mini',
             apiKeyPlaceholder: 'sk-...',
             baseUrlPlaceholder: 'https://api.openai.com/v1',
@@ -35,6 +39,9 @@ export function createLLMProviderOptions(tt: Translate): LLMProviderOption[] {
         {
             title: 'Claude (Anthropic)',
             value: 'claude',
+            description: tt('Anthropic Claude cloud service.'),
+            location: 'cloud',
+            apiKeyRequired: true,
             modelPlaceholder: 'claude-sonnet-4-20250514',
             apiKeyPlaceholder: 'sk-ant-...',
             baseUrlPlaceholder: 'https://api.anthropic.com/v1',
@@ -44,6 +51,9 @@ export function createLLMProviderOptions(tt: Translate): LLMProviderOption[] {
         {
             title: 'DeepSeek',
             value: 'deepseek',
+            description: tt('DeepSeek cloud service with an OpenAI-compatible endpoint.'),
+            location: 'cloud',
+            apiKeyRequired: true,
             modelPlaceholder: 'deepseek-chat',
             apiKeyPlaceholder: 'sk-...',
             baseUrlPlaceholder: 'https://api.deepseek.com/v1',
@@ -53,6 +63,9 @@ export function createLLMProviderOptions(tt: Translate): LLMProviderOption[] {
         {
             title: 'Qwen (Alibaba Cloud)',
             value: 'qwen',
+            description: tt('Alibaba Cloud Qwen service.'),
+            location: 'cloud',
+            apiKeyRequired: true,
             modelPlaceholder: 'qwen-plus',
             apiKeyPlaceholder: 'sk-...',
             baseUrlPlaceholder: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
@@ -62,6 +75,9 @@ export function createLLMProviderOptions(tt: Translate): LLMProviderOption[] {
         {
             title: 'SiliconFlow',
             value: 'siliconflow',
+            description: tt('SiliconFlow hosted model service.'),
+            location: 'cloud',
+            apiKeyRequired: true,
             modelPlaceholder: 'deepseek-ai/DeepSeek-V3',
             apiKeyPlaceholder: 'sk-...',
             baseUrlPlaceholder: 'https://api.siliconflow.cn/v1',
@@ -71,6 +87,9 @@ export function createLLMProviderOptions(tt: Translate): LLMProviderOption[] {
         {
             title: 'Zhipu GLM',
             value: 'zhipu',
+            description: tt('Zhipu GLM cloud service.'),
+            location: 'cloud',
+            apiKeyRequired: true,
             modelPlaceholder: 'glm-4-flash',
             apiKeyPlaceholder: 'API key',
             baseUrlPlaceholder: 'https://open.bigmodel.cn/api/paas/v4',
@@ -80,6 +99,9 @@ export function createLLMProviderOptions(tt: Translate): LLMProviderOption[] {
         {
             title: 'Ollama (local)',
             value: 'ollama',
+            description: tt('Run models on the Bill Analyser server with Ollama.'),
+            location: 'local',
+            apiKeyRequired: false,
             modelPlaceholder: 'llama3.1',
             apiKeyPlaceholder: tt('Not required'),
             baseUrlPlaceholder: 'http://localhost:11434',
@@ -89,6 +111,9 @@ export function createLLMProviderOptions(tt: Translate): LLMProviderOption[] {
         {
             title: 'xAI',
             value: 'xai',
+            description: tt('xAI cloud service.'),
+            location: 'cloud',
+            apiKeyRequired: true,
             modelPlaceholder: 'grok-3-mini',
             apiKeyPlaceholder: 'xai-...',
             baseUrlPlaceholder: 'https://api.x.ai/v1',
@@ -98,6 +123,9 @@ export function createLLMProviderOptions(tt: Translate): LLMProviderOption[] {
         {
             title: 'Google (Gemini)',
             value: 'google',
+            description: tt('Google Gemini through its OpenAI-compatible endpoint.'),
+            location: 'cloud',
+            apiKeyRequired: true,
             modelPlaceholder: 'gemini-2.0-flash',
             apiKeyPlaceholder: 'AIza...',
             baseUrlPlaceholder: 'https://generativelanguage.googleapis.com/v1beta/openai',
@@ -107,6 +135,9 @@ export function createLLMProviderOptions(tt: Translate): LLMProviderOption[] {
         {
             title: 'OpenRouter',
             value: 'openrouter',
+            description: tt('Use one OpenRouter key to access supported hosted models.'),
+            location: 'cloud',
+            apiKeyRequired: true,
             modelPlaceholder: 'openai/gpt-4o-mini',
             apiKeyPlaceholder: 'sk-or-...',
             baseUrlPlaceholder: 'https://openrouter.ai/api/v1',
@@ -116,6 +147,9 @@ export function createLLMProviderOptions(tt: Translate): LLMProviderOption[] {
         {
             title: 'OpenAI-compatible',
             value: 'openai_compatible',
+            description: tt('Connect Sub2API or another OpenAI-compatible service.'),
+            location: 'custom',
+            apiKeyRequired: true,
             modelPlaceholder: 'gpt-4o-mini',
             apiKeyPlaceholder: 'sk-...',
             baseUrlPlaceholder: 'https://your-provider.example.com/v1',
@@ -124,6 +158,9 @@ export function createLLMProviderOptions(tt: Translate): LLMProviderOption[] {
         {
             title: 'Azure OpenAI',
             value: 'azure',
+            description: tt('Connect an Azure OpenAI resource and deployment.'),
+            location: 'custom',
+            apiKeyRequired: true,
             modelPlaceholder: 'deployment-name',
             apiKeyPlaceholder: 'Azure API key',
             baseUrlPlaceholder: 'https://<resource>.openai.azure.com/openai/v1',
@@ -172,6 +209,7 @@ export function createEmptyLLMConfigForm(): LLMConfigForm {
         credential_mode: 'api_key',
         credential_json: '',
         advancedMode: false,
+        customPrompts: false,
         reasoning_depth: '',
         temperature: '0.3',
         max_tokens: '4096',

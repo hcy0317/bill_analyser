@@ -156,12 +156,41 @@
 }
 
 .llm-config-dialog-content {
-    max-height: min(64vh, 640px);
+    max-height: min(70vh, 720px);
     overflow-y: auto;
 }
 
 .llm-config-dialog-actions {
     align-items: center;
+}
+
+.llm-config-saved-grid :deep(.v-col) {
+    display: flex;
+}
+
+.llm-config-saved-card {
+    width: 100%;
+}
+
+.llm-config-saved-card--active {
+    border-color: rgba(var(--v-theme-primary), 0.58);
+    background: rgba(var(--v-theme-primary), 0.05);
+}
+
+.llm-config-step {
+    display: grid;
+    gap: 16px;
+}
+
+.llm-config-step__heading {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+}
+
+.llm-config-step__heading :deep(.v-chip) {
+    flex: 0 0 auto;
+    margin-top: 2px;
 }
 
 .v-table :deep(td) {

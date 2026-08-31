@@ -118,6 +118,35 @@ mod ai_response_contract_tests {
     }
 
     #[test]
+    fn ocr_config_projects_safe_server_quick_setup_capability() {
+        let config = OcrConfigContract {
+            provider: "disabled".to_string(),
+            lang: "chi_sim+eng".to_string(),
+            model: String::new(),
+            base_url: String::new(),
+            parameters: json!({}),
+            credential_config: json!({}),
+        };
+        let runtime = OcrRuntimePresentation {
+            local_json_configured: true,
+            bundled: true,
+            display_name: "RapidOCR".to_string(),
+            model: "PP-OCRv6 small (ONNX)".to_string(),
+        };
+
+        let payload = build_ocr_config_response_payload_with_runtime(&config, &runtime);
+
+        assert_eq!(payload["server_setup"]["local_model"]["provider"], "local_json_ocr");
+        assert_eq!(payload["server_setup"]["local_model"]["configured"], true);
+        assert_eq!(payload["server_setup"]["local_model"]["bundled"], true);
+        assert_eq!(payload["server_setup"]["local_model"]["display_name"], "RapidOCR");
+        assert_eq!(payload["server_setup"]["local_model"]["model"], "PP-OCRv6 small (ONNX)");
+        let serialized = serde_json::to_string(&payload).expect("runtime payload");
+        assert!(!serialized.contains("COMMAND"));
+        assert!(!serialized.contains("/opt/"));
+    }
+
+    #[test]
     fn ocr_recognition_transport_preserves_yuan_draft_and_provenance() {
         let provider_result = OcrProviderTextResult {
             text: "支付宝\n商品: 拿铁咖啡\n付款金额 12.34\n2025-01-02 10:30".to_string(),

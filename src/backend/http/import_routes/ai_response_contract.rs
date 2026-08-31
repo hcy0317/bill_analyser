@@ -100,8 +100,52 @@ fn build_llm_config_get_response(config: &Value) -> ImportV2RouteResponse {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct OcrRuntimePresentation {
+    local_json_configured: bool,
+    bundled: bool,
+    display_name: String,
+    model: String,
+}
+
+impl OcrRuntimePresentation {
+    fn from_env() -> Self {
+        let local_json_configured = std::env::var("BILL_ANALYSER_RUST_OCR_LOCAL_JSON_COMMAND")
+            .is_ok_and(|value| !value.trim().is_empty());
+        let bundled = std::env::var("BILL_ANALYSER_RUST_OCR_LOCAL_JSON_BUNDLED")
+            .is_ok_and(|value| matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"));
+        Self {
+            local_json_configured,
+            bundled,
+            display_name: safe_ocr_runtime_label(
+                "BILL_ANALYSER_RUST_OCR_LOCAL_JSON_DISPLAY_NAME",
+                "Local OCR",
+            ),
+            model: safe_ocr_runtime_label("BILL_ANALYSER_RUST_OCR_LOCAL_JSON_MODEL", ""),
+        }
+    }
+}
+
+fn safe_ocr_runtime_label(key: &str, fallback: &str) -> String {
+    let value = std::env::var(key).unwrap_or_default();
+    let sanitized = value
+        .trim()
+        .chars()
+        .filter(|ch| !ch.is_control())
+        .take(120)
+        .collect::<String>();
+    if sanitized.is_empty() {
+        fallback.to_string()
+    } else {
+        sanitized
+    }
+}
+
 /// 构建 OCR 配置响应载荷，递归脱敏 parameters 和 credential_config。
-fn build_ocr_config_response_payload(config: &OcrConfigContract) -> Value {
+fn build_ocr_config_response_payload_with_runtime(
+    config: &OcrConfigContract,
+    runtime: &OcrRuntimePresentation,
+) -> Value {
     let mut safe_parameters = config.parameters.clone();
     redact_secrets_in_value(&mut safe_parameters);
     json!({
@@ -113,7 +157,20 @@ fn build_ocr_config_response_payload(config: &OcrConfigContract) -> Value {
         "credential_config": redact_provider_auth_config(&config.credential_config),
         "available_providers": ocr_available_providers_with_disabled(),
         "configured": config.provider != OCR_DISABLED_PROVIDER_NAME,
+        "server_setup": {
+            "local_model": {
+                "provider": "local_json_ocr",
+                "configured": runtime.local_json_configured,
+                "bundled": runtime.bundled,
+                "display_name": runtime.display_name,
+                "model": runtime.model,
+            }
+        },
     })
+}
+
+fn build_ocr_config_response_payload(config: &OcrConfigContract) -> Value {
+    build_ocr_config_response_payload_with_runtime(config, &OcrRuntimePresentation::from_env())
 }
 
 /// 构建 OCR 配置读取/保存成功响应，维持 success/result envelope。

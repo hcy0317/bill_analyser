@@ -163,10 +163,11 @@ describe('LearningCenterPanel production behavior', () => {
         expect(source).toContain('<script setup lang="ts">');
         expect(source).toContain('useExternalTemplateBindings(');
         expect(template.match(/<Teleport defer/g)).toHaveLength(4);
-        expect(template).toContain('<v-tabs v-model="llmConnectionMode"');
-        expect(template).toContain('<v-window v-model="llmConnectionMode"');
-        expect(template).toContain('<v-window-item value="api">');
-        expect(template).toContain('<v-window-item value="oauth">');
+        expect(template).not.toContain('<v-tabs v-model="llmConnectionMode"');
+        expect(template).not.toContain('<v-window v-model="llmConnectionMode"');
+        expect(template).toContain("tt('Other sign-in methods (expert)')");
+        expect(template).toContain('v-model="newConfigForm.credential_mode"');
+        expect(template).toContain('v-model="newConfigForm.credential_json"');
         expect(template).not.toContain('newConfigForm.token_endpoint');
         expect(template).not.toContain('newConfigForm.refresh_headers');
         expect(template).not.toContain('newConfigForm.refresh_body');

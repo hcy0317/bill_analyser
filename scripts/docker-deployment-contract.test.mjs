@@ -53,6 +53,8 @@ test("the production compose owns the complete Bill Analyser runtime", async () 
   assert.match(dockerfile, /cargo build --locked --release -p bill-analyser-http --bin bill_http_server/);
   assert.match(dockerfile, /COPY tests\/backend \.\/tests\/backend/);
   assert.match(dockerfile, /tesseract-ocr-chi-sim/);
+  assert.match(dockerfile, /rapidocr==3\.9\.2/);
+  assert.match(dockerfile, /PP-OCRv6 small \(ONNX Runtime\)/);
 
   assert.match(nginx, /listen 8080/);
   assert.match(nginx, /proxy_pass http:\/\/backend:5000/);
@@ -79,6 +81,8 @@ test("the production compose owns the complete Bill Analyser runtime", async () 
   assert.match(verify, /svc:hcy-bill/);
   assert.match(verify, /BILL_ANALYSER_AUTH_JWT_SECRET/);
   assert.match(verify, /POSTGRES_PASSWORD/);
+  assert.match(verify, /rapidocr_adapter\.py --check/);
+  assert.match(verify, /bundled_ocr/);
 
   assert.match(gitignore, /^\.runtime\/$/m);
 });

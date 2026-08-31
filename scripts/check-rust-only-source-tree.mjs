@@ -18,6 +18,10 @@ const forbiddenPathPrefixes = new Map([
     ['src/backend/python/', 'removed Python backend sidecar tree'],
 ]);
 
+const allowedPythonSourcePaths = new Set([
+    'deploy/ocr/rapidocr_adapter.py',
+]);
+
 function normalizeTrackedPath(value) {
     return String(value).replaceAll('\\', '/').replace(/^\.\//, '');
 }
@@ -29,11 +33,13 @@ function validateTrackedPaths(paths) {
         if (!trackedPath) {
             continue;
         }
-        if (/\.(?:py|pyi|pyx)$/i.test(trackedPath)) {
+        const normalizedLowerPath = trackedPath.toLowerCase();
+        if (/\.(?:py|pyi|pyx)$/i.test(trackedPath)
+            && !allowedPythonSourcePaths.has(normalizedLowerPath)) {
             findings.push({ path: trackedPath, reason: 'tracked Python source' });
             continue;
         }
-        const exactReason = forbiddenExactPaths.get(trackedPath.toLowerCase());
+        const exactReason = forbiddenExactPaths.get(normalizedLowerPath);
         if (exactReason) {
             findings.push({ path: trackedPath, reason: exactReason });
             continue;
@@ -67,6 +73,7 @@ function runSelfTest() {
     const allowed = [
         'src/backend/http/lib.rs',
         'scripts/check-gitea-workflow.mjs',
+        'deploy/ocr/rapidocr_adapter.py',
         'docs/python-history.md',
     ];
     assert.deepEqual(validateTrackedPaths(allowed), []);
@@ -74,6 +81,10 @@ function runSelfTest() {
     const pythonFinding = validateTrackedPaths(['src/backend/http/server.py']);
     assert.equal(pythonFinding.length, 1);
     assert.match(pythonFinding[0].reason, /Python source/);
+
+    const nonAdapterDeployPythonFinding = validateTrackedPaths(['deploy/ocr/other_adapter.py']);
+    assert.equal(nonAdapterDeployPythonFinding.length, 1);
+    assert.match(nonAdapterDeployPythonFinding[0].reason, /Python source/);
 
     const sidecarFinding = validateTrackedPaths(['scripts/hooks/task_state.mjs']);
     assert.equal(sidecarFinding.length, 1);

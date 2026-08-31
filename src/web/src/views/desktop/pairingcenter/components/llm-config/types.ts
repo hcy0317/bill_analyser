@@ -29,6 +29,7 @@ export interface LLMConfigForm {
     credential_mode: string;
     credential_json: string;
     advancedMode: boolean;
+    customPrompts: boolean;
     reasoning_depth: string;
     temperature: string;
     max_tokens: string;
@@ -46,6 +47,10 @@ export interface LLMProviderOption {
     defaultModel?: string;
     defaultBaseUrl?: string;
     requiresBaseUrl?: boolean;
+    description: string;
+    location: 'cloud' | 'local' | 'custom';
+    recommended?: boolean;
+    apiKeyRequired?: boolean;
 }
 
 export interface LLMCandidateItem {

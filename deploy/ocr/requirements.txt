@@ -1,0 +1,23 @@
+# Bundled CPU OCR runtime dependencies. RapidOCR itself is installed with
+# --no-deps so the headless OpenCV build can replace the GUI wheel.
+# rapidocr==3.9.2
+onnxruntime==1.29.0
+opencv-python-headless==5.0.0.93
+numpy==2.4.6
+pyclipper==1.4.0
+Shapely==2.1.2
+PyYAML==6.0.3
+Pillow==12.3.0
+six==1.17.0
+tqdm==4.70.0
+omegaconf==2.3.1
+requests==2.34.2
+colorlog==6.12.0
+flatbuffers==25.12.19
+packaging==26.3
+protobuf==7.36.0
+antlr4-python3-runtime==4.9.3
+charset-normalizer==3.5.1
+idna==3.19
+urllib3==2.7.0
+certifi==2026.7.22

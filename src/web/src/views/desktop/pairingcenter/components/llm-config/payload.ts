@@ -63,19 +63,21 @@ export function buildAdvancedSettingsPayload(form: LLMConfigForm): LLMAdvancedSe
         settings.max_tokens = maxTokens;
     }
 
-    const systemPrompt = form.system_prompt.trim();
-    if (systemPrompt) {
-        settings.system_prompt = systemPrompt;
-    }
+    if (form.customPrompts) {
+        const systemPrompt = form.system_prompt.trim();
+        if (systemPrompt) {
+            settings.system_prompt = systemPrompt;
+        }
 
-    const classificationPrompt = form.classification_prompt_template.trim();
-    if (classificationPrompt) {
-        settings.classification_prompt_template = classificationPrompt;
-    }
+        const classificationPrompt = form.classification_prompt_template.trim();
+        if (classificationPrompt) {
+            settings.classification_prompt_template = classificationPrompt;
+        }
 
-    const rulePrompt = form.rule_prompt_template.trim();
-    if (rulePrompt) {
-        settings.rule_prompt_template = rulePrompt;
+        const rulePrompt = form.rule_prompt_template.trim();
+        if (rulePrompt) {
+            settings.rule_prompt_template = rulePrompt;
+        }
     }
 
     return settings;

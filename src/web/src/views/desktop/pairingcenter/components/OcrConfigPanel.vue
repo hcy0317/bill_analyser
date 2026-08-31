@@ -48,6 +48,7 @@ const ocrConfig = ref<OCRConfigResponse>({
     credential_config: {},
     available_providers: ['disabled', 'tesseract', 'cloud_stub', 'local_json_ocr', 'llm_vision'],
     configured: false,
+    server_setup: {},
 });
 const ocrConfigForm = ref({
     provider: 'disabled',
@@ -73,6 +74,13 @@ const credentialModeOptions = [
     { title: tt('Access Token'), value: 'access_token' },
     { title: tt('Refresh Token'), value: 'refresh_token' },
 ];
+const ocrLanguageOptions: SelectOption[] = [
+    { title: tt('Chinese and English (recommended)'), value: 'chi_sim+eng' },
+    { title: tt('Simplified Chinese'), value: 'chi_sim' },
+    { title: tt('English'), value: 'eng' },
+];
+const DEFAULT_CLOUD_VISION_MODEL = 'gpt-4o-mini';
+const DEFAULT_CLOUD_VISION_BASE_URL = 'https://api.openai.com/v1';
 
 const ocrProviderOptions = computed<SelectOption[]>(() => {
     const providers = ocrConfig.value.available_providers.length
@@ -84,34 +92,52 @@ const ocrProviderOptions = computed<SelectOption[]>(() => {
     }));
 });
 
+const serverLocalModel = computed(() => ({
+    provider: ocrConfig.value.server_setup?.local_model?.provider || 'local_json_ocr',
+    configured: ocrConfig.value.server_setup?.local_model?.configured === true,
+    bundled: ocrConfig.value.server_setup?.local_model?.bundled === true,
+    display_name: ocrConfig.value.server_setup?.local_model?.display_name || tt('Local OCR'),
+    model: ocrConfig.value.server_setup?.local_model?.model || '',
+}));
+const serverQuickSetupAvailable = computed(() => (
+    serverLocalModel.value.configured && serverLocalModel.value.bundled
+));
+
 const ocrSetupOptions = computed<OCRSetupOption[]>(() => [
+    ...(serverQuickSetupAvailable.value ? [{
+        title: tt('Smart built-in recognition'),
+        value: 'local_json_ocr',
+        kind: 'local' as const,
+        kindLabel: 'Recommended',
+        description: tt('PP-OCRv6 small runs locally on this server for stronger Chinese receipt recognition.'),
+    }] : []),
     {
-        title: tt('Disabled'),
+        title: serverQuickSetupAvailable.value ? tt('Basic built-in recognition') : tt('Built-in recognition'),
+        value: 'tesseract',
+        kind: 'built_in',
+        kindLabel: serverQuickSetupAvailable.value ? 'Fallback' : 'Recommended',
+        description: tt('Runs inside this Bill Analyser server. No account, address, or API key is required.'),
+    },
+    ...(!serverQuickSetupAvailable.value ? [{
+        title: tt('Self-hosted / local OCR'),
+        value: 'local_json_ocr',
+        kind: 'local' as const,
+        kindLabel: 'Private',
+        description: tt('Uses an OCR command installed by the server operator. Images stay on this server.'),
+    }] : []),
+    {
+        title: tt('Cloud vision'),
+        value: 'llm_vision',
+        kind: 'cloud',
+        kindLabel: 'May cost',
+        description: tt('Sends receipt images to an OpenAI-compatible vision service. Provider charges may apply.'),
+    },
+    {
+        title: tt('Turn off OCR'),
         value: 'disabled',
         kind: 'off',
         kindLabel: 'Off',
-        description: tt('Do not run OCR automatically.'),
-    },
-    {
-        title: 'Tesseract',
-        value: 'tesseract',
-        kind: 'built_in',
-        kindLabel: 'Built-in',
-        description: tt('Built into this Bill Analyser server. No endpoint or credential is required.'),
-    },
-    {
-        title: tt('Local JSON OCR'),
-        value: 'local_json_ocr',
-        kind: 'local',
-        kindLabel: 'Local',
-        description: tt('Use the local OCR command configured on this server. Images do not leave the machine.'),
-    },
-    {
-        title: tt('Cloud / Remote Vision'),
-        value: 'llm_vision',
-        kind: 'cloud',
-        kindLabel: 'Cloud',
-        description: tt('Send receipt images to an OpenAI-compatible vision endpoint. Provider charges may apply.'),
+        description: tt('Do not recognize receipt images automatically.'),
     },
 ]);
 const selectedOCRSetupOption = computed<OCRSetupOption>(() => (
@@ -120,6 +146,32 @@ const selectedOCRSetupOption = computed<OCRSetupOption>(() => (
 ));
 const usesRemoteVision = computed(() => ocrConfigForm.value.provider === 'llm_vision');
 const supportsLanguage = computed(() => ocrConfigForm.value.provider === 'tesseract');
+const savedOCRSetupOption = computed<OCRSetupOption>(() => (
+    ocrSetupOptions.value.find(option => option.value === ocrConfig.value.provider)
+        ?? ocrSetupOptions.value.find(option => option.value === 'disabled') as OCRSetupOption
+));
+const ocrHasUnsavedChanges = computed(() => {
+    const config = ocrConfig.value;
+    const form = ocrConfigForm.value;
+    const credentials = config.credential_config || {};
+    return form.provider !== config.provider
+        || form.lang.trim() !== config.lang
+        || form.model.trim() !== (config.model || '')
+        || form.base_url.trim() !== (config.base_url || '')
+        || form.parameters.trim() !== JSON.stringify(config.parameters || {}, null, 2)
+        || form.credential_mode !== String(credentials['credential_mode'] || 'api_key')
+        || form.credential_json.trim() !== JSON.stringify(credentials['credential_json'] || {}, null, 2)
+        || form.token_endpoint.trim() !== String(credentials['token_endpoint'] || '')
+        || form.refresh_headers.trim() !== JSON.stringify(credentials['refresh_headers'] || {}, null, 2)
+        || form.refresh_body.trim() !== JSON.stringify(credentials['refresh_body'] || {}, null, 2)
+        || form.refresh_params.trim() !== JSON.stringify(credentials['refresh_params'] || {}, null, 2)
+        || form.api_key.trim().length > 0;
+});
+const ocrSaveActionLabel = computed(() => (
+    ocrConfigForm.value.provider === 'disabled'
+        ? tt('Save and turn off OCR')
+        : `${tt('Save and enable')} ${selectedOCRSetupOption.value.title}`
+));
 
 function ocrProviderLabel(provider: string): string {
     const labels: Record<string, string> = {
@@ -130,6 +182,19 @@ function ocrProviderLabel(provider: string): string {
         llm_vision: 'LLM Vision',
     };
     return labels[provider] ?? provider;
+}
+
+/** 选择普通用户可理解的 OCR 模式，并只补齐该模式真正需要的安全默认值。 */
+function selectOCRSetup(provider: string): void {
+    ocrConfigForm.value.provider = provider;
+    if (provider === 'tesseract' && !ocrConfigForm.value.lang.trim()) {
+        ocrConfigForm.value.lang = 'chi_sim+eng';
+    }
+    if (provider === 'llm_vision') {
+        ocrConfigForm.value.model = ocrConfigForm.value.model.trim() || DEFAULT_CLOUD_VISION_MODEL;
+        ocrConfigForm.value.base_url = ocrConfigForm.value.base_url.trim() || DEFAULT_CLOUD_VISION_BASE_URL;
+        ocrConfigForm.value.credential_mode = ocrConfigForm.value.credential_mode || 'api_key';
+    }
 }
 
 /**
@@ -147,6 +212,7 @@ function applyOCRConfig(config: OCRConfigResponse): void {
             ? config.available_providers
             : ['disabled', 'tesseract', 'cloud_stub', 'local_json_ocr', 'llm_vision'],
         configured: !!config.configured,
+        server_setup: config.server_setup || {},
     };
     const credentialConfig = ocrConfig.value.credential_config || {};
     ocrConfigForm.value = {
@@ -304,13 +370,16 @@ async function loadOCRConfig() {
 async function saveOCRConfig() {
     ocrConfigSaving.value = true;
     try {
-        const parameters = parseOptionalJsonObject(ocrConfigForm.value.parameters, 'Parameters JSON');
-        const credentialConfig = buildOcrCredentialConfig();
+        const provider = ocrConfigForm.value.provider;
+        const parameters = provider === 'disabled'
+            ? {}
+            : parseOptionalJsonObject(ocrConfigForm.value.parameters, 'Parameters JSON');
+        const credentialConfig = provider === 'llm_vision' ? buildOcrCredentialConfig() : {};
         const resp = await services.updateOCRConfig({
-            provider: ocrConfigForm.value.provider,
+            provider,
             lang: ocrConfigForm.value.lang.trim() || 'chi_sim+eng',
-            model: ocrConfigForm.value.model.trim(),
-            base_url: ocrConfigForm.value.base_url.trim(),
+            model: provider === 'llm_vision' ? ocrConfigForm.value.model.trim() : '',
+            base_url: provider === 'llm_vision' ? ocrConfigForm.value.base_url.trim() : '',
             parameters,
             credential_config: credentialConfig,
         });
@@ -329,6 +398,14 @@ async function saveOCRConfig() {
     }
 }
 
+async function enableServerQuickSetup(): Promise<void> {
+    if (!serverQuickSetupAvailable.value) {
+        return;
+    }
+    selectOCRSetup(serverLocalModel.value.provider);
+    await saveOCRConfig();
+}
+
 useExternalTemplateBindings(
     SettingsJsonImportExportButton,
     mdiRefresh,
@@ -339,9 +416,17 @@ useExternalTemplateBindings(
     credentialModeOptions,
     ocrProviderOptions,
     ocrSetupOptions,
+    ocrLanguageOptions,
+    serverLocalModel,
+    serverQuickSetupAvailable,
     selectedOCRSetupOption,
+    savedOCRSetupOption,
+    ocrHasUnsavedChanges,
+    ocrSaveActionLabel,
     usesRemoteVision,
     supportsLanguage,
+    selectOCRSetup,
+    enableServerQuickSetup,
     saveOCRConfig,
 );
 

@@ -770,6 +770,36 @@ fn ocr_provider_adapters_use_one_typed_failure_boundary() {
 }
 
 #[test]
+fn docker_runtime_bundles_pinned_offline_ppocrv6_small_adapter() {
+    let dockerfile = source("Dockerfile");
+    let requirements = source("deploy/ocr/requirements.txt");
+    let adapter = source("deploy/ocr/rapidocr_adapter.py");
+
+    assert!(requirements.contains("rapidocr==3.9.2"));
+    assert!(requirements.contains("onnxruntime==1.29.0"));
+    assert!(requirements.contains("opencv-python-headless==5.0.0.93"));
+    assert!(dockerfile
+        .contains("pip download --no-deps --dest /tmp/bill-analyser-ocr-wheel rapidocr==3.9.2"));
+    assert!(dockerfile.contains(
+        "pip install --no-cache-dir --no-deps /tmp/bill-analyser-ocr-wheel/rapidocr-3.9.2-py3-none-any.whl"
+    ));
+    assert!(dockerfile.contains("04d6b8d151f823d930bd91910555f57bea897c0c44fa6794267b94cf9c1ef9a0"));
+    assert!(dockerfile.contains("rapidocr check"));
+    assert!(dockerfile.contains("rapidocr_adapter.py --check"));
+    assert!(dockerfile.contains("BILL_ANALYSER_RUST_OCR_LOCAL_JSON_COMMAND"));
+    assert!(dockerfile.contains("BILL_ANALYSER_RUST_OCR_LOCAL_JSON_BUNDLED=1"));
+    assert!(adapter.contains("PP-OCRv6_det_small.onnx"));
+    assert!(adapter.contains("PP-OCRv6_rec_small.onnx"));
+    assert!(adapter.contains("ch_ppocr_mobile_v2.0_cls_mobile.onnx"));
+    assert!(adapter.contains("MAX_IMAGE_BYTES"));
+    assert!(adapter.contains("MAX_IMAGE_PIXELS"));
+    assert!(adapter.contains("OCRVersion.PPOCRV6"));
+    assert!(adapter.contains("ModelType.SMALL"));
+    assert!(adapter.contains("redirect_stdout(sys.stderr)"));
+    assert!(adapter.contains("json.dumps"));
+}
+
+#[test]
 fn preview_row_version_is_mapped_serialized_and_enforced_by_single_update_cas() {
     let migration =
         source("src/backend/db/postgres/migrations/0001_initial_authoritative_schema.sql");

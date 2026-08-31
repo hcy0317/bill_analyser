@@ -38,6 +38,15 @@ export interface OCRConfigResponse {
     credential_config?: Record<string, unknown>;
     available_providers: string[];
     configured: boolean;
+    server_setup?: {
+        local_model?: {
+            provider: string;
+            configured: boolean;
+            bundled: boolean;
+            display_name: string;
+            model: string;
+        };
+    };
 }
 
 export type OCRConfigUpdateRequest = Pick<

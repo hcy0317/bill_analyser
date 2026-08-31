@@ -185,6 +185,12 @@ describe('useLearningCenterLlmConfig state and computed contracts', () => {
         state.newConfigForm.value.provider = 'missing-provider';
         expect(state.selectedLLMProviderOption.value.value).toBe('openai');
 
+        state.newConfigForm.value.customPrompts = false;
+        state.newConfigForm.value.system_prompt = 'stale';
+        state.restoreRecommendedPrompts();
+        expect(state.newConfigForm.value.customPrompts).toBe(true);
+        expect(state.newConfigForm.value.system_prompt).toContain('Bill Analyser');
+
         state.llmConnectionMode.value = 'oauth';
         expect(state.newConfigForm.value.credential_mode).toBe('session_json');
         expect(state.llmConnectionMode.value).toBe('oauth');
@@ -319,6 +325,7 @@ describe('useLearningCenterLlmConfig saved configuration actions', () => {
             base_url: '  https://api.example.test/v1  ',
             credential_mode: 'api_key',
             advancedMode: true,
+            customPrompts: true,
             reasoning_depth: 'high',
             temperature: '0.2',
             max_tokens: '1024',
@@ -390,7 +397,7 @@ describe('useLearningCenterLlmConfig saved configuration actions', () => {
         }));
     });
 
-    test('marks later configs inactive and enforces name, base-url, and credential early returns', async () => {
+    test('marks later configs inactive, derives an empty display name, and enforces connection fields', async () => {
         const state = createComposable();
         state.llmSavedConfigs.value = [{ id: 1, name: 'existing', provider: 'openai', model: 'm' }];
         Object.assign(state.newConfigForm.value, {
@@ -410,9 +417,11 @@ describe('useLearningCenterLlmConfig saved configuration actions', () => {
         mockServices.createLLMConfig.mockClear();
         state.newConfigForm.value.name = '   ';
         await state.saveNewConfig();
-        expect(mockSetError).toHaveBeenCalledWith('Name is required');
-        expect(mockServices.createLLMConfig).not.toHaveBeenCalled();
+        expect(mockServices.createLLMConfig).toHaveBeenCalledWith(expect.objectContaining({
+            name: 'OpenAI',
+        }));
 
+        mockServices.createLLMConfig.mockClear();
         state.newConfigForm.value.name = 'Requires URL';
         state.newConfigForm.value.provider = 'openai_compatible';
         state.newConfigForm.value.base_url = '';

@@ -37,6 +37,11 @@ $postgresInspect = @(docker inspect "bill-analyser-postgres" | ConvertFrom-Json)
 $backendInspect = @(docker inspect "bill-analyser-backend" | ConvertFrom-Json)[0]
 $postgresEnvNames = @($postgresInspect.Config.Env | ForEach-Object { ([string]$_ -split "=", 2)[0] })
 $backendEnvNames = @($backendInspect.Config.Env | ForEach-Object { ([string]$_ -split "=", 2)[0] })
+$backendEnv = @{}
+foreach ($entry in $backendInspect.Config.Env) {
+    $parts = ([string]$entry -split "=", 2)
+    $backendEnv[$parts[0]] = if ($parts.Count -gt 1) { $parts[1] } else { "" }
+}
 if ($postgresEnvNames -contains "BILL_ANALYSER_AUTH_JWT_SECRET") {
     throw "PostgreSQL container received the application JWT secret"
 }
@@ -48,6 +53,14 @@ if ($backendEnvNames -contains "POSTGRES_PASSWORD") {
 }
 if ($postgresEnvNames -notcontains "POSTGRES_PASSWORD" -or $backendEnvNames -notcontains "BILL_ANALYSER_AUTH_JWT_SECRET") {
     throw "Required container-specific runtime variables are missing"
+}
+if ($backendEnv["BILL_ANALYSER_RUST_OCR_LOCAL_JSON_BUNDLED"] -ne "1") {
+    throw "Bundled local OCR capability is not enabled"
+}
+$ocrCheck = & docker exec bill-analyser-backend /opt/bill-analyser-ocr/bin/python /opt/bill-analyser-ocr/rapidocr_adapter.py --check |
+    ConvertFrom-Json
+if (-not $ocrCheck.ready -or [string]::IsNullOrWhiteSpace([string]$ocrCheck.model)) {
+    throw "Bundled local OCR model check failed"
 }
 
 $localBase = "http://127.0.0.1:$WebPort"
@@ -80,5 +93,6 @@ if ($null -eq $app) { throw "LocalOps does not contain the bill_analyser Compose
     public_url = $PublicUrl
     public_status = [int]$public.StatusCode
     environment_isolation = "postgres-only database credentials; backend-only application secrets"
+    bundled_ocr = [ordered]@{ ready = $true; model = [string]$ocrCheck.model }
     local_ops_app = [ordered]@{ id = $app.id; name = $app.name; running = $app.running }
 } | ConvertTo-Json -Depth 8

@@ -204,7 +204,7 @@ export function useLearningCenterLlmConfig(options: LearningCenterLlmConfigOptio
             return;
         }
         const payload = {
-            name: form.name.trim(),
+            name: form.name.trim() || selectedLLMProviderOption.value.title,
             provider: form.provider,
             model: form.model.trim(),
             api_key: form.credential_mode === 'api_key' ? form.api_key.trim() : '',
@@ -213,11 +213,6 @@ export function useLearningCenterLlmConfig(options: LearningCenterLlmConfigOptio
             advanced_settings: buildAdvancedSettingsPayload(form),
             is_active: llmSavedConfigs.value.length === 0,
         };
-
-        if (!payload.name) {
-            setError('Name is required');
-            return;
-        }
 
         if (selectedLLMProviderOption.value.requiresBaseUrl && !payload.base_url) {
             setError(`${selectedLLMProviderOption.value.title} requires a Base URL`);
@@ -265,6 +260,7 @@ export function useLearningCenterLlmConfig(options: LearningCenterLlmConfigOptio
     }
 
     function restoreRecommendedPrompts(): void {
+        newConfigForm.value.customPrompts = true;
         newConfigForm.value.system_prompt = DEFAULT_LLM_SYSTEM_PROMPT;
         newConfigForm.value.classification_prompt_template = DEFAULT_LLM_PROMPT_TEMPLATE;
         newConfigForm.value.rule_prompt_template = DEFAULT_LLM_PROMPT_TEMPLATE;

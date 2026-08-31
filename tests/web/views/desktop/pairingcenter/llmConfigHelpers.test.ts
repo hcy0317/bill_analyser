@@ -42,6 +42,7 @@ describe('LLM config helper contracts', () => {
         expect(options.find(option => option.value === 'openai_compatible')).toMatchObject({
             requiresBaseUrl: true,
             baseUrlPlaceholder: 'https://your-provider.example.com/v1',
+            location: 'custom',
         });
         expect(options.find(option => option.value === 'azure')).toMatchObject({
             requiresBaseUrl: true,
@@ -52,6 +53,15 @@ describe('LLM config helper contracts', () => {
             baseUrlPlaceholder: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
             defaultModel: 'qwen-plus',
             defaultBaseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+        });
+        expect(options.find(option => option.value === 'openai')).toMatchObject({
+            recommended: true,
+            location: 'cloud',
+            description: 't:Official OpenAI cloud service.',
+        });
+        expect(options.find(option => option.value === 'ollama')).toMatchObject({
+            location: 'local',
+            apiKeyRequired: false,
         });
         expect(getLLMProviderLabel('anthropic', options)).toBe('Claude (Anthropic)');
         expect(getLLMProviderLabel('openai-compatible', options)).toBe('OpenAI-compatible');
@@ -68,11 +78,15 @@ describe('LLM config helper contracts', () => {
         expect(form.system_prompt).toContain('JSON');
         expect(form.classification_prompt_template).toBe('{default_prompt}');
         expect(form.rule_prompt_template).toBe('{default_prompt}');
+        expect(form.customPrompts).toBe(false);
     });
 
     test('applies provider presets without requiring users to copy model identifiers or base URLs', () => {
         const form = createEmptyLLMConfigForm();
         const deepSeek = createLLMProviderOptions(tt).find(option => option.value === 'deepseek')!;
+        form.api_key = 'old-provider-key';
+        form.credential_mode = 'refresh_token';
+        form.credential_json = '{"refresh_token":"old-provider-token"}';
 
         applyLLMProviderDefaults(form, deepSeek);
 
@@ -80,6 +94,9 @@ describe('LLM config helper contracts', () => {
         expect(form.name).toBe('DeepSeek');
         expect(form.model).toBe('deepseek-chat');
         expect(form.base_url).toBe('https://api.deepseek.com/v1');
+        expect(form.api_key).toBe('');
+        expect(form.credential_mode).toBe('api_key');
+        expect(form.credential_json).toBe('');
 
         form.api_key = 'stale';
         applyLLMProviderDefaults(form, createLLMProviderOptions(tt).find(option => option.value === 'ollama')!);
@@ -87,6 +104,7 @@ describe('LLM config helper contracts', () => {
 
         applyLLMProviderDefaults(form, {
             title: 'Custom', value: 'custom', modelPlaceholder: '', apiKeyPlaceholder: '', baseUrlPlaceholder: '',
+            description: 'Custom provider', location: 'custom',
         });
         expect(form).toMatchObject({ provider: 'custom', name: 'Custom', model: '', base_url: '' });
     });
@@ -114,7 +132,7 @@ describe('LLM config helper contracts', () => {
             .toThrow('Credential JSON must be a JSON object');
     });
 
-    test('builds advanced settings only when advanced mode is enabled', () => {
+    test('builds advanced settings only when enabled and keeps prompts system-managed by default', () => {
         expect(buildAdvancedSettingsPayload(makeForm({
             advancedMode: false,
             reasoning_depth: 'high',
@@ -123,6 +141,21 @@ describe('LLM config helper contracts', () => {
 
         expect(buildAdvancedSettingsPayload(makeForm({
             advancedMode: true,
+            reasoning_depth: 'high',
+            temperature: '0.15',
+            max_tokens: '2048',
+            system_prompt: '  system prompt  ',
+            classification_prompt_template: ' classify {transactions_json} ',
+            rule_prompt_template: ' rule {category_name} ',
+        }))).toEqual({
+            reasoning_depth: 'high',
+            temperature: 0.15,
+            max_tokens: 2048,
+        });
+
+        expect(buildAdvancedSettingsPayload(makeForm({
+            advancedMode: true,
+            customPrompts: true,
             reasoning_depth: 'high',
             temperature: '0.15',
             max_tokens: '2048',
