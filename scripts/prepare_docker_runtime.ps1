@@ -202,6 +202,7 @@ $backendValues = [ordered]@{
     BILL_ANALYSER_POSTGRES_URL = $postgresUrl
     BILL_ANALYSER_AUTH_JWT_SECRET = $jwtSecret
     BILL_ANALYSER_IMPORT_CONFIRM_RECEIPT_READ_SOURCE = (First-ConfiguredValue -Names @("BILL_ANALYSER_IMPORT_CONFIRM_RECEIPT_READ_SOURCE") -Sources @($dotenv) -DefaultValue "typed")
+    BILL_ANALYSER_LLM_BASE_URL_ALLOWLIST = (First-ConfiguredValue -Names @("BILL_ANALYSER_LLM_BASE_URL_ALLOWLIST") -Sources @($existingBackend, $dotenv) -DefaultValue "https://sub2api.long-antares.ts.net")
 }
 
 foreach ($name in @(
@@ -223,7 +224,6 @@ foreach ($name in @(
     "BILL_ANALYSER_WEAVIATE_RETRY_ATTEMPTS",
     "BILL_ANALYSER_WEAVIATE_BATCH_SIZE",
     "BILL_ANALYSER_WEAVIATE_VECTOR_DIMENSIONS",
-    "BILL_ANALYSER_LLM_BASE_URL_ALLOWLIST",
     "BILL_ANALYSER_LLM_TOKEN_URL_ALLOWLIST",
     "BILL_ANALYSER_BACKUP_SYNC_ENDPOINT_ALLOWLIST"
 )) {

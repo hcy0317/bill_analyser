@@ -9,6 +9,7 @@ Product surfaces: Bill Analyser desktop web; Rules Center → LLM Recognition �
 Evidence reviewed:
 
 - Current implementation and browser state: `LearningCenterPanel.vue`, `LearningCenterPanel.template.html`, `useLearningCenterLlmConfig.ts`, `OcrConfigPanel.vue`, and `ocr-config/**`.
+- Post-deployment browser review of the active PP-OCRv6 page and direct user feedback that the duplicated setup banner, four wide engine cards, and repeated success alerts were visually heavy.
 - Existing visual contracts: `.agents/skills/bill-analyser-ui-style-reference/SKILL.md`, `src/web/src/desktop-main.ts`, and desktop card/form patterns.
 - Current runtime contracts: `docs/PROJECT_OVERVIEW.md` and Rust LLM/OCR provider, credential-redaction, SSRF, and receipt-recognition paths.
 - Mature references: WeKnora model/provider and parser-engine settings, Open WebUI OpenAI-compatible connections, Dify provider credentials, PaddleOCR local/self-hosted/cloud modes, and Sub2API guided account setup.
@@ -63,11 +64,11 @@ LLM Configuration:
 
 OCR Configuration:
 
-1. Current saved mode summary.
-2. Primary question: “Where should receipt images be recognized?”
-3. Four mutually exclusive cards: built-in (recommended), self-hosted/local, cloud vision, off.
-4. Only the selected mode’s necessary fields appear.
-5. A “How to use it” section points to Transactions → Add → Recognize receipt image; settings never upload or bill automatically.
+1. One compact current-mode summary; do not repeat the same model readiness in a banner and alerts.
+2. Primary choices are full-width radio rows: local private recognition, cloud vision, and off.
+3. When bundled PP-OCRv6 is ready, Tesseract moves under a compatibility disclosure instead of competing as a peer choice.
+4. Only the selected mode’s necessary fields appear; the save action appears only when something changed.
+5. A compact “How to use it” disclosure points to Transactions → Add → Recognize receipt image; settings never upload or bill automatically.
 
 ## Design principles
 
@@ -81,7 +82,8 @@ OCR Configuration:
 
 - Use existing Vuetify outlined cards, comfortable fields, tonal status chips, and the repository primary color.
 - Use a 4/8/12/16/24 px spacing rhythm from existing framework utilities.
-- Choice cards use a clear selected border/background, short title, one-sentence description, and a small semantic badge.
+- Choice rows use one icon, a short title, one sentence, a trailing radio state, and a selected border/background. Avoid tall equal-width engine cards.
+- Status is stated once. Do not stack a readiness banner, a selected-mode alert, and a second success alert for the same local model.
 - Avoid new hard-coded brand colors; use `primary`, `success`, `warning`, `error`, and theme surface variables.
 - Motion is limited to existing expansion and dialog transitions.
 
@@ -89,7 +91,7 @@ OCR Configuration:
 
 - Existing: `v-card`, `v-item-group`, `v-alert`, `v-chip`, `v-select`, `v-text-field`, `v-expansion-panels`, `v-empty-state`, `v-dialog`.
 - LLM saved connection cards replace the dense table while retaining test, activate, and delete actions.
-- OCR setup cards remain local to `OcrConfigPanel`; LLM provider guidance remains local to the LLM configuration dialog.
+- OCR compact mode rows and compatibility disclosure remain local to `OcrConfigPanel`; LLM provider guidance remains local to the LLM configuration dialog.
 - Tokens and shared defaults remain owned by Vuetify theme and existing desktop styles; no parallel design-system package is introduced.
 
 ## Accessibility

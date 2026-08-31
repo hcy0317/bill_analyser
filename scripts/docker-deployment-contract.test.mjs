@@ -70,6 +70,8 @@ test("the production compose owns the complete Bill Analyser runtime", async () 
   assert.doesNotMatch(prepare, /bill_analyser_dev/);
   assert.match(prepare, /backend\.env/);
   assert.match(prepare, /postgres\.env/);
+  assert.match(prepare, /BILL_ANALYSER_LLM_BASE_URL_ALLOWLIST/);
+  assert.match(prepare, /https:\/\/sub2api\.long-antares\.ts\.net/);
   assert.match(prepare, /SetAccessRuleProtection/);
   assert.match(prepare, /DirectorySecurity/);
   assert.doesNotMatch(prepare, /Write-(?:Host|Output).*secret/i);
@@ -83,6 +85,8 @@ test("the production compose owns the complete Bill Analyser runtime", async () 
   assert.match(verify, /POSTGRES_PASSWORD/);
   assert.match(verify, /rapidocr_adapter\.py --check/);
   assert.match(verify, /bundled_ocr/);
+  assert.match(verify, /BILL_ANALYSER_LLM_BASE_URL_ALLOWLIST/);
+  assert.match(verify, /sub2api\.long-antares\.ts\.net/);
 
   assert.match(gitignore, /^\.runtime\/$/m);
 });

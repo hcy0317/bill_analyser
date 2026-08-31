@@ -57,6 +57,13 @@ if ($postgresEnvNames -notcontains "POSTGRES_PASSWORD" -or $backendEnvNames -not
 if ($backendEnv["BILL_ANALYSER_RUST_OCR_LOCAL_JSON_BUNDLED"] -ne "1") {
     throw "Bundled local OCR capability is not enabled"
 }
+$requiredLlmOrigin = "https://sub2api.long-antares.ts.net"
+$llmAllowedOrigins = @([string]$backendEnv["BILL_ANALYSER_LLM_BASE_URL_ALLOWLIST"] -split "[;,]" |
+    ForEach-Object { $_.Trim().TrimEnd("/") } |
+    Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+if ($llmAllowedOrigins -notcontains $requiredLlmOrigin) {
+    throw "Sub2API LLM origin is absent from BILL_ANALYSER_LLM_BASE_URL_ALLOWLIST"
+}
 $ocrCheck = & docker exec bill-analyser-backend /opt/bill-analyser-ocr/bin/python /opt/bill-analyser-ocr/rapidocr_adapter.py --check |
     ConvertFrom-Json
 if (-not $ocrCheck.ready -or [string]::IsNullOrWhiteSpace([string]$ocrCheck.model)) {
@@ -93,6 +100,7 @@ if ($null -eq $app) { throw "LocalOps does not contain the bill_analyser Compose
     public_url = $PublicUrl
     public_status = [int]$public.StatusCode
     environment_isolation = "postgres-only database credentials; backend-only application secrets"
+    llm_base_url_allowlist = [ordered]@{ sub2api_origin_configured = $true }
     bundled_ocr = [ordered]@{ ready = $true; model = [string]$ocrCheck.model }
     local_ops_app = [ordered]@{ id = $app.id; name = $app.name; running = $app.running }
 } | ConvertTo-Json -Depth 8

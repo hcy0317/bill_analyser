@@ -145,6 +145,14 @@ describe('OcrConfigPanel state and mapping', () => {
             title: 'tt:Smart built-in recognition',
             kindLabel: 'Recommended',
         });
+        expect(bindings.ocrPrimarySetupOptions.value.map((item: any) => item.value)).toStrictEqual([
+            'local_json_ocr',
+            'llm_vision',
+            'disabled',
+        ]);
+        expect(bindings.ocrCompatibilitySetupOptions.value.map((item: any) => item.value)).toStrictEqual([
+            'tesseract',
+        ]);
         expect(bindings.ocrLanguageOptions).toStrictEqual([
             { title: 'tt:Chinese and English (recommended)', value: 'chi_sim+eng' },
             { title: 'tt:Simplified Chinese', value: 'chi_sim' },
@@ -489,7 +497,7 @@ describe('OcrConfigPanel loading and saving', () => {
         );
     });
 
-    test('one-click server setup enables the bundled local model without cloud fields', async () => {
+    test('bundled local mode waits for explicit save and does not carry cloud fields', async () => {
         const bindings = setup();
         bindings.applyOCRConfig(fullConfig({ provider: 'disabled', configured: false }));
         mockServices.updateOCRConfig.mockResolvedValueOnce(response(fullConfig({
@@ -497,7 +505,9 @@ describe('OcrConfigPanel loading and saving', () => {
             configured: true,
         })));
 
-        await bindings.enableServerQuickSetup();
+        bindings.selectOCRSetup('local_json_ocr');
+        expect(mockServices.updateOCRConfig).not.toHaveBeenCalled();
+        await bindings.saveOCRConfig();
 
         expect(mockServices.updateOCRConfig).toHaveBeenCalledWith(expect.objectContaining({
             provider: 'local_json_ocr',

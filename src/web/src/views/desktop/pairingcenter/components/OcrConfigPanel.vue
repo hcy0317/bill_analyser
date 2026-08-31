@@ -10,7 +10,15 @@ import { useExternalTemplateBindings } from '@/lib/vue_external_template.ts';
 import { useI18n } from '@/locales/helpers.ts';
 import services, { type OCRConfigResponse } from '@/lib/services.ts';
 
-import { mdiRefresh } from '@mdi/js';
+import {
+    mdiCloudOutline,
+    mdiFileDocumentOutline,
+    mdiPower,
+    mdiRadioboxBlank,
+    mdiRadioboxMarked,
+    mdiRefresh,
+    mdiShieldLockOutline,
+} from '@mdi/js';
 
 interface SelectOption {
     title: string;
@@ -21,6 +29,7 @@ interface OCRSetupOption extends SelectOption {
     kind: 'off' | 'built_in' | 'local' | 'cloud';
     kindLabel: string;
     description: string;
+    icon: string;
 }
 
 const props = defineProps<{
@@ -110,6 +119,7 @@ const ocrSetupOptions = computed<OCRSetupOption[]>(() => [
         kind: 'local' as const,
         kindLabel: 'Recommended',
         description: tt('PP-OCRv6 small runs locally on this server for stronger Chinese receipt recognition.'),
+        icon: mdiShieldLockOutline,
     }] : []),
     {
         title: serverQuickSetupAvailable.value ? tt('Basic built-in recognition') : tt('Built-in recognition'),
@@ -117,6 +127,7 @@ const ocrSetupOptions = computed<OCRSetupOption[]>(() => [
         kind: 'built_in',
         kindLabel: serverQuickSetupAvailable.value ? 'Fallback' : 'Recommended',
         description: tt('Runs inside this Bill Analyser server. No account, address, or API key is required.'),
+        icon: mdiFileDocumentOutline,
     },
     ...(!serverQuickSetupAvailable.value ? [{
         title: tt('Self-hosted / local OCR'),
@@ -124,6 +135,7 @@ const ocrSetupOptions = computed<OCRSetupOption[]>(() => [
         kind: 'local' as const,
         kindLabel: 'Private',
         description: tt('Uses an OCR command installed by the server operator. Images stay on this server.'),
+        icon: mdiShieldLockOutline,
     }] : []),
     {
         title: tt('Cloud vision'),
@@ -131,6 +143,7 @@ const ocrSetupOptions = computed<OCRSetupOption[]>(() => [
         kind: 'cloud',
         kindLabel: 'May cost',
         description: tt('Sends receipt images to an OpenAI-compatible vision service. Provider charges may apply.'),
+        icon: mdiCloudOutline,
     },
     {
         title: tt('Turn off OCR'),
@@ -138,8 +151,19 @@ const ocrSetupOptions = computed<OCRSetupOption[]>(() => [
         kind: 'off',
         kindLabel: 'Off',
         description: tt('Do not recognize receipt images automatically.'),
+        icon: mdiPower,
     },
 ]);
+const ocrPrimarySetupOptions = computed<OCRSetupOption[]>(() => (
+    serverQuickSetupAvailable.value
+        ? ocrSetupOptions.value.filter(option => option.value !== 'tesseract')
+        : ocrSetupOptions.value
+));
+const ocrCompatibilitySetupOptions = computed<OCRSetupOption[]>(() => (
+    serverQuickSetupAvailable.value
+        ? ocrSetupOptions.value.filter(option => option.value === 'tesseract')
+        : []
+));
 const selectedOCRSetupOption = computed<OCRSetupOption>(() => (
     ocrSetupOptions.value.find(option => option.value === ocrConfigForm.value.provider)
         ?? ocrSetupOptions.value[0] as OCRSetupOption
@@ -398,16 +422,10 @@ async function saveOCRConfig() {
     }
 }
 
-async function enableServerQuickSetup(): Promise<void> {
-    if (!serverQuickSetupAvailable.value) {
-        return;
-    }
-    selectOCRSetup(serverLocalModel.value.provider);
-    await saveOCRConfig();
-}
-
 useExternalTemplateBindings(
     SettingsJsonImportExportButton,
+    mdiRadioboxBlank,
+    mdiRadioboxMarked,
     mdiRefresh,
     hideSectionTitle,
     hasHeaderActionsTarget,
@@ -416,6 +434,8 @@ useExternalTemplateBindings(
     credentialModeOptions,
     ocrProviderOptions,
     ocrSetupOptions,
+    ocrPrimarySetupOptions,
+    ocrCompatibilitySetupOptions,
     ocrLanguageOptions,
     serverLocalModel,
     serverQuickSetupAvailable,
@@ -426,7 +446,6 @@ useExternalTemplateBindings(
     usesRemoteVision,
     supportsLanguage,
     selectOCRSetup,
-    enableServerQuickSetup,
     saveOCRConfig,
 );
 

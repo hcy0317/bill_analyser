@@ -51,17 +51,25 @@ describe('LearningCenterPanel OCR config placement', () => {
         expect(source).toContain('<Teleport defer :disabled="!hasHeaderActionsTarget" :to="headerActionsTarget">');
     });
 
-    test('OCR config leads with processing location and keeps expert contracts behind disclosure', () => {
+    test('OCR config uses compact mode rows and keeps fallback and expert contracts behind disclosure', () => {
         const source = readOcrPanelSource();
 
         expect(source).toContain("tt('Where should receipt images be recognized?')");
-        expect(source).toContain('ocr-provider-option__description');
+        expect(source).toContain('class="ocr-mode-list"');
+        expect(source).toContain('class="ocr-mode-option"');
+        expect(source).toContain('ocr-mode-option__description');
+        expect(source).toContain('<v-item-group v-model="ocrConfigForm.provider"');
+        expect(source).toContain('tag="button"');
+        expect(source).toContain(':aria-pressed="isSelected"');
+        expect(source).toContain('v-for="option in ocrPrimarySetupOptions"');
+        expect(source).toContain("tt('Compatibility engine')");
         expect(source).toContain(':items="ocrLanguageOptions"');
         expect(source).toContain("tt('Expert settings')");
         expect(source).toContain("tt('How to use receipt recognition')");
         expect(source).toContain('ocrSaveActionLabel');
         expect(source).toContain('width: 100%');
-        expect(source).toContain('max-width: none');
+        expect(source).not.toContain('ocr-provider-toggle');
+        expect(source).not.toContain('ocr-server-quick-setup');
         expect(source).not.toContain('v-model="ocrConfigForm.lang" :label="tt(\'OCR Language\')"');
     });
 

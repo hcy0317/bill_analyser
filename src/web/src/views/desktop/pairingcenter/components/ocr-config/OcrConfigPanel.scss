@@ -41,52 +41,6 @@
     min-width: 38px;
 }
 
-.ocr-provider-toggle {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 12px;
-    width: 100%;
-    height: auto;
-    padding: 0;
-    background: transparent;
-}
-
-.ocr-provider-toggle > .ocr-provider-option {
-    justify-self: stretch;
-    width: 100% !important;
-    max-width: none !important;
-    min-width: 0 !important;
-    min-height: clamp(128px, 18vh, 152px);
-    height: auto !important;
-    padding: 16px;
-    border-radius: 8px !important;
-}
-
-.ocr-provider-option :deep(.v-btn__content) {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    justify-content: flex-start;
-    gap: 8px;
-    width: 100%;
-    text-align: start;
-    white-space: normal;
-}
-
-.ocr-provider-option__title {
-    font-size: 0.95rem;
-    font-weight: 600;
-    line-height: 1.35;
-}
-
-.ocr-provider-option__description {
-    flex: 1 1 auto;
-    font-size: 0.78rem;
-    font-weight: 400;
-    line-height: 1.45;
-    opacity: 0.78;
-}
-
 .ocr-config-card__title {
     display: flex;
     flex-wrap: wrap;
@@ -94,8 +48,116 @@
     gap: 12px;
 }
 
-.ocr-server-quick-setup {
-    border: 1px solid rgba(var(--v-theme-primary), 0.34);
+.ocr-current-summary {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 16px;
+    border: 1px solid rgba(var(--v-theme-on-surface), 0.12);
+    border-radius: 10px;
+    background: rgba(var(--v-theme-on-surface), 0.035);
+}
+
+.ocr-current-summary__icon,
+.ocr-mode-option__icon {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    color: rgb(var(--v-theme-primary));
+    background: rgba(var(--v-theme-primary), 0.12);
+}
+
+.ocr-current-summary__content,
+.ocr-mode-option__copy {
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.ocr-mode-list {
+    display: grid;
+    gap: 10px;
+    width: 100%;
+}
+
+.ocr-mode-option {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    height: auto;
+    padding: 13px 15px;
+    border: 1px solid rgba(var(--v-theme-on-surface), 0.12);
+    border-radius: 10px;
+    text-align: start;
+    transition: border-color 120ms ease, background-color 120ms ease;
+}
+
+.ocr-mode-option:hover {
+    border-color: rgba(var(--v-theme-primary), 0.45);
+}
+
+.ocr-mode-option--selected {
+    border-color: rgba(var(--v-theme-primary), 0.7);
+    background: rgba(var(--v-theme-primary), 0.075);
+}
+
+.ocr-mode-option__content {
+    display: flex;
+    width: 100%;
+    min-width: 0;
+    align-items: flex-start;
+    gap: 12px;
+}
+
+.ocr-mode-option__state {
+    flex: 0 0 auto;
+    align-self: center;
+    margin-inline-start: auto;
+}
+
+.ocr-mode-option__heading {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+}
+
+.ocr-mode-option__description,
+.ocr-mode-option__meta {
+    margin-top: 3px;
+    color: rgba(var(--v-theme-on-surface), 0.68);
+    font-size: 0.82rem;
+    line-height: 1.45;
+    white-space: normal;
+}
+
+.ocr-mode-option__meta {
+    color: rgba(var(--v-theme-on-surface), 0.52);
+    font-size: 0.75rem;
+}
+
+.ocr-mode-option--compact {
+    margin-bottom: 12px;
+}
+
+.ocr-mode-details {
+    padding: 16px;
+    border: 1px solid rgba(var(--v-theme-on-surface), 0.1);
+    border-radius: 10px;
+    background: rgba(var(--v-theme-on-surface), 0.025);
+}
+
+.ocr-secondary-panels :deep(.v-expansion-panel) {
+    border: 1px solid rgba(var(--v-theme-on-surface), 0.1);
+    box-shadow: none;
+}
+
+.ocr-save-actions {
+    flex-wrap: wrap;
+    gap: 12px;
 }
 
 .ocr-usage-steps {
@@ -105,18 +167,22 @@
     padding-inline-start: 22px;
 }
 
-@media (max-width: 959px) {
-    .ocr-provider-toggle {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-}
-
 @media (max-width: 599px) {
-    .ocr-provider-toggle {
-        grid-template-columns: 1fr;
+    .ocr-current-summary {
+        align-items: flex-start;
+        flex-wrap: wrap;
     }
 
-    .ocr-provider-option {
-        min-height: 124px;
+    .ocr-current-summary > .v-chip {
+        margin-inline-start: 54px;
+    }
+
+    .ocr-mode-option {
+        padding: 12px;
+    }
+
+    .ocr-mode-option__icon {
+        width: 36px;
+        height: 36px;
     }
 }
