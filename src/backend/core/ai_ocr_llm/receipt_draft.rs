@@ -227,6 +227,18 @@ fn infer_transaction_type(
             matching_keywords(text, &["转账", "transfer"]),
         ));
     }
+    if contains_any(
+        &normalized,
+        &["投资理财", "基金", "定投", "理财申购", "investment"],
+    ) {
+        return Some((
+            "investment",
+            1,
+            0.9,
+            "investment_keyword".to_string(),
+            matching_keywords(text, &["投资理财", "基金", "定投", "investment"]),
+        ));
+    }
     if payment_platform.is_some()
         || contains_any(
             &normalized,
@@ -336,9 +348,11 @@ fn apply_account_mapping(
     account_rules: &[AccountRuleCandidate],
     accounts: &[ReceiptDraftAccount],
 ) {
-    if account_rules.is_empty() {
-        return;
-    }
+    let payment_method = parsed
+        .payment_method
+        .clone()
+        .or_else(|| parsed.payment_platform.clone())
+        .unwrap_or_default();
     let context = AccountRuleMatchContext {
         parser_id: "ocr_receipt".to_string(),
         parser_label: "Receipt OCR".to_string(),
@@ -347,42 +361,104 @@ fn apply_account_mapping(
             .description
             .clone()
             .unwrap_or_else(|| text.to_string()),
-        payment_method: parsed.payment_platform.clone().unwrap_or_default(),
+        payment_method: payment_method.clone(),
         description: text.to_string(),
         expense_counterparty: parsed.description.clone().unwrap_or_default(),
-        expense_payment_method: parsed.payment_platform.clone().unwrap_or_default(),
+        expense_payment_method: payment_method.clone(),
         expense_description: text.to_string(),
         income_counterparty: parsed.description.clone().unwrap_or_default(),
-        income_payment_method: parsed.payment_platform.clone().unwrap_or_default(),
+        income_payment_method: payment_method,
         income_description: text.to_string(),
         investment_counterparty: parsed.description.clone().unwrap_or_default(),
         investment_description: text.to_string(),
     };
-    let Some(matched) = match_account_rules(
+    if let Some(matched) = match_account_rules(
         account_rules,
         &context,
         ACCOUNT_ROLE_SOURCE,
         transaction_type.unwrap_or(TRANSACTION_SCOPE_ALL),
-    ) else {
+    ) {
+        let account_id = matched.account_id.to_string();
+        let account_name = accounts
+            .iter()
+            .find(|account| account.id == account_id)
+            .map(|account| account.name.clone());
+        insert_field(
+            draft,
+            "source_account_id",
+            ReceiptDraftField {
+                value: json!(account_id),
+                confidence: 0.88,
+                reason: "account_rule".to_string(),
+                evidence: matched.matched_fields,
+                label: account_name,
+                unit: None,
+            },
+        );
+        return;
+    }
+
+    let Some((account, confidence, reason, evidence)) =
+        match_receipt_account(accounts, parsed, text)
+    else {
         return;
     };
-    let account_id = matched.account_id.to_string();
-    let account_name = accounts
-        .iter()
-        .find(|account| account.id == account_id)
-        .map(|account| account.name.clone());
     insert_field(
         draft,
         "source_account_id",
         ReceiptDraftField {
-            value: json!(account_id),
-            confidence: 0.88,
-            reason: "account_rule".to_string(),
-            evidence: matched.matched_fields,
-            label: account_name,
+            value: json!(account.id),
+            confidence,
+            reason: reason.to_string(),
+            evidence,
+            label: Some(account.name.clone()),
             unit: None,
         },
     );
+}
+
+fn match_receipt_account<'a>(
+    accounts: &'a [ReceiptDraftAccount],
+    parsed: &PaymentScreenshotParseContract,
+    text: &str,
+) -> Option<(&'a ReceiptDraftAccount, f64, &'static str, Vec<String>)> {
+    if let Some(payment_method) = parsed.payment_method.as_deref() {
+        let normalized_method = normalize_match_text(payment_method);
+        let direct = accounts
+            .iter()
+            .filter(|account| {
+                let name = normalize_match_text(&account.name);
+                name.chars().count() >= 2 && normalized_method.contains(&name)
+            })
+            .collect::<Vec<_>>();
+        if let [account] = direct.as_slice() {
+            return Some((
+                account,
+                0.91,
+                "ocr_payment_method_account",
+                vec![payment_method.to_string()],
+            ));
+        }
+    }
+
+    let account_alias = match parsed.payment_platform.as_deref() {
+        Some("wechat_pay") => Some("微信"),
+        Some("alipay") => Some("支付宝"),
+        _ => None,
+    }?;
+    let aliases = accounts
+        .iter()
+        .filter(|account| normalize_match_text(&account.name).contains(account_alias))
+        .collect::<Vec<_>>();
+    if let [account] = aliases.as_slice() {
+        return Some((
+            account,
+            0.86,
+            "ocr_platform_account",
+            matching_keywords(text, &[account_alias]),
+        ));
+    }
+    None
 }
 
 /// 根据 tag 名称命中 OCR 文本，为草稿提供自动标签或候选标签。

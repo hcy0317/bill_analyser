@@ -7,6 +7,9 @@ use unicode_normalization::UnicodeNormalization;
 
 use super::types::PaymentScreenshotParseContract;
 
+type DateParts = (i32, u32, u32);
+type TimeParts = (u32, u32, u32, bool);
+
 /// 解析支付截图 OCR 文本，提取金额、时间、描述、支付平台和整体置信度。
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn parse_payment_screenshot_text(text: &str) -> PaymentScreenshotParseContract {
@@ -16,6 +19,7 @@ pub fn parse_payment_screenshot_text(text: &str) -> PaymentScreenshotParseContra
             amount: None,
             trade_time: None,
             description: None,
+            payment_method: None,
             payment_platform: None,
             confidence: 0.0,
         };
@@ -25,11 +29,13 @@ pub fn parse_payment_screenshot_text(text: &str) -> PaymentScreenshotParseContra
     let amount = parse_amount(&normalized_text);
     let trade_time = parse_trade_time(&normalized_text);
     let description = parse_description(&lines);
+    let payment_method = parse_payment_method(&lines);
     let payment_platform = detect_payment_platform(&normalized_text).map(str::to_string);
     let confidence = score_ocr_confidence(
         amount,
         trade_time.as_deref(),
         description.as_deref(),
+        payment_method.as_deref(),
         payment_platform.as_deref(),
     );
 
@@ -37,6 +43,7 @@ pub fn parse_payment_screenshot_text(text: &str) -> PaymentScreenshotParseContra
         amount,
         trade_time,
         description,
+        payment_method,
         payment_platform,
         confidence,
     }
@@ -80,6 +87,7 @@ fn detect_payment_platform(text: &str) -> Option<&'static str> {
         || lowered.contains("alipay")
         || text.contains("花呗")
         || text.contains("余额宝")
+        || text.contains("蚂蚁财富")
     {
         Some("alipay")
     } else {
@@ -122,8 +130,32 @@ fn parse_amount(text: &str) -> Option<f64> {
     if contains_any_case_insensitive(text, &["元", "CNY", "RMB"]) {
         parse_currency_adjacent_amount(text).map(f64::abs)
     } else {
-        None
+        parse_standalone_signed_amount(text).map(f64::abs)
     }
+}
+
+/// 识别支付详情页居中的独立有符号金额，避免把状态栏速率或订单号误当金额。
+fn parse_standalone_signed_amount(text: &str) -> Option<f64> {
+    normalize_lines(text).into_iter().find_map(|line| {
+        let cleaned = line
+            .trim()
+            .trim_start_matches(['¥', '￥'])
+            .trim()
+            .replace(',', "");
+        let body = cleaned
+            .strip_prefix('-')
+            .or_else(|| cleaned.strip_prefix('+'))?;
+        let (integer, decimal) = body.split_once('.')?;
+        if integer.is_empty()
+            || integer.len() > 12
+            || decimal.len() != 2
+            || !integer.chars().all(|ch| ch.is_ascii_digit())
+            || !decimal.chars().all(|ch| ch.is_ascii_digit())
+        {
+            return None;
+        }
+        cleaned.parse::<f64>().ok()
+    })
 }
 
 /// 在标签或货币符号之后解析数字，遇到非分隔字符时停止以降低误识别。
@@ -235,6 +267,9 @@ fn parse_trade_time(text: &str) -> Option<String> {
     let search_text = normalize_datetime_text(text);
     let tokens = search_text.split_whitespace().collect::<Vec<_>>();
     for (index, token) in tokens.iter().enumerate() {
+        if let Some((date_parts, time_parts)) = parse_compact_date_time_token(token) {
+            return Some(format_date_time(date_parts, Some(time_parts)));
+        }
         let Some(date_parts) = parse_date_token(token) else {
             continue;
         };
@@ -244,6 +279,19 @@ fn parse_trade_time(text: &str) -> Option<String> {
         return Some(format_date_time(date_parts, time_parts));
     }
     None
+}
+
+/// 兼容 OCR 把 `2026-08-26 09:06:15` 合并为 `2026-08-2609:06:15`。
+fn parse_compact_date_time_token(token: &str) -> Option<(DateParts, TimeParts)> {
+    let colon = token.find(':')?;
+    let hour_start = colon.checked_sub(2)?;
+    let hour = token.get(hour_start..colon)?;
+    if !hour.chars().all(|ch| ch.is_ascii_digit()) {
+        return None;
+    }
+    let date_parts = parse_date_token(token.get(..hour_start)?)?;
+    let time_parts = parse_time_token(token.get(hour_start..)?)?;
+    Some((date_parts, time_parts))
 }
 
 /// 将中文日期分隔符规范为 ASCII 形式，方便后续 token 解析。
@@ -352,35 +400,73 @@ fn format_date_time(
 /// 从 OCR 行中提取交易描述，优先使用带标签字段，否则寻找可信候选行。
 #[tracing::instrument(level = "debug", skip_all)]
 fn parse_description(lines: &[String]) -> Option<String> {
-    parse_labeled_description(lines).or_else(|| {
-        lines
+    let mut values = parse_labeled_descriptions(lines);
+    if let Some(headline) = headline_before_amount(lines) {
+        if !values.contains(&headline) {
+            values.insert(0, headline);
+        }
+    }
+    if values.is_empty() {
+        return lines
             .iter()
             .find(|line| is_description_candidate(line))
-            .map(|line| clean_description(line))
-    })
+            .map(|line| clean_description(line));
+    }
+    Some(values.join(" - "))
 }
 
-/// 解析“交易对方/商户/备注”等标签后的描述值，兼容值在下一行的截图布局。
-#[tracing::instrument(level = "debug", skip_all)]
-fn parse_labeled_description(lines: &[String]) -> Option<String> {
+fn headline_before_amount(lines: &[String]) -> Option<String> {
+    let amount_index = lines
+        .iter()
+        .position(|line| parse_standalone_signed_amount(line).is_some())?;
+    lines[..amount_index]
+        .iter()
+        .rev()
+        .find(|line| is_description_candidate(line))
+        .map(|line| clean_description(line))
+}
+
+/// 从全图 OCR 的有序文本行中提取真实扣款账户/支付方式。
+fn parse_payment_method(lines: &[String]) -> Option<String> {
     for (index, line) in lines.iter().enumerate() {
-        for label in description_labels() {
+        for label in payment_method_labels() {
             if let Some(value) = value_after_label(line, label) {
-                if is_description_candidate(value) {
-                    return Some(clean_description(value));
-                }
+                return Some(clean_field_value(value));
             }
             if line == label {
-                if let Some(next_line) = lines
-                    .get(index + 1)
-                    .filter(|item| is_description_candidate(item))
-                {
-                    return Some(clean_description(next_line));
+                if let Some(value) = lines.get(index + 1) {
+                    let cleaned = clean_field_value(value);
+                    if !cleaned.is_empty() {
+                        return Some(cleaned);
+                    }
                 }
             }
         }
     }
     None
+}
+
+/// 解析“交易对方/商户/备注”等标签后的描述值，兼容值在下一行的截图布局。
+#[tracing::instrument(level = "debug", skip_all)]
+fn parse_labeled_descriptions(lines: &[String]) -> Vec<String> {
+    let mut values = Vec::new();
+    for (index, line) in lines.iter().enumerate() {
+        for label in description_labels() {
+            let value = value_after_label(line, label).or_else(|| {
+                (line == label)
+                    .then(|| lines.get(index + 1))
+                    .flatten()
+                    .map(String::as_str)
+            });
+            if let Some(value) = value.filter(|item| is_description_candidate(item)) {
+                let cleaned = clean_description(value);
+                if !values.contains(&cleaned) {
+                    values.push(cleaned);
+                }
+            }
+        }
+    }
+    values
 }
 
 fn value_after_label<'a>(line: &'a str, label: &str) -> Option<&'a str> {
@@ -427,10 +513,24 @@ fn is_description_candidate(line: &str) -> bool {
 }
 
 fn clean_description(value: &str) -> String {
-    collapse_whitespace(value)
+    let collapsed = collapse_whitespace(value);
+    let without_detail = collapsed
+        .split_once("查看详情")
+        .map(|(value, _)| value)
+        .unwrap_or(&collapsed);
+    without_detail
         .trim_matches(|ch: char| ch.is_whitespace() || matches!(ch, ':' | '：'))
+        .trim_end_matches(['.', '…', '>', '＞', '›'])
         .chars()
         .take(60)
+        .collect()
+}
+
+fn clean_field_value(value: &str) -> String {
+    collapse_whitespace(value)
+        .trim_matches(|ch: char| ch.is_whitespace() || matches!(ch, ':' | '：' | '>' | '＞' | '›'))
+        .chars()
+        .take(80)
         .collect()
 }
 
@@ -439,6 +539,7 @@ fn score_ocr_confidence(
     amount: Option<f64>,
     trade_time: Option<&str>,
     description: Option<&str>,
+    payment_method: Option<&str>,
     payment_platform: Option<&str>,
 ) -> f64 {
     let mut score = 0.0;
@@ -451,7 +552,9 @@ fn score_ocr_confidence(
     if description.is_some_and(|value| !value.is_empty()) {
         score += 0.25;
     }
-    if payment_platform.is_some_and(|value| !value.is_empty()) {
+    if payment_platform.is_some_and(|value| !value.is_empty())
+        || payment_method.is_some_and(|value| !value.is_empty())
+    {
         score += 0.2;
     }
     f64::min(1.0, score)
@@ -467,9 +570,23 @@ fn description_labels() -> &'static [&'static str] {
         "对方账户",
         "商品",
         "商品说明",
+        "商户全称",
+        "服务详情",
+        "交易详情",
         "订单名称",
         "备注",
         "说明",
+    ]
+}
+
+fn payment_method_labels() -> &'static [&'static str] {
+    &[
+        "付款方式",
+        "支付方式",
+        "扣款方式",
+        "支付渠道",
+        "付款账户",
+        "支付账户",
     ]
 }
 

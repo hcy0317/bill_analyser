@@ -145,6 +145,9 @@ fn validate_llm_base_url(provider: &str, base_url: &str, explicit: bool) -> Resu
             return Ok(());
         }
     }
+    if provider == "openai_compatible" && parsed.is_https() && !llm_url_host_is_forbidden(&parsed) {
+        return Ok(());
+    }
     if llm_url_is_allowlisted(&parsed) {
         if parsed.is_https() || llm_url_is_local_plain_http_endpoint(&parsed) {
             return Ok(());

@@ -64,6 +64,10 @@ $llmAllowedOrigins = @([string]$backendEnv["BILL_ANALYSER_LLM_BASE_URL_ALLOWLIST
 if ($llmAllowedOrigins -notcontains $requiredLlmOrigin) {
     throw "Sub2API LLM origin is absent from BILL_ANALYSER_LLM_BASE_URL_ALLOWLIST"
 }
+$sub2apiResolution = & docker exec bill-analyser-backend getent hosts sub2api.long-antares.ts.net
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace(($sub2apiResolution -join ""))) {
+    throw "Backend container cannot resolve Sub2API through Tailscale MagicDNS"
+}
 $ocrCheck = & docker exec bill-analyser-backend /opt/bill-analyser-ocr/bin/python /opt/bill-analyser-ocr/rapidocr_adapter.py --check |
     ConvertFrom-Json
 if (-not $ocrCheck.ready -or [string]::IsNullOrWhiteSpace([string]$ocrCheck.model)) {
@@ -100,7 +104,10 @@ if ($null -eq $app) { throw "LocalOps does not contain the bill_analyser Compose
     public_url = $PublicUrl
     public_status = [int]$public.StatusCode
     environment_isolation = "postgres-only database credentials; backend-only application secrets"
-    llm_base_url_allowlist = [ordered]@{ sub2api_origin_configured = $true }
+    llm_base_url_allowlist = [ordered]@{
+        sub2api_origin_configured = $true
+        tailscale_magic_dns = $true
+    }
     bundled_ocr = [ordered]@{ ready = $true; model = [string]$ocrCheck.model }
     local_ops_app = [ordered]@{ id = $app.id; name = $app.name; running = $app.running }
 } | ConvertTo-Json -Depth 8

@@ -5,7 +5,7 @@ use bill_analyser_db::{
     create_postgres_llm_config, effective_postgres_llm_config_from_saved, get_postgres_llm_config,
     has_postgres_llm_account_rule_candidate_duplicate, has_postgres_llm_rule_candidate_duplicate,
     list_postgres_llm_candidates, list_postgres_llm_configs, run_postgres_migrations,
-    LlmCandidateDraft, LlmConfigDraft, PostgresPool,
+    update_postgres_llm_config, LlmCandidateDraft, LlmConfigDraft, LlmConfigUpdate, PostgresPool,
 };
 use serde_json::json;
 use sqlx::{postgres::PgConnectOptions, postgres::PgPoolOptions, Executor, Row};
@@ -79,6 +79,30 @@ async fn llm_runtime_tables_round_trip_after_postgres_migrations() -> Result<(),
     assert_eq!(effective["enabled"], true);
     assert_eq!(effective["provider_config"]["model"], "gpt-test");
     assert_eq!(effective["provider_config"]["api_key"], "secret-token");
+
+    let edited = update_postgres_llm_config(
+        &pool,
+        config_id,
+        user_id,
+        &LlmConfigUpdate {
+            model: Some("gpt-edited".to_string()),
+            advanced_settings: Some(json!({"api_protocol": "responses"})),
+            ..LlmConfigUpdate::default()
+        },
+    )
+    .await?
+    .expect("edited config");
+    assert_eq!(edited["model"], "gpt-edited");
+    assert_eq!(edited["advanced_settings"]["api_protocol"], "responses");
+    let edited_effective = effective_postgres_llm_config_from_saved(&pool, user_id).await?;
+    assert_eq!(
+        edited_effective["provider_config"]["api_key"],
+        "secret-token"
+    );
+    assert_eq!(
+        edited_effective["advanced_settings"]["api_protocol"],
+        "responses"
+    );
 
     let candidate = create_postgres_llm_candidate(
         &pool,

@@ -13,6 +13,7 @@ Evidence reviewed:
 - Existing visual contracts: `.agents/skills/bill-analyser-ui-style-reference/SKILL.md`, `src/web/src/desktop-main.ts`, and desktop card/form patterns.
 - Current runtime contracts: `docs/PROJECT_OVERVIEW.md` and Rust LLM/OCR provider, credential-redaction, SSRF, and receipt-recognition paths.
 - Mature references: WeKnora model/provider and parser-engine settings, Open WebUI OpenAI-compatible connections, Dify provider credentials, PaddleOCR local/self-hosted/cloud modes, and Sub2API guided account setup.
+- WeKnora edit and protocol implementation: `frontend/src/views/settings/ModelSettings.vue`, `frontend/src/components/ModelEditorDialog.vue`, and `internal/models/openaiapi/protocol.go` at local read-only head `045c3a5c9`.
 
 ## Brand
 
@@ -21,6 +22,8 @@ Bill Analyser should feel private, dependable, and calm. Intelligent features ex
 ## Product goals
 
 - Let a non-technical user configure a common LLM with provider, credential, and model in one guided flow.
+- Let saved LLM connections reopen in the same guided editor without re-entering stored credentials.
+- Let OpenAI-compatible users choose Auto, Responses API, or Chat Completions while Auto follows WeKnora's Responses-first fallback model.
 - Let a user understand OCR by answering one question: “Where should receipt images be recognized?”
 - Make the bundled PP-OCRv6 small server model a one-click private default, with Tesseract retained as a lightweight fallback.
 - Make the current saved state, unsaved selection, next action, privacy boundary, and possible cloud cost explicit.
@@ -35,6 +38,7 @@ Non-goals:
 Success signals:
 
 - The default LLM form exposes only provider, API key, model, endpoint summary, and optional display name.
+- Saved LLM cards expose edit as a first-class action, and protocol choice is visible for OpenAI-compatible connections.
 - The default OCR form exposes only one mode choice and fields required by that mode.
 - Saved and unsaved states are visually distinguishable, and every page explains where the feature is used.
 
@@ -58,9 +62,11 @@ The existing Rules Center and its three LLM Recognition tabs remain stable.
 LLM Configuration:
 
 1. Current connection summary and saved connection cards.
-2. “Add model connection” dialog with three numbered sections: choose service, enter connection details, save and use.
-3. API key is the default path. OAuth/credential JSON is an expert disclosure, not a peer tab.
-4. Prompt overrides and generation parameters are grouped under “Expert settings; normally unchanged.”
+2. Saved cards open the same three-section dialog in edit mode; blank credential fields preserve the stored secret.
+3. “Add model connection” dialog with three numbered sections: choose service, enter connection details, save and use.
+4. OpenAI-compatible connection details include Auto (recommended), Responses API, and Chat Completions protocol choices.
+5. API key is the default path. OAuth/credential JSON is an expert disclosure, not a peer tab.
+6. Prompt overrides and generation parameters are grouped under “Expert settings; normally unchanged.”
 
 OCR Configuration:
 
@@ -77,6 +83,7 @@ OCR Configuration:
 - Saved state is authoritative: an unsaved selection never changes the “currently enabled” label.
 - Privacy and cost at the decision point: cloud-image transfer warnings sit on the cloud card and form.
 - One primary action per surface: save and enable; testing/activation are secondary actions on saved LLM cards.
+- Edit is not hidden behind testing: connection cards expose edit, test, activate, and delete as separate actions.
 
 ## Visual language
 
@@ -116,7 +123,7 @@ OCR Configuration:
 - Empty: explain why no saved LLM connection exists and offer one primary add action.
 - Unsaved: show “Unsaved changes” while preserving the current saved-mode status.
 - Success: refresh from the server and show the resulting active mode/connection.
-- Error: preserve inputs and provide an actionable category such as address, credential, model, timeout, or provider limit.
+- Error: preserve inputs and provide an actionable category such as DNS, protocol, address, credential, model, timeout, or provider limit.
 - Disabled: explain that no automatic OCR request will run.
 - Slow network: action remains busy and duplicate submission is disabled.
 
@@ -130,6 +137,8 @@ OCR Configuration:
 ## Implementation constraints
 
 - Vue 3 + Vuetify desktop patterns; preserve existing route, REST, user scope, redaction, allowlist, and provider values.
+- OpenAI-compatible accepts arbitrary public HTTPS URLs and full `/responses` or `/chat/completions` endpoints; credentials, metadata, link-local, localhost/private names, and unallowlisted plain HTTP remain blocked.
+- Production backend uses Tailscale MagicDNS for the saved Sub2API service name while retaining Docker embedded discovery for PostgreSQL and Weaviate.
 - Do not issue paid LLM/OCR calls during automated verification.
 - The backend image pins RapidOCR/ONNX Runtime, verifies packaged model hashes at build and deployment checks, caps image bytes/pixels, and performs no first-run model download.
 - API keys are never read back in plaintext; blank same-provider credentials keep the saved secret.

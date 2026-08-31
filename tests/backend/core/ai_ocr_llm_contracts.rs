@@ -2,11 +2,12 @@ use bill_analyser_core::ai_ocr_llm::{
     build_llm_account_rule_induction_prompt, build_llm_category_rule_induction_prompt,
     build_llm_classification_prompt, build_llm_import_preview_recommendation_prompt,
     build_llm_provider_config, build_llm_rule_expression_synthesis_prompt,
-    build_llm_rule_induction_prompt, build_runtime_llm_config_from_saved_config,
-    copy_runtime_llm_config, llm_available_providers, normalize_llm_advanced_settings,
-    normalize_llm_provider_name, normalize_ocr_config, ocr_available_providers_with_disabled,
-    parse_llm_json_array_response, parse_payment_screenshot_text, render_llm_prompt_template,
-    safe_llm_config_payload, validate_llm_vision_base_url,
+    build_llm_rule_induction_prompt, build_receipt_transaction_draft,
+    build_runtime_llm_config_from_saved_config, copy_runtime_llm_config, llm_available_providers,
+    normalize_llm_advanced_settings, normalize_llm_provider_name, normalize_ocr_config,
+    ocr_available_providers_with_disabled, parse_llm_json_array_response,
+    parse_payment_screenshot_text, render_llm_prompt_template, safe_llm_config_payload,
+    validate_llm_vision_base_url, OcrProviderTextResult, ReceiptDraftAccount, ReceiptDraftContext,
 };
 use serde_json::json;
 use std::env;
@@ -182,6 +183,127 @@ fn payment_screenshot_parser_extracts_wechat_and_alipay_contract_fields() {
 }
 
 #[test]
+fn full_image_payment_screenshots_partition_amount_time_payment_method_and_account() {
+    let wechat_text = r#"15:11 M
+85.7
+KB/s
+四川农商银行
+泷口卤肉烟酒副食
+-6.00
+当前状态
+支付成功
+支付时间
+2026年8月27日10:54:49
+商品
+泷口卤肉烟酒副食
+商户全称
+梓潼县泷口副食店
+支付方式
+零钱
+交易单号
+4500000341202608271740217914
+本服务由财付通提供"#;
+    let wechat = parse_payment_screenshot_text(wechat_text);
+    assert_eq!(wechat.amount, Some(6.0));
+    assert_eq!(wechat.trade_time.as_deref(), Some("2026-08-27 10:54:49"));
+    assert_eq!(
+        wechat.description.as_deref(),
+        Some("泷口卤肉烟酒副食 - 梓潼县泷口副食店")
+    );
+    assert_eq!(wechat.payment_method.as_deref(), Some("零钱"));
+    assert_eq!(wechat.payment_platform.as_deref(), Some("wechat_pay"));
+
+    let alipay_text = r#"15:13 M
+35.5
+KB/s
+账单详情
+蚂蚁财富-蚂蚁（杭州）基金销售有限公司
+-35.00
+交易成功
+创建时间
+2026-08-2609:06:15
+付款方式
+中国农业银行储蓄卡(4071)>
+服务详情
+蚂蚁财富-广发中证养老产业A-定投...查看详情>
+订单号
+20260826001080012204310011999172
+账单分类
+投资理财>"#;
+    let alipay = parse_payment_screenshot_text(alipay_text);
+    assert_eq!(alipay.amount, Some(35.0));
+    assert_eq!(alipay.trade_time.as_deref(), Some("2026-08-26 09:06:15"));
+    assert_eq!(
+        alipay.description.as_deref(),
+        Some("蚂蚁财富-蚂蚁(杭州)基金销售有限公司 - 蚂蚁财富-广发中证养老产业A-定投")
+    );
+    assert_eq!(
+        alipay.payment_method.as_deref(),
+        Some("中国农业银行储蓄卡(4071)")
+    );
+    assert_eq!(alipay.payment_platform.as_deref(), Some("alipay"));
+
+    for label in ["商品说明", "交易详情"] {
+        let parsed = parse_payment_screenshot_text(&format!(
+            "支付宝\n-12.00\n{label}\n测试商品或服务\n创建时间\n2026-08-26 09:06:15"
+        ));
+        assert_eq!(
+            parsed.description.as_deref(),
+            Some("测试商品或服务"),
+            "支付宝 {label} 布局"
+        );
+    }
+
+    let context = ReceiptDraftContext {
+        accounts: vec![
+            ReceiptDraftAccount {
+                id: "17000000003".to_string(),
+                name: "农业银行".to_string(),
+            },
+            ReceiptDraftAccount {
+                id: "17000000038".to_string(),
+                name: "农业银行信用卡".to_string(),
+            },
+            ReceiptDraftAccount {
+                id: "17000000045".to_string(),
+                name: "微信".to_string(),
+            },
+            ReceiptDraftAccount {
+                id: "17000000312".to_string(),
+                name: "支付宝".to_string(),
+            },
+        ],
+        ..ReceiptDraftContext::default()
+    };
+    let wechat_provider = OcrProviderTextResult {
+        text: wechat_text.to_string(),
+        confidence: 0.98,
+        model: "PP-OCRv6".to_string(),
+        raw_provider_response: json!({}),
+        lines: Vec::new(),
+    };
+    let wechat_draft = build_receipt_transaction_draft(&wechat, &wechat_provider, &context);
+    assert_eq!(
+        wechat_draft.auto_fill["source_account_id"].value,
+        "17000000045"
+    );
+
+    let alipay_provider = OcrProviderTextResult {
+        text: alipay_text.to_string(),
+        confidence: 0.98,
+        model: "PP-OCRv6".to_string(),
+        raw_provider_response: json!({}),
+        lines: Vec::new(),
+    };
+    let alipay_draft = build_receipt_transaction_draft(&alipay, &alipay_provider, &context);
+    assert_eq!(
+        alipay_draft.auto_fill["source_account_id"].value,
+        "17000000003"
+    );
+    assert_eq!(alipay_draft.auto_fill["type"].value, "investment");
+}
+
+#[test]
 fn llm_provider_alias_defaults_match_current_factory() {
     let _allowlist_lock = lock_llm_allowlist_env();
     let _allowlist_restore = EnvVarRestore::capture("BILL_ANALYSER_LLM_BASE_URL_ALLOWLIST");
@@ -269,7 +391,7 @@ fn llm_provider_alias_defaults_match_current_factory() {
     );
     assert_eq!(default_openai_compatible.model, "custom-chat");
     assert_eq!(default_openai_compatible.provider_name, "openai_compatible");
-    assert!(build_llm_provider_config(
+    let arbitrary_public_https = build_llm_provider_config(
         "openai_compatible",
         Some(&json!({
             "api_key": "secret",
@@ -277,7 +399,31 @@ fn llm_provider_alias_defaults_match_current_factory() {
             "model": "custom-chat",
         })),
     )
-    .is_err());
+    .expect("custom OpenAI-compatible public HTTPS endpoint");
+    assert_eq!(
+        arbitrary_public_https.base_url,
+        "https://llm.example.test/v1"
+    );
+    for unsafe_custom_url in [
+        "http://llm.example.test/v1",
+        "https://localhost/v1",
+        "https://metadata.google.internal/v1",
+        "https://169.254.169.254/v1",
+        "https://user:password@llm.example.test/v1",
+    ] {
+        assert!(
+            build_llm_provider_config(
+                "openai_compatible",
+                Some(&json!({
+                    "api_key": "secret",
+                    "base_url": unsafe_custom_url,
+                    "model": "custom-chat",
+                })),
+            )
+            .is_err(),
+            "unsafe custom URL should fail closed: {unsafe_custom_url}"
+        );
+    }
     assert!(build_llm_provider_config(
         "openai",
         Some(&json!({
@@ -296,7 +442,7 @@ fn llm_provider_alias_defaults_match_current_factory() {
             "model": "custom-chat",
         })),
     )
-    .is_err());
+    .is_ok());
     env::set_var(
         "BILL_ANALYSER_LLM_BASE_URL_ALLOWLIST",
         "http://llm.example.test",
@@ -377,6 +523,7 @@ fn llm_provider_alias_defaults_match_current_factory() {
 #[test]
 fn llm_advanced_settings_runtime_isolation_and_secret_redaction_are_pinned() {
     let normalized = normalize_llm_advanced_settings(Some(&json!({
+        "api_protocol": "RESPONSES",
         "reasoning_depth": "HIGH",
         "temperature": "0.55",
         "max_tokens": "1234",
@@ -385,11 +532,21 @@ fn llm_advanced_settings_runtime_isolation_and_secret_redaction_are_pinned() {
         "rule_prompt_template": "规则 {category_name}",
         "invalid": "ignored",
     })));
+    assert_eq!(normalized["api_protocol"], "responses");
     assert_eq!(normalized["reasoning_depth"], "high");
     assert_eq!(normalized["temperature"], 0.55);
     assert_eq!(normalized["max_tokens"], 1234);
     assert_eq!(normalized["system_prompt"], "系统提示词");
     assert!(!normalized.contains_key("invalid"));
+    assert_eq!(
+        normalize_llm_advanced_settings(Some(&json!({"api_protocol": "chat-completions"})))
+            ["api_protocol"],
+        "chat_completions"
+    );
+    assert!(
+        !normalize_llm_advanced_settings(Some(&json!({"api_protocol": "legacy"})))
+            .contains_key("api_protocol")
+    );
     assert!(normalize_llm_advanced_settings(Some(&json!("[]"))).is_empty());
     assert!(normalize_llm_advanced_settings(Some(&json!("\"plain\""))).is_empty());
     assert!(normalize_llm_advanced_settings(Some(&json!("1"))).is_empty());

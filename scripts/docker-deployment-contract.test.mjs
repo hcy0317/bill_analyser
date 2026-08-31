@@ -37,6 +37,7 @@ test("the production compose owns the complete Bill Analyser runtime", async () 
   assert.doesNotMatch(postgresService, /^    ports:/m);
   assert.doesNotMatch(weaviateService, /^    ports:/m);
   assert.match(backendService, /\.runtime\/docker\/backend\.env/);
+  assert.match(backendService, /dns:\r?\n\s+- 100\.100\.100\.100/);
   assert.doesNotMatch(backendService, /postgres\.env/);
   assert.match(compose, /condition: service_healthy/g);
   assert.match(compose, /BILL_ANALYSER_HTTP_BIND: 0\.0\.0\.0:5000/);
@@ -87,6 +88,7 @@ test("the production compose owns the complete Bill Analyser runtime", async () 
   assert.match(verify, /bundled_ocr/);
   assert.match(verify, /BILL_ANALYSER_LLM_BASE_URL_ALLOWLIST/);
   assert.match(verify, /sub2api\.long-antares\.ts\.net/);
+  assert.match(verify, /getent hosts/);
 
   assert.match(gitignore, /^\.runtime\/$/m);
 });

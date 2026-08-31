@@ -13,6 +13,7 @@ struct LlmProviderRequestContext {
     temperature: f64,
     max_tokens: i64,
     reasoning_depth: String,
+    api_protocol: String,
 }
 
 #[derive(Debug, Clone)]
@@ -235,6 +236,11 @@ fn llm_provider_context_from_config(
         .and_then(Value::as_str)
         .unwrap_or_default()
         .to_string();
+    let api_protocol = advanced
+        .and_then(|item| item.get("api_protocol"))
+        .and_then(Value::as_str)
+        .unwrap_or("auto")
+        .to_string();
     Ok(LlmProviderRequestContext {
         config: provider_contract,
         api_key,
@@ -249,6 +255,7 @@ fn llm_provider_context_from_config(
         temperature,
         max_tokens,
         reasoning_depth,
+        api_protocol,
     })
 }
 
@@ -275,71 +282,92 @@ async fn execute_llm_provider_request(
     }
     let mut did_refresh_after_unauthorized = false;
     let mut last_error = String::new();
-    for attempt in 0..3 {
-        let (url, headers, payload) = llm_provider_http_request(&context, prompt);
-        let mut request = client.post(&url);
-        for (key, value) in &headers {
-            request = request.header(*key, value);
-        }
-        let response = request.body(payload.to_string()).send().await;
-        match response {
-            Ok(response) => {
-                let status = response.status();
-                let raw_text = read_limited_llm_provider_body(response).await?;
-                if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-                    let detail = llm_provider_error_diagnostic(&raw_text, &context)
-                        .map(|detail| format!(": {detail}"))
-                        .unwrap_or_default();
-                    return Err(llm_contract_error_response(
-                        &format!("Rate limit exceeded{detail}"),
-                        "LLM_RATE_LIMITED",
-                        429,
-                    ));
-                }
-                if status == reqwest::StatusCode::UNAUTHORIZED {
-                    if !did_refresh_after_unauthorized
-                        && provider_auth_has_refresh_credential(&context.credential_config)
-                    {
-                        context = refresh_llm_provider_context(state, &client, &context).await?;
-                        did_refresh_after_unauthorized = true;
-                        continue;
+    let protocols = llm_api_protocol_attempts(&context);
+    'protocols: for (protocol_index, protocol) in protocols.iter().copied().enumerate() {
+        let has_alternate = protocol_index + 1 < protocols.len();
+        for attempt in 0..3 {
+            let (url, headers, payload) = llm_provider_http_request(&context, prompt, protocol);
+            let mut request = client.post(&url);
+            for (key, value) in &headers {
+                request = request.header(*key, value);
+            }
+            let response = request.body(payload.to_string()).send().await;
+            match response {
+                Ok(response) => {
+                    let status = response.status();
+                    let raw_text = read_limited_llm_provider_body(response).await?;
+                    if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+                        let detail = llm_provider_error_diagnostic(&raw_text, &context)
+                            .map(|detail| format!(": {detail}"))
+                            .unwrap_or_default();
+                        return Err(llm_contract_error_response(
+                            &format!("Rate limit exceeded{detail}"),
+                            "LLM_RATE_LIMITED",
+                            429,
+                        ));
                     }
-                    return Err(llm_relogin_required_response());
+                    if status == reqwest::StatusCode::UNAUTHORIZED {
+                        if !did_refresh_after_unauthorized
+                            && provider_auth_has_refresh_credential(&context.credential_config)
+                        {
+                            context = refresh_llm_provider_context(state, &client, &context).await?;
+                            did_refresh_after_unauthorized = true;
+                            continue;
+                        }
+                        return Err(llm_relogin_required_response());
+                    }
+                    if status.is_success() {
+                        let raw_response = match serde_json::from_str::<Value>(&raw_text) {
+                            Ok(value) => value,
+                            Err(_) if has_alternate => {
+                                last_error = "provider protocol returned invalid JSON".to_string();
+                                continue 'protocols;
+                            }
+                            Err(_) => {
+                                return Err(llm_contract_error_response(
+                                    "LLM provider returned invalid JSON",
+                                    "LLM_PROVIDER_UNAVAILABLE",
+                                    503,
+                                ));
+                            }
+                        };
+                        match llm_provider_runtime_response(&context, raw_response, protocol) {
+                            Ok(response) => return Ok(response),
+                            Err(_) if has_alternate => {
+                                last_error = "provider protocol returned incompatible content".to_string();
+                                continue 'protocols;
+                            }
+                            Err(error) => return Err(error),
+                        }
+                    }
+                    last_error = format!("provider status {}", status.as_u16());
+                    if let Some(detail) = llm_provider_error_diagnostic(&raw_text, &context) {
+                        last_error.push_str(": ");
+                        last_error.push_str(&detail);
+                    }
+                    if has_alternate && llm_status_allows_protocol_fallback(status) {
+                        continue 'protocols;
+                    }
+                    if !status.is_server_error() || attempt == 2 {
+                        break 'protocols;
+                    }
                 }
-                if status.is_success() {
-                    let raw_response = serde_json::from_str::<Value>(&raw_text).map_err(|_| {
-                        llm_contract_error_response(
-                            "LLM provider returned invalid JSON",
-                            "LLM_PROVIDER_UNAVAILABLE",
-                            503,
-                        )
-                    })?;
-                    return llm_provider_runtime_response(&context, raw_response);
-                }
-                last_error = format!("provider status {}", status.as_u16());
-                if let Some(detail) = llm_provider_error_diagnostic(&raw_text, &context) {
-                    last_error.push_str(": ");
-                    last_error.push_str(&detail);
-                }
-                if !status.is_server_error() || attempt == 2 {
-                    break;
+                Err(error) => {
+                    last_error = if error.is_timeout() {
+                        "provider timeout".to_string()
+                    } else {
+                        "provider request failed".to_string()
+                    };
+                    if attempt == 2 {
+                        break 'protocols;
+                    }
                 }
             }
-            Err(error) => {
-                last_error = if error.is_timeout() {
-                    "provider timeout".to_string()
-                } else {
-                    "provider request failed".to_string()
-                };
-                if attempt == 2 {
-                    break;
-                }
-            }
+            sleep(StdDuration::from_millis(
+                50 * u64::try_from(attempt + 1).unwrap_or(1),
+            ))
+            .await;
         }
-        sleep(StdDuration::from_millis(
-            50 * u64::try_from(attempt + 1).unwrap_or(1),
-        ))
-        .await;
     }
     Err(llm_contract_error_response(
         &format!("LLM provider unavailable: {last_error}"),
@@ -518,126 +546,6 @@ async fn read_limited_llm_provider_body(
     })
 }
 
-fn llm_provider_http_request(
-    context: &LlmProviderRequestContext,
-    prompt: &str,
-) -> (String, Vec<(&'static str, String)>, Value) {
-    let base_url = context.config.base_url.trim_end_matches('/');
-    match context.config.provider_kind.as_str() {
-        "claude" => {
-            let mut payload = json!({
-                "model": context.config.model,
-                "messages": [{"role": "user", "content": prompt}],
-                "max_tokens": context.max_tokens,
-                "temperature": context.temperature,
-            });
-            if !context.system_prompt.trim().is_empty() {
-                payload["system"] = json!(context.system_prompt);
-            }
-            (
-                format!("{base_url}/messages"),
-                vec![
-                    ("x-api-key", context.api_key.clone()),
-                    ("anthropic-version", "2023-06-01".to_string()),
-                    ("content-type", "application/json".to_string()),
-                ],
-                payload,
-            )
-        }
-        "ollama" => {
-            let mut payload = json!({
-                "model": context.config.model,
-                "prompt": prompt,
-                "stream": false,
-                "options": {
-                    "temperature": context.temperature,
-                    "num_predict": context.max_tokens,
-                },
-            });
-            if !context.system_prompt.trim().is_empty() {
-                payload["system"] = json!(context.system_prompt);
-            }
-            (
-                format!("{base_url}/api/generate"),
-                vec![("content-type", "application/json".to_string())],
-                payload,
-            )
-        }
-        _ => {
-            let mut messages = Vec::new();
-            if !context.system_prompt.trim().is_empty() {
-                messages.push(json!({"role": "system", "content": context.system_prompt}));
-            }
-            messages.push(json!({"role": "user", "content": prompt}));
-            let mut payload = json!({
-                "model": context.config.model,
-                "messages": messages,
-                "temperature": context.temperature,
-                "max_tokens": context.max_tokens,
-            });
-            if !context.reasoning_depth.trim().is_empty()
-                && matches!(context.config.provider_name.as_str(), "openai" | "azure")
-            {
-                payload["reasoning_effort"] = json!(context.reasoning_depth);
-            }
-            (
-                format!("{base_url}/chat/completions"),
-                vec![
-                    ("authorization", format!("Bearer {}", context.api_key)),
-                    ("content-type", "application/json".to_string()),
-                ],
-                payload,
-            )
-        }
-    }
-}
-
-fn llm_provider_runtime_response(
-    context: &LlmProviderRequestContext,
-    raw_response: Value,
-) -> Result<LlmProviderRuntimeResponse, ImportV2RouteResponse> {
-    let content = match context.config.provider_kind.as_str() {
-        "claude" => raw_response
-            .get("content")
-            .and_then(Value::as_array)
-            .map(|blocks| {
-                blocks
-                    .iter()
-                    .filter(|block| block.get("type").and_then(Value::as_str) == Some("text"))
-                    .filter_map(|block| block.get("text").and_then(Value::as_str))
-                    .collect::<Vec<_>>()
-                    .join("")
-            })
-            .unwrap_or_default(),
-        "ollama" => raw_response
-            .get("response")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_string(),
-        _ => raw_response
-            .get("choices")
-            .and_then(Value::as_array)
-            .and_then(|choices| choices.first())
-            .and_then(|choice| choice.get("message"))
-            .and_then(|message| message.get("content"))
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_string(),
-    };
-    if content.trim().is_empty() {
-        return Err(llm_contract_error_response(
-            "LLM provider returned empty content",
-            "LLM_PROVIDER_UNAVAILABLE",
-            503,
-        ));
-    }
-    Ok(LlmProviderRuntimeResponse {
-        content,
-        model: context.config.model.clone(),
-        provider: context.config.provider_name.clone(),
-    })
-}
-
 fn reserve_llm_rate_limit(user_id: i64, slots: usize) -> Result<(), ImportV2RouteResponse> {
     if slots == 0 {
         return Ok(());
@@ -684,6 +592,7 @@ mod provider_runtime_tests {
             temperature: 0.0,
             max_tokens: 16,
             reasoning_depth: String::new(),
+            api_protocol: "auto".to_string(),
         }
     }
 

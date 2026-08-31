@@ -241,6 +241,7 @@ fn build_ocr_recognition_success_response_with_context(
                 "amount": parsed.amount,
                 "trade_time": parsed.trade_time,
                 "description": parsed.description,
+                "payment_method": parsed.payment_method,
                 "payment_platform": parsed.payment_platform,
                 "provenance": {
                     "provider": provider_name,

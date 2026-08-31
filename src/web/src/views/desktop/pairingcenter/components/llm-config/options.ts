@@ -16,6 +16,7 @@ export function applyLLMProviderDefaults(form: LLMConfigForm, option: LLMProvide
     form.api_key = '';
     form.credential_mode = 'api_key';
     form.credential_json = '';
+    form.api_protocol = 'auto';
 }
 
 /**
@@ -181,6 +182,14 @@ export function createLLMReasoningDepthOptions(tt: Translate): SelectOption[] {
     ];
 }
 
+export function createLLMApiProtocolOptions(tt: Translate): SelectOption[] {
+    return [
+        { title: tt('Auto detect (recommended)'), value: 'auto' },
+        { title: tt('Responses API'), value: 'responses' },
+        { title: tt('Chat Completions'), value: 'chat_completions' },
+    ];
+}
+
 /**
  * 构造凭据模式选项，覆盖 API key、JSON 凭据和 token 刷新等保存形态。
  */
@@ -208,6 +217,7 @@ export function createEmptyLLMConfigForm(): LLMConfigForm {
         base_url: 'https://api.openai.com/v1',
         credential_mode: 'api_key',
         credential_json: '',
+        api_protocol: 'auto',
         advancedMode: false,
         customPrompts: false,
         reasoning_depth: '',

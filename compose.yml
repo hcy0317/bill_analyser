@@ -65,6 +65,8 @@ services:
       BILL_ANALYSER_RUNTIME_PROFILE: production
       RUST_LOG: ${BILL_ANALYSER_RUST_LOG:-info}
       TZ: Asia/Shanghai
+    dns:
+      - 100.100.100.100
     depends_on:
       postgres:
         condition: service_healthy

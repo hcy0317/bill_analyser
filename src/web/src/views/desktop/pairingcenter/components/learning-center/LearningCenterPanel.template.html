@@ -428,9 +428,18 @@
                                                 <div v-if="cfg.base_url" class="text-caption text-medium-emphasis mt-3 text-truncate">
                                                     {{ cfg.base_url }}
                                                 </div>
+                                                <div v-if="cfg.provider === 'openai_compatible'"
+                                                     class="text-caption text-medium-emphasis mt-1">
+                                                    {{ tt('API protocol') }}: {{ llmApiProtocolLabel(cfg.advanced_settings?.api_protocol) }}
+                                                </div>
                                             </v-card-text>
                                             <v-divider />
                                             <v-card-actions class="flex-wrap ga-1 pa-3">
+                                                <v-btn size="small" variant="outlined" color="default"
+                                                       :prepend-icon="mdiPencil"
+                                                       @click="openEditConfigDialog(cfg)">
+                                                    {{ tt('Edit') }}
+                                                </v-btn>
                                                 <v-btn size="small" variant="outlined" color="default"
                                                        :loading="testingConfigId === cfg.id"
                                                        :disabled="testingConfigId !== null && testingConfigId !== cfg.id"
@@ -631,7 +640,7 @@
             <template #title>
                 <div class="d-flex align-center justify-center">
                     <div class="d-flex w-100 align-center justify-center">
-                        <h4 class="text-h4">{{ tt('Add model connection') }}</h4>
+                        <h4 class="text-h4">{{ llmConfigDialogTitle }}</h4>
                     </div>
                     <v-btn density="comfortable" color="default" variant="text" class="ms-2"
                            :icon="true" @click="closeAddConfigDialog">
@@ -692,7 +701,9 @@
                                       autocomplete="new-password" data-lpignore="true" data-1p-ignore="true"
                                       @focus="unlockAutofillFields" density="comfortable"
                                       variant="outlined" type="password"
-                                      :hint="tt('The key is stored encrypted or redacted by the server and is never shown again.')"
+                                      :hint="editingConfigId === null
+                                          ? tt('The key is stored encrypted or redacted by the server and is never shown again.')
+                                          : tt('Leave blank to keep the saved credential.')"
                                       persistent-hint :placeholder="selectedLLMProviderOption.apiKeyPlaceholder" />
                         <v-alert v-else-if="selectedLLMProviderOption.apiKeyRequired === false"
                                  type="success" variant="tonal" density="compact" class="mb-4">
@@ -716,6 +727,15 @@
                                               persistent-hint :placeholder="selectedLLMProviderOption.baseUrlPlaceholder" />
                             </v-col>
                         </v-row>
+                        <v-select v-if="newConfigForm.provider === 'openai_compatible'"
+                                  v-model="newConfigForm.api_protocol"
+                                  :label="tt('API protocol')"
+                                  :items="llmApiProtocolOptions"
+                                  item-title="title" item-value="value"
+                                  :name="llmConfigFieldNames.apiProtocol"
+                                  density="comfortable" variant="outlined"
+                                  :hint="tt('Auto detect tries Responses API first, then Chat Completions when the endpoint is incompatible.')"
+                                  persistent-hint />
                         <v-expansion-panels variant="accordion" class="mt-2">
                             <v-expansion-panel>
                                 <v-expansion-panel-title>{{ tt('Other sign-in methods (expert)') }}</v-expansion-panel-title>
@@ -840,7 +860,7 @@
                         <v-btn variant="tonal" type="button" :disabled="addConfigSaving"
                                @click="closeAddConfigDialog">{{ tt('Cancel') }}</v-btn>
                         <v-btn color="primary" :loading="addConfigSaving"
-                               type="submit">{{ tt('Save connection') }}</v-btn>
+                               type="submit">{{ llmConfigSaveLabel }}</v-btn>
                     </div>
                 </v-card-text>
             </form>

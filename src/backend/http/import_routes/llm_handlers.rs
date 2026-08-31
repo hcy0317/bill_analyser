@@ -5,6 +5,12 @@
 include!("llm/preview_request.rs");
 include!("llm/analyze_request.rs");
 include!("llm/rule_synthesis_request.rs");
+#[path = "llm/provider_protocol.rs"]
+mod llm_provider_protocol;
+use llm_provider_protocol::{
+    llm_api_protocol_attempts, llm_provider_http_request, llm_provider_runtime_response,
+    llm_status_allows_protocol_fallback,
+};
 include!("llm/provider_runtime.rs");
 include!("llm/preview_helpers.rs");
 include!("llm/rule_synthesis_helpers.rs");

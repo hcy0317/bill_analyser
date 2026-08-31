@@ -5,6 +5,8 @@ import {
     buildCredentialConfigPayload,
     applyLLMProviderDefaults,
     createEmptyLLMConfigForm,
+    createLLMApiProtocolOptions,
+    createLLMConfigFormFromSaved,
     createLLMProviderOptions,
     getLLMProviderLabel,
     toLLMCandidates,
@@ -74,11 +76,50 @@ describe('LLM config helper contracts', () => {
         expect(form.name).toBe('OpenAI');
         expect(form.model).toBe('gpt-4o-mini');
         expect(form.base_url).toBe('https://api.openai.com/v1');
+        expect(form.api_protocol).toBe('auto');
         expect(form.system_prompt).toContain('Bill Analyser');
         expect(form.system_prompt).toContain('JSON');
         expect(form.classification_prompt_template).toBe('{default_prompt}');
         expect(form.rule_prompt_template).toBe('{default_prompt}');
         expect(form.customPrompts).toBe(false);
+    });
+
+    test('offers explicit OpenAI protocols and hydrates an edit form without exposing credentials', () => {
+        expect(createLLMApiProtocolOptions(tt)).toStrictEqual([
+            { title: 't:Auto detect (recommended)', value: 'auto' },
+            { title: 't:Responses API', value: 'responses' },
+            { title: 't:Chat Completions', value: 'chat_completions' },
+        ]);
+
+        const form = createLLMConfigFormFromSaved({
+            id: 7,
+            name: 'Sub2API',
+            provider: 'openai_compatible',
+            model: 'gpt-5.6-luna',
+            base_url: 'https://sub2api.example.test/v1/responses',
+            credential_config: { credential_mode: 'api_key', access_token: '********' },
+            advanced_settings: {
+                api_protocol: 'responses',
+                temperature: 0.25,
+                max_tokens: 8192,
+            },
+            is_active: true,
+        });
+
+        expect(form).toMatchObject({
+            name: 'Sub2API',
+            provider: 'openai_compatible',
+            model: 'gpt-5.6-luna',
+            base_url: 'https://sub2api.example.test/v1/responses',
+            api_key: '',
+            credential_mode: 'api_key',
+            credential_json: '',
+            api_protocol: 'responses',
+            advancedMode: true,
+            temperature: '0.25',
+            max_tokens: '8192',
+        });
+        expect(JSON.stringify(form)).not.toContain('********');
     });
 
     test('applies provider presets without requiring users to copy model identifiers or base URLs', () => {
@@ -137,7 +178,7 @@ describe('LLM config helper contracts', () => {
             advancedMode: false,
             reasoning_depth: 'high',
             system_prompt: 'system',
-        }))).toEqual({});
+        }))).toEqual({ api_protocol: 'auto' });
 
         expect(buildAdvancedSettingsPayload(makeForm({
             advancedMode: true,
@@ -148,6 +189,7 @@ describe('LLM config helper contracts', () => {
             classification_prompt_template: ' classify {transactions_json} ',
             rule_prompt_template: ' rule {category_name} ',
         }))).toEqual({
+            api_protocol: 'auto',
             reasoning_depth: 'high',
             temperature: 0.15,
             max_tokens: 2048,
@@ -163,6 +205,7 @@ describe('LLM config helper contracts', () => {
             classification_prompt_template: ' classify {transactions_json} ',
             rule_prompt_template: ' rule {category_name} ',
         }))).toEqual({
+            api_protocol: 'auto',
             reasoning_depth: 'high',
             temperature: 0.15,
             max_tokens: 2048,

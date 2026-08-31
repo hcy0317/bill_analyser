@@ -1,8 +1,58 @@
 import type {
     LLMCandidateItem,
+    LLMConfigForm,
     LLMConfigItem,
     LLMProviderOption,
 } from './types.ts';
+import { createEmptyLLMConfigForm } from './options.ts';
+
+export function createLLMConfigFormFromSaved(config: LLMConfigItem): LLMConfigForm {
+    const defaults = createEmptyLLMConfigForm();
+    const advanced = config.advanced_settings || {};
+    const credentialMode = typeof config.credential_config?.['credential_mode'] === 'string'
+        ? String(config.credential_config['credential_mode'])
+        : 'api_key';
+    const hasAdvancedOverrides = Boolean(
+        advanced.reasoning_depth
+        || advanced.temperature !== undefined
+        || advanced.max_tokens !== undefined
+        || advanced.system_prompt
+        || advanced.classification_prompt_template
+        || advanced.rule_prompt_template
+    );
+    const customPrompts = Boolean(
+        advanced.system_prompt
+        || advanced.classification_prompt_template
+        || advanced.rule_prompt_template
+    );
+    const apiProtocol = ['responses', 'chat_completions'].includes(String(advanced.api_protocol))
+        ? advanced.api_protocol as 'responses' | 'chat_completions'
+        : 'auto';
+    return {
+        ...defaults,
+        name: config.name,
+        provider: config.provider,
+        model: config.model,
+        base_url: config.base_url || '',
+        api_key: '',
+        credential_mode: credentialMode,
+        credential_json: '',
+        api_protocol: apiProtocol,
+        advancedMode: hasAdvancedOverrides,
+        customPrompts,
+        reasoning_depth: advanced.reasoning_depth || '',
+        temperature: advanced.temperature !== undefined
+            ? String(advanced.temperature)
+            : defaults.temperature,
+        max_tokens: advanced.max_tokens !== undefined
+            ? String(advanced.max_tokens)
+            : defaults.max_tokens,
+        system_prompt: advanced.system_prompt || defaults.system_prompt,
+        classification_prompt_template: advanced.classification_prompt_template
+            || defaults.classification_prompt_template,
+        rule_prompt_template: advanced.rule_prompt_template || defaults.rule_prompt_template,
+    };
+}
 
 /**
  * 将配置列表响应转成前端模型，并在进入组件状态前移除 api_key。

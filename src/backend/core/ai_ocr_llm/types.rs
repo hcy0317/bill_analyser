@@ -56,6 +56,8 @@ pub struct PaymentScreenshotParseContract {
     pub amount: Option<f64>,
     pub trade_time: Option<String>,
     pub description: Option<String>,
+    #[serde(default)]
+    pub payment_method: Option<String>,
     pub payment_platform: Option<String>,
     pub confidence: f64,
 }

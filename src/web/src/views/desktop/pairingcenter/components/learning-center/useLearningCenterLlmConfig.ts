@@ -7,6 +7,8 @@ import {
     buildAdvancedSettingsPayload,
     buildCredentialConfigPayload,
     createEmptyLLMConfigForm,
+    createLLMApiProtocolOptions,
+    createLLMConfigFormFromSaved,
     createLLMCredentialModeOptions,
     createLLMProviderOptions,
     createLLMReasoningDepthOptions,
@@ -55,12 +57,14 @@ export function useLearningCenterLlmConfig(options: LearningCenterLlmConfigOptio
     const llmProviderOptions: LLMProviderOption[] = createLLMProviderOptions(tt);
     const defaultLLMProviderOption = llmProviderOptions[0] as LLMProviderOption;
     const llmReasoningDepthOptions = createLLMReasoningDepthOptions(tt);
+    const llmApiProtocolOptions = createLLMApiProtocolOptions(tt);
     const llmCredentialModeOptions = createLLMCredentialModeOptions(tt);
     const llmOAuthCredentialModeOptions = llmCredentialModeOptions.filter(option => option.value !== 'api_key');
 
     const addConfigDialog = ref(false);
     const addConfigSaving = ref(false);
     const testingConfigId = ref<number | null>(null);
+    const editingConfigId = ref<number | null>(null);
     const autofillNonce = ref(Date.now());
     const autofillFieldsLocked = ref(false);
     const autofillUnlockTimer = ref<number | null>(null);
@@ -68,6 +72,12 @@ export function useLearningCenterLlmConfig(options: LearningCenterLlmConfigOptio
 
     const selectedLLMProviderOption = computed<LLMProviderOption>(() => (
         llmProviderOptions.find(option => option.value === newConfigForm.value.provider) ?? defaultLLMProviderOption
+    ));
+    const llmConfigDialogTitle = computed(() => (
+        editingConfigId.value === null ? tt('Add model connection') : tt('Edit model connection')
+    ));
+    const llmConfigSaveLabel = computed(() => (
+        editingConfigId.value === null ? tt('Save connection') : tt('Save changes')
     ));
 
     const llmConnectionMode = computed<'api' | 'oauth'>({
@@ -91,6 +101,7 @@ export function useLearningCenterLlmConfig(options: LearningCenterLlmConfigOptio
         model: `llm-config-model-${autofillNonce.value}`,
         apiKey: `llm-config-credential-${autofillNonce.value}`,
         baseUrl: `llm-config-endpoint-${autofillNonce.value}`,
+        apiProtocol: `llm-config-protocol-${autofillNonce.value}`,
         credentialJson: `llm-config-credential-json-${autofillNonce.value}`,
         temperature: `llm-config-temperature-${autofillNonce.value}`,
         maxTokens: `llm-config-max-tokens-${autofillNonce.value}`,
@@ -166,6 +177,7 @@ export function useLearningCenterLlmConfig(options: LearningCenterLlmConfigOptio
         clearAutofillUnlockTimer();
         autofillFieldsLocked.value = false;
         addConfigDialog.value = false;
+        editingConfigId.value = null;
     }
 
     /**
@@ -186,7 +198,16 @@ export function useLearningCenterLlmConfig(options: LearningCenterLlmConfigOptio
 
     function openAddConfigDialog() {
         autofillNonce.value = Date.now();
+        editingConfigId.value = null;
         newConfigForm.value = createEmptyLLMConfigForm();
+        addConfigDialog.value = true;
+        lockAutofillFieldsBriefly();
+    }
+
+    function openEditConfigDialog(config: LLMConfigItem) {
+        autofillNonce.value = Date.now();
+        editingConfigId.value = config.id;
+        newConfigForm.value = createLLMConfigFormFromSaved(config);
         addConfigDialog.value = true;
         lockAutofillFieldsBriefly();
     }
@@ -207,11 +228,8 @@ export function useLearningCenterLlmConfig(options: LearningCenterLlmConfigOptio
             name: form.name.trim() || selectedLLMProviderOption.value.title,
             provider: form.provider,
             model: form.model.trim(),
-            api_key: form.credential_mode === 'api_key' ? form.api_key.trim() : '',
             base_url: form.base_url.trim(),
-            credential_config: credentialConfig,
             advanced_settings: buildAdvancedSettingsPayload(form),
-            is_active: llmSavedConfigs.value.length === 0,
         };
 
         if (selectedLLMProviderOption.value.requiresBaseUrl && !payload.base_url) {
@@ -221,16 +239,37 @@ export function useLearningCenterLlmConfig(options: LearningCenterLlmConfigOptio
 
         addConfigSaving.value = true;
         try {
-            const resp = await services.createLLMConfig(payload);
+            const editingId = editingConfigId.value;
+            const resp = editingId === null
+                ? await services.createLLMConfig({
+                    ...payload,
+                    api_key: form.credential_mode === 'api_key' ? form.api_key.trim() : '',
+                    credential_config: credentialConfig,
+                    is_active: llmSavedConfigs.value.length === 0,
+                })
+                : await services.updateLLMSavedConfig(editingId, {
+                    ...payload,
+                    ...(form.credential_mode === 'api_key' && form.api_key.trim()
+                        ? { api_key: form.api_key.trim(), credential_config: credentialConfig }
+                        : form.credential_mode !== 'api_key' && form.credential_json.trim()
+                            ? { credential_config: credentialConfig }
+                            : {}),
+                });
             if (resp.data?.success) {
                 closeAddConfigDialog();
                 newConfigForm.value = createEmptyLLMConfigForm();
                 await loadLLMConfigs();
             } else {
-                setError(getPayloadErrorMessage(resp.data?.result, 'Failed to create config'));
+                setError(getPayloadErrorMessage(
+                    resp.data?.result,
+                    editingId === null ? 'Failed to create config' : 'Failed to update config',
+                ));
             }
         } catch (error: unknown) {
-            setError(getRequestErrorMessage(error, 'Failed to create config'));
+            setError(getRequestErrorMessage(
+                error,
+                editingConfigId.value === null ? 'Failed to create config' : 'Failed to update config',
+            ));
         } finally {
             addConfigSaving.value = false;
         }
@@ -238,6 +277,12 @@ export function useLearningCenterLlmConfig(options: LearningCenterLlmConfigOptio
 
     function llmProviderLabel(provider: string): string {
         return getLLMProviderLabel(provider, llmProviderOptions);
+    }
+
+    function llmApiProtocolLabel(protocol?: string): string {
+        return llmApiProtocolOptions.find(option => option.value === protocol)?.title
+            ?? llmApiProtocolOptions[0]?.title
+            ?? tt('Auto detect (recommended)');
     }
 
     /**
@@ -403,15 +448,19 @@ export function useLearningCenterLlmConfig(options: LearningCenterLlmConfigOptio
         selectedLLMIds,
         llmProviderOptions,
         llmReasoningDepthOptions,
+        llmApiProtocolOptions,
         llmCredentialModeOptions,
         llmOAuthCredentialModeOptions,
         llmConnectionMode,
         addConfigDialog,
         addConfigSaving,
         testingConfigId,
+        editingConfigId,
         autofillFieldsLocked,
         newConfigForm,
         selectedLLMProviderOption,
+        llmConfigDialogTitle,
+        llmConfigSaveLabel,
         baseUrlFieldLabel,
         llmConfigFieldNames,
         llmPendingCount,
@@ -423,10 +472,12 @@ export function useLearningCenterLlmConfig(options: LearningCenterLlmConfigOptio
         closeAddConfigDialog,
         loadLLMConfigs,
         openAddConfigDialog,
+        openEditConfigDialog,
         selectLLMProvider,
         restoreRecommendedPrompts,
         saveNewConfig,
         llmProviderLabel,
+        llmApiProtocolLabel,
         handleActivateConfig,
         handleTestConfig,
         handleDeleteConfig,

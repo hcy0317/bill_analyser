@@ -41,14 +41,15 @@ export function buildCredentialConfigPayload(form: LLMConfigForm): Record<string
 }
 
 /**
- * 根据高级模式构造 advanced_settings；未开启高级模式时不提交任何高级字段。
+ * 构造 advanced_settings；协议选择始终保存，高级模式只控制生成参数和提示词覆盖。
  */
 export function buildAdvancedSettingsPayload(form: LLMConfigForm): LLMAdvancedSettings {
+    const settings: LLMAdvancedSettings = {
+        api_protocol: form.api_protocol || 'auto',
+    };
     if (!form.advancedMode) {
-        return {};
+        return settings;
     }
-
-    const settings: LLMAdvancedSettings = {};
     if (form.reasoning_depth) {
         settings.reasoning_depth = form.reasoning_depth;
     }

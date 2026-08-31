@@ -16,6 +16,7 @@ const mockServices = {
     getLLMConfigs: jest.fn<(...args: any[]) => Promise<any>>(),
     rejectLLMCandidate: jest.fn<(...args: any[]) => Promise<any>>(),
     testLLMConfig: jest.fn<(...args: any[]) => Promise<any>>(),
+    updateLLMSavedConfig: jest.fn<(...args: any[]) => Promise<any>>(),
 };
 
 let mockCredentialShouldThrow = false;
@@ -134,6 +135,7 @@ beforeEach(() => {
     mockGetRequestErrorMessage.mockImplementation((_error, fallback) => `request:${fallback}`);
     mockServices.getLLMConfigs.mockResolvedValue(successResponse([rawConfig()]));
     mockServices.createLLMConfig.mockResolvedValue(successResponse({ id: 2 }));
+    mockServices.updateLLMSavedConfig.mockResolvedValue(successResponse({ id: 1 }));
     mockServices.activateLLMConfig.mockResolvedValue(successResponse());
     mockServices.deleteLLMConfig.mockResolvedValue(successResponse());
     mockServices.getLLMCandidates.mockResolvedValue(successResponse({ candidates: [rawCandidate()] }));
@@ -158,6 +160,10 @@ describe('useLearningCenterLlmConfig state and computed contracts', () => {
         expect(state.llmCandidates.value).toStrictEqual([]);
         expect(state.llmProviderOptions.map(option => option.value)).toContain('openai_compatible');
         expect(state.llmReasoningDepthOptions).toContainEqual({ title: 'tt:High', value: 'high' });
+        expect(state.llmApiProtocolOptions).toContainEqual({
+            title: 'tt:Responses API',
+            value: 'responses',
+        });
         expect(state.llmCredentialModeOptions).toContainEqual({ title: 'tt:API Key', value: 'api_key' });
         expect(state.llmOAuthCredentialModeOptions).not.toContainEqual(expect.objectContaining({ value: 'api_key' }));
         expect(state.llmConnectionMode.value).toBe('api');
@@ -168,7 +174,8 @@ describe('useLearningCenterLlmConfig state and computed contracts', () => {
             apiKey: expect.stringMatching(/^llm-config-credential-/),
             rulePrompt: expect.stringMatching(/^llm-config-rule-prompt-/),
         });
-        expect(new Set(Object.values(state.llmConfigFieldNames.value)).size).toBe(11);
+        expect(new Set(Object.values(state.llmConfigFieldNames.value)).size).toBe(12);
+        expect(state.editingConfigId.value).toBeNull();
         expect(state.llmStatusOptions.value).toStrictEqual([
             { title: 'tt:All', value: '' },
             { title: 'tt:Pending', value: 'pending' },
@@ -178,6 +185,8 @@ describe('useLearningCenterLlmConfig state and computed contracts', () => {
         expect(state.llmProviderLabel('openai')).toBe('OpenAI');
         expect(state.llmProviderLabel('anthropic')).toBe('Claude (Anthropic)');
         expect(state.llmProviderLabel('custom-provider')).toBe('custom-provider');
+        expect(state.llmApiProtocolLabel('responses')).toBe('tt:Responses API');
+        expect(state.llmApiProtocolLabel('unknown')).toBe('tt:Auto detect (recommended)');
 
         state.newConfigForm.value.provider = 'openai_compatible';
         expect(state.selectedLLMProviderOption.value.requiresBaseUrl).toBe(true);
@@ -354,6 +363,7 @@ describe('useLearningCenterLlmConfig saved configuration actions', () => {
             base_url: 'https://api.example.test/v1',
             credential_config: { credential_mode: 'api_key' },
             advanced_settings: {
+                api_protocol: 'auto',
                 reasoning_depth: 'high',
                 temperature: 0.2,
                 max_tokens: 1024,
@@ -370,6 +380,49 @@ describe('useLearningCenterLlmConfig saved configuration actions', () => {
         expect(state.newConfigForm.value.api_key).toBe('');
         expect(state.llmSavedConfigs.value[0]).not.toHaveProperty('api_key');
         expect(JSON.stringify(state.llmSavedConfigs.value)).not.toContain('not-a-real-key');
+    });
+
+    test('opens saved connections for editing and preserves credentials when the secret fields stay blank', async () => {
+        const state = createComposable();
+        const saved = rawConfig({
+            id: 7,
+            name: 'Sub2API',
+            provider: 'openai_compatible',
+            model: 'gpt-5.6-luna',
+            base_url: 'https://sub2api.example.test/v1/responses',
+            credential_config: { credential_mode: 'api_key', access_token: '********' },
+            advanced_settings: { api_protocol: 'responses', temperature: 0.2, max_tokens: 8192 },
+        });
+
+        state.openEditConfigDialog(saved as any);
+        expect(state.editingConfigId.value).toBe(7);
+        expect(state.addConfigDialog.value).toBe(true);
+        expect(state.newConfigForm.value).toMatchObject({
+            name: 'Sub2API',
+            provider: 'openai_compatible',
+            model: 'gpt-5.6-luna',
+            base_url: 'https://sub2api.example.test/v1/responses',
+            api_key: '',
+            api_protocol: 'responses',
+        });
+
+        state.newConfigForm.value.model = 'gpt-5.6-sol';
+        await state.saveNewConfig();
+
+        expect(mockServices.createLLMConfig).not.toHaveBeenCalled();
+        expect(mockServices.updateLLMSavedConfig).toHaveBeenCalledWith(7, {
+            name: 'Sub2API',
+            provider: 'openai_compatible',
+            model: 'gpt-5.6-sol',
+            base_url: 'https://sub2api.example.test/v1/responses',
+            advanced_settings: {
+                api_protocol: 'responses',
+                temperature: 0.2,
+                max_tokens: 8192,
+            },
+        });
+        expect(state.editingConfigId.value).toBeNull();
+        expect(JSON.stringify(mockServices.updateLLMSavedConfig.mock.calls)).not.toContain('********');
     });
 
     test('keeps API key and OAuth credential payloads isolated when saving', async () => {

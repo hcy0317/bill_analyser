@@ -100,8 +100,11 @@ describe('LearningCenterPanel guided LLM config', () => {
         const source = readLearningPanelSource();
 
         expect(source).toContain('llm-config-saved-grid');
+        expect(source).toContain('openEditConfigDialog(cfg)');
         expect(source).toContain("tt('Test connection')");
         expect(source).toContain("tt('Use this connection')");
+        expect(source).toContain('v-model="newConfigForm.api_protocol"');
+        expect(source).toContain(':items="llmApiProtocolOptions"');
         expect(source).not.toContain('<v-table v-if="llmSavedConfigs.length > 0"');
     });
 });

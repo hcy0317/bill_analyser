@@ -10,6 +10,7 @@ export interface AnalyzeLLMTransactionsRequest {
 }
 
 interface LLMAdvancedSettings {
+    api_protocol?: 'auto' | 'responses' | 'chat_completions';
     reasoning_depth?: string;
     temperature?: number;
     max_tokens?: number;

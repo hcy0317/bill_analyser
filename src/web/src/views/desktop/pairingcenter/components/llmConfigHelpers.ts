@@ -11,6 +11,7 @@ export type {
 export {
     applyLLMProviderDefaults,
     createEmptyLLMConfigForm,
+    createLLMApiProtocolOptions,
     createLLMCredentialModeOptions,
     createLLMProviderOptions,
     createLLMReasoningDepthOptions,
@@ -25,6 +26,7 @@ export {
 
 export {
     getLLMProviderLabel,
+    createLLMConfigFormFromSaved,
     toLLMCandidates,
     toLLMConfigs,
 } from './llm-config/transforms.ts';

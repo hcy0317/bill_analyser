@@ -12,6 +12,7 @@ export interface LLMConfigItem {
 }
 
 export interface LLMAdvancedSettings {
+    api_protocol?: 'auto' | 'responses' | 'chat_completions';
     reasoning_depth?: string;
     temperature?: number;
     max_tokens?: number;
@@ -28,6 +29,7 @@ export interface LLMConfigForm {
     base_url: string;
     credential_mode: string;
     credential_json: string;
+    api_protocol: 'auto' | 'responses' | 'chat_completions';
     advancedMode: boolean;
     customPrompts: boolean;
     reasoning_depth: string;

@@ -16,6 +16,22 @@ pub fn normalize_llm_advanced_settings(settings: Option<&Value>) -> Map<String, 
     let loaded = decode_settings_object(settings);
     let mut normalized = Map::new();
 
+    if let Some(api_protocol) = loaded
+        .get("api_protocol")
+        .and_then(Value::as_str)
+        .map(|value| value.trim().to_lowercase())
+        .and_then(|value| match value.as_str() {
+            "auto" | "default" => Some("auto"),
+            "responses" | "response" => Some("responses"),
+            "chat_completions" | "chat-completions" | "chat" | "completions" => {
+                Some("chat_completions")
+            }
+            _ => None,
+        })
+    {
+        normalized.insert("api_protocol".to_string(), json!(api_protocol));
+    }
+
     if let Some(reasoning_depth) = loaded
         .get("reasoning_depth")
         .and_then(Value::as_str)
