@@ -849,6 +849,7 @@ import {
 import {
     clearResolvedImportPreviewReviewState
 } from '../importPreviewReviewState.ts';
+import { buildReclassifyPreviewUpdates } from '../reclassifyPreviewUpdates.ts';
 import {
     buildImportPreviewActionScope,
     hashImportPreviewSelectionIds,
@@ -2856,7 +2857,7 @@ async function reclassifySelected(): Promise<void> {
     logger.info(`[重新分类] 开始重新分类，session_id=${props.sessionId}`);
 
     try {
-        const previewUpdates = buildSelectedPreviewUpdates();
+        const previewUpdates = await buildReclassifyPreviewUpdates(props.sessionId, serverPagedMode.value, totalImportTransactionCount.value, buildTrackedPreviewUpdates());
         const response = await services.reclassifyImportPreview({
             sessionId: props.sessionId,
             previewUpdates

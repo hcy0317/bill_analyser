@@ -44,8 +44,14 @@ async fn update_postgres_auth_user_profile_internal(
         transaction.rollback().await.map_err(postgres_auth_error)?;
         return Ok(false);
     };
-    let current_email: String = row.try_get("email").map_err(postgres_auth_error)?;
-    let mut display_name: String = row.try_get("display_name").map_err(postgres_auth_error)?;
+    let current_email = normalize_nullable_profile_text(
+        row.try_get::<Option<String>, _>("email")
+            .map_err(postgres_auth_error)?,
+    );
+    let mut display_name = normalize_nullable_profile_text(
+        row.try_get::<Option<String>, _>("display_name")
+            .map_err(postgres_auth_error)?,
+    );
     let Json(mut metadata): Json<Value> = row.try_get("metadata").map_err(postgres_auth_error)?;
     let mut email = current_email.clone();
 

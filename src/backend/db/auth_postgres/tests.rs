@@ -82,6 +82,15 @@ mod tests {
     }
 
     #[test]
+    fn nullable_legacy_display_name_normalizes_before_profile_update() {
+        assert_eq!(normalize_nullable_profile_text(None), "");
+        assert_eq!(
+            normalize_nullable_profile_text(Some("Existing".to_string())),
+            "Existing"
+        );
+    }
+
+    #[test]
     fn profile_update_application_covers_all_postgres_metadata_variants() {
         let mut email = "old@example.test".to_string();
         let current_email = email.clone();

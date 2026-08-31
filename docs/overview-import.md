@@ -36,6 +36,6 @@
 - 前端人工编辑类型、分类、账户等字段时只清除 transfer/learning/LLM 这些 actionable 建议提示，并通过 family-scoped update payload 持久化。
 - 分类、来源账户与目标账户的 canonical id 必须来自当前用户 active 主数据；原始 parser/payment/category 文本只作为 review evidence 或非法字段提示展示，不会作为 accepted identity 写入 preview、confirm payload 或正式账单。
 - confirm、cancel、导入失败后新建 session 都会立即清理当前用户的 import staging；系统不保留未完成导入续传状态。
-- preview update/reclassify 要显式落库，不只改响应投影；非空 `preview_updates` 只读取、刷新、写回并返回目标 preview id，空更新才执行整 session 重新分类，非分页前端按目标 id 原位合并局部响应。前端服务端分页草稿在字段变化时立即缓存，迟到响应恢复草稿并重绑编辑器；跨页选择 mutation 直接消费响应 metadata，不再随后重复请求当前页；有效/无效/需标注选择在同一次 mutation 内先落库已浏览页面的有效性草稿，再按新状态做集合选择。
+- preview update/reclassify 要显式落库，不只改响应投影；reclassify 始终为整 session 收集全部 preview 行的 `expected_row_version`，已浏览行携带本地草稿，未浏览分页先按最多 200 行一页读取当前 token，再以非空 `preview_updates` 批量提交。后端只读取、刷新、写回并返回目标 preview id，空更新或任一缺失 token 都以 428 失败关闭；非分页前端按目标 id 原位合并局部响应。前端服务端分页草稿在字段变化时立即缓存，迟到响应恢复草稿并重绑编辑器；跨页选择 mutation 直接消费响应 metadata，不再随后重复请求当前页；有效/无效/需标注选择在同一次 mutation 内先落库已浏览页面的有效性草稿，再按新状态做集合选择。
 - confirm 必须使用事务保证 bills、tags、accounts、learning side effects 一致。
 - 金额字段必须复核元/分转换。

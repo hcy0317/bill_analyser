@@ -140,6 +140,10 @@ fn apply_postgres_profile_update(
     }
 }
 
+fn normalize_nullable_profile_text(value: Option<String>) -> String {
+    value.unwrap_or_default()
+}
+
 // 中文说明：在认证事务内写入审计事件，保证登录、2FA、重置等事件与业务提交同生命周期。
 async fn insert_postgres_auth_log_in_transaction(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,

@@ -118,6 +118,58 @@ async fn bearer_session_pool_and_query_timeout_return_503_then_recover_without_r
 }
 
 #[tokio::test]
+async fn profile_account_preferences_update_when_legacy_display_name_is_null(
+) -> Result<(), Box<dyn Error>> {
+    let Some(test_db) =
+        postgres_test_support::isolated_postgres_database("profile_nullable_display_name").await?
+    else {
+        return Ok(());
+    };
+    let pool = &test_db.pool;
+    let user_id = insert_user(pool, "profile-nullable-display-name").await?;
+    let account_id: i64 =
+        sqlx::query_scalar("INSERT INTO accounts (user_id, name) VALUES ($1, 'Cash') RETURNING id")
+            .bind(user_id)
+            .fetch_one(pool)
+            .await?;
+    let access_token = signed_access_token(user_id, ChronoDuration::minutes(10));
+    create_session(pool, user_id, &sha256_hex(&access_token)).await?;
+    let app = build_router(authority_state(&test_db.db_name)?);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/api/profile")
+                .header(header::AUTHORIZATION, format!("Bearer {access_token}"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "defaultAccountId": account_id.to_string(),
+                        "cashAccountId": account_id.to_string()
+                    })
+                    .to_string(),
+                ))?,
+        )
+        .await?;
+    let status = response.status();
+    let body: Value = serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await?)?;
+
+    assert_eq!(status, StatusCode::OK, "profile update response: {body}");
+    assert_eq!(
+        body["result"]["user"]["defaultAccountId"],
+        account_id.to_string()
+    );
+    assert_eq!(
+        body["result"]["user"]["cashAccountId"],
+        account_id.to_string()
+    );
+
+    test_db.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
 async fn invalid_expired_and_unavailable_authority_never_fall_back_to_jwt_only(
 ) -> Result<(), Box<dyn Error>> {
     let Some(test_db) =

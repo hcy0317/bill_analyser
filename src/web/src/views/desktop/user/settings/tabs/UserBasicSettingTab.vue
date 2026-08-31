@@ -3,6 +3,7 @@
 <script setup lang="ts">
 import ConfirmDialog from '@/components/desktop/ConfirmDialog.vue';
 import SnackBar from '@/components/desktop/SnackBar.vue';
+import DefaultImportDirectorySettingsCard from '@/views/desktop/app/settings/tabs/DefaultImportDirectorySettingsCard.vue';
 import { ref, computed, useTemplateRef } from 'vue';
 import { useI18n } from '@/locales/helpers.ts';
 import { useUserProfilePageBase } from '@/views/base/users/UserProfilePageBase.ts';
@@ -232,7 +233,7 @@ function showOpenAvatarDialog(): void {
     avatarInput.value?.click();
 }
 
-useExternalTemplateBindings(ConfirmDialog, SnackBar, CategoryType, SUPPORTED_IMAGE_EXTENSIONS, Account, isUserVerifyEmailEnabled, mdiAccount, mdiAccountEditOutline, tt, newProfile, oldProfile, emailVerified, loading, resending, saving, allAccounts, allVisibleAccounts, allVisibleCategorizedAccounts, allWeekDays, allCalendarDisplayTypes, allDateDisplayTypes, allLongDateFormats, allShortDateFormats, allLongTimeFormats, allShortTimeFormats, allFiscalYearFormats, allCurrencyDisplayTypes, allNumeralSystemTypes, allDecimalSeparators, allDigitGroupingSymbols, allDigitGroupingTypes, allCoordinateDisplayTypes, allExpenseAmountColorTypes, allIncomeAmountColorTypes, allTransactionEditScopeTypes, languageTitle, supportDigitGroupingSymbol, inputIsNotChanged, inputIsInvalid, reset, allCategories, hasAvailableTransferCategories, defaultAccountSelectionText, cashAccountSelectionText, cashTransferCategoryPrimaryText, cashTransferCategorySecondaryText, confirmDialog, snackbar, avatarInput, avatarUrl, avatarProvider, currentUserAvatar, save, updateAvatar, removeAvatar, resendVerifyEmail, showOpenAvatarDialog);
+useExternalTemplateBindings(ConfirmDialog, SnackBar, DefaultImportDirectorySettingsCard, CategoryType, SUPPORTED_IMAGE_EXTENSIONS, Account, isUserVerifyEmailEnabled, mdiAccount, mdiAccountEditOutline, tt, newProfile, oldProfile, emailVerified, loading, resending, saving, allAccounts, allVisibleAccounts, allVisibleCategorizedAccounts, allWeekDays, allCalendarDisplayTypes, allDateDisplayTypes, allLongDateFormats, allShortDateFormats, allLongTimeFormats, allShortTimeFormats, allFiscalYearFormats, allCurrencyDisplayTypes, allNumeralSystemTypes, allDecimalSeparators, allDigitGroupingSymbols, allDigitGroupingTypes, allCoordinateDisplayTypes, allExpenseAmountColorTypes, allIncomeAmountColorTypes, allTransactionEditScopeTypes, languageTitle, supportDigitGroupingSymbol, inputIsNotChanged, inputIsInvalid, reset, allCategories, hasAvailableTransferCategories, defaultAccountSelectionText, cashAccountSelectionText, cashTransferCategoryPrimaryText, cashTransferCategorySecondaryText, confirmDialog, snackbar, avatarInput, avatarUrl, avatarProvider, currentUserAvatar, save, updateAvatar, removeAvatar, resendVerifyEmail, showOpenAvatarDialog);
 
 init();
 </script>

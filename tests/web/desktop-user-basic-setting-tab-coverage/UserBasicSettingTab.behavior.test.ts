@@ -194,6 +194,9 @@ jest.mock('@/components/desktop/SnackBar.vue', () => mockChildComponent(
     'UserBasicSnackBar',
     { showMessage: mockShowMessage, showError: mockShowError }
 ));
+jest.mock('@/views/desktop/app/settings/tabs/DefaultImportDirectorySettingsCard.vue', () => (
+    mockChildComponent('DefaultImportDirectorySettingsCard')
+));
 jest.mock('@/locales/helpers.ts', () => ({
     useI18n: () => ({ tt: (key: string) => `tt:${key}` })
 }));
@@ -592,7 +595,8 @@ describe('desktop UserBasicSettingTab production template', () => {
             'v-row', 'v-col', 'v-card', 'v-card-text', 'v-progress-circular', 'v-avatar',
             'v-img', 'v-icon', 'v-menu', 'v-list', 'v-list-item', 'v-skeleton-loader',
             'v-btn', 'v-divider', 'v-form', 'v-text-field', 'two-column-select', 'v-select',
-            'language-select', 'currency-select', 'fiscal-year-start-select'
+            'language-select', 'currency-select', 'fiscal-year-start-select',
+            'default-import-directory-settings-card'
         ]);
         try {
             expect(mounted.state.loading).toBe(true);
@@ -600,6 +604,10 @@ describe('desktop UserBasicSettingTab production template', () => {
             expect(mounted.state.currentUserAvatar).toContain('avatar-initial');
             expect(mounted.state.avatarProvider).toBe('internal');
             expect(findNodes(mounted.root, node => node.props['accept'] === '.png,.jpg,.jpeg')).toHaveLength(1);
+            expect(findNodes(
+                mounted.root,
+                node => node.type === 'DefaultImportDirectorySettingsCard-stub'
+            )).toHaveLength(1);
 
             const callbacks = collectHostCallbacks(mounted.root);
             expect(callbacks.map(item => item.name)).toEqual(expect.arrayContaining([

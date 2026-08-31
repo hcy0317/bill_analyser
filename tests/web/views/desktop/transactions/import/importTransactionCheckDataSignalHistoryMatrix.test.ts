@@ -8,6 +8,7 @@ const mockAnalyzeLLMTransactions = jest.fn<(...args: Array<unknown>) => Promise<
 const mockGetImportLearningSuggestions = jest.fn<(...args: Array<unknown>) => Promise<any>>();
 const mockPromoteImportLearning = jest.fn<(...args: Array<unknown>) => Promise<any>>();
 const mockReclassifyImportPreview = jest.fn<(...args: Array<any>) => Promise<any>>();
+const mockGetImportPreviewPage = jest.fn<(...args: Array<any>) => Promise<any>>();
 const mockGetImportPreviewRowVersionConflict = jest.fn<(...args: Array<any>) => any>();
 const mockGetImportPreviewSelectionConflict = jest.fn<(...args: Array<any>) => any>();
 const mockLoggerError = jest.fn();
@@ -103,6 +104,7 @@ jest.mock('@/lib/services.ts', () => ({
         getImportLearningSuggestions: mockGetImportLearningSuggestions,
         promoteImportLearning: mockPromoteImportLearning,
         reclassifyImportPreview: mockReclassifyImportPreview,
+        getImportPreviewPage: mockGetImportPreviewPage,
         getImportPreviewRowVersionConflict: mockGetImportPreviewRowVersionConflict,
         getImportPreviewSelectionConflict: mockGetImportPreviewSelectionConflict
     }
@@ -247,14 +249,15 @@ function createTransaction(
 function createBindings(
     transactions: ImportTransaction[],
     sessionId = 'signal-session',
-    serverPaged = false
+    serverPaged = false,
+    total = transactions.length
 ): { bindings: any, emit: jest.Mock } {
     const emit = jest.fn();
     const bindings = (ImportTransactionCheckDataTab as any).setup({
         importTransactions: transactions,
         sessionId,
         serverPaged,
-        totalImportTransactionCount: transactions.length,
+        totalImportTransactionCount: total,
         previewMetadata: serverPaged ? {
             counts: {
                 total: transactions.length,
@@ -616,6 +619,57 @@ describe('desktop import signal, history, and annotation matrix', () => {
 });
 
 describe('desktop import async action branch matrix', () => {
+    test('reclassify includes versioned preview rows even when none are selected', async () => {
+        const unselected = createTransaction(60, { selected: false });
+        (unselected as ImportTransaction & { _rowVersion?: number })._rowVersion = 4;
+        mockReclassifyImportPreview.mockResolvedValueOnce({
+            data: { result: { preview: [{ id: 60, row_version: 5 }] } }
+        });
+
+        await createBindings([unselected]).bindings.reclassifySelected();
+
+        expect(mockReclassifyImportPreview).toHaveBeenCalledWith({
+            sessionId: 'signal-session',
+            previewUpdates: [expect.objectContaining({
+                id: 60,
+                expected_row_version: 4
+            })]
+        });
+    });
+
+    test('server-paged reclassify loads row-version tokens for unvisited pages', async () => {
+        const currentPageRow = createTransaction(81, { selected: false });
+        (currentPageRow as ImportTransaction & { _rowVersion?: number })._rowVersion = 7;
+        mockGetImportPreviewPage.mockResolvedValueOnce({
+            data: {
+                result: {
+                    preview: [
+                        { id: 81, row_version: 7 },
+                        { id: 82, row_version: 9 }
+                    ]
+                }
+            }
+        });
+        mockReclassifyImportPreview.mockResolvedValueOnce({
+            data: { result: { preview: [{ id: 81, row_version: 8 }, { id: 82, row_version: 10 }] } }
+        });
+
+        await createBindings([currentPageRow], 'signal-session', true, 2).bindings.reclassifySelected();
+
+        expect(mockGetImportPreviewPage).toHaveBeenCalledWith({
+            sessionId: 'signal-session',
+            page: 1,
+            pageSize: 200
+        });
+        expect(mockReclassifyImportPreview).toHaveBeenCalledWith({
+            sessionId: 'signal-session',
+            previewUpdates: expect.arrayContaining([
+                expect.objectContaining({ id: 81, expected_row_version: 7 }),
+                { id: 82, expected_row_version: 9 }
+            ])
+        });
+    });
+
     test('reclassify handles missing session, updated rows, zero rows, and failures', async () => {
         const selected = createTransaction(61);
         (selected as ImportTransaction & { _rowVersion?: number })._rowVersion = 5;
